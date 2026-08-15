@@ -357,10 +357,10 @@ class OcrRepositoryImpl(
             OcrPageResult(
                 chapterId = chapterId,
                 pageIndex = pageIndex,
-                modelKey = modelKey,
+                ocrModel = modelKey,
+                imageWidth = image.width,
+                imageHeight = image.height,
                 regions = if (text.isBlank()) emptyList() else listOf(region),
-                text = text,
-                createdAt = System.currentTimeMillis(),
             )
         } catch (e: Throwable) {
             if (!useFallbackModelsPref.get()) {
