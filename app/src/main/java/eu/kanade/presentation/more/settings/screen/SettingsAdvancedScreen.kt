@@ -262,6 +262,30 @@ object SettingsAdvancedScreen : SearchableSettings {
                         true
                     },
                 ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = networkPreferences.enableProxy,
+                    title = stringResource(MR.strings.pref_enable_proxy),
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = networkPreferences.proxyType,
+                    entries = mapOf(
+                        0 to "HTTP",
+                        1 to "SOCKS5",
+                    ),
+                    title = stringResource(MR.strings.pref_proxy_type),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    preference = networkPreferences.proxyHost,
+                    title = stringResource(MR.strings.pref_proxy_host),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    preference = networkPreferences.proxyUser,
+                    title = stringResource(MR.strings.pref_proxy_user),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    preference = networkPreferences.proxyPassword,
+                    title = stringResource(MR.strings.pref_proxy_password),
+                ),
                 Preference.PreferenceItem.EditTextPreference(
                     preference = userAgentPref,
                     title = stringResource(MR.strings.pref_user_agent_string),

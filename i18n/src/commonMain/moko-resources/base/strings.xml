@@ -1249,6 +1249,16 @@
     <string name="action_open_cbz_file">Open CBZ / ZIP Archive</string>
     <string name="cbz_no_files_found">No CBZ archives selected. Click Open CBZ / ZIP Archive for direct reading without caching.</string>
 
+    <!-- Proxy & Storage Settings -->
+    <string name="pref_proxy_category">Proxy Server Settings</string>
+    <string name="pref_enable_proxy">Enable Proxy Server</string>
+    <string name="pref_proxy_type">Proxy Type</string>
+    <string name="pref_proxy_host">Proxy Host / IP Address</string>
+    <string name="pref_proxy_port">Proxy Port</string>
+    <string name="pref_proxy_user">Proxy Username (Optional)</string>
+    <string name="pref_proxy_password">Proxy Password (Optional)</string>
+    <string name="action_select_local_folder">Select Local Storage Folder</string>
+
     <string name="action_ocr">Trigger region selection for text recognition</string>
     <string name="action_preprocess_ocr">Scan OCR</string>
     <string name="action_copy">Copy</string>

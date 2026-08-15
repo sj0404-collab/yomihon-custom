@@ -16,4 +16,12 @@ class NetworkPreferences(
         "default_user_agent",
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
     )
+
+    // Proxy Settings
+    val enableProxy: Preference<Boolean> = preferenceStore.getBoolean("pref_enable_proxy", false)
+    val proxyType: Preference<Int> = preferenceStore.getInt("pref_proxy_type", 0) // 0 = HTTP, 1 = SOCKS
+    val proxyHost: Preference<String> = preferenceStore.getString("pref_proxy_host", "")
+    val proxyPort: Preference<Int> = preferenceStore.getInt("pref_proxy_port", 8080)
+    val proxyUser: Preference<String> = preferenceStore.getString("pref_proxy_user", "")
+    val proxyPassword: Preference<String> = preferenceStore.getString("pref_proxy_password", "")
 }

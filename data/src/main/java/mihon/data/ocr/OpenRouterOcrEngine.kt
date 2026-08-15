@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * OCR Engine backed by OpenRouter AI Vision models.
+ * OCR Engine backed by OpenRouter AI Vision models with strict verbatim transcription.
  */
 internal class OpenRouterOcrEngine(
     private val context: Context,
@@ -35,13 +35,14 @@ internal class OpenRouterOcrEngine(
 
         val jsonBody = JSONObject().apply {
             put("model", model)
+            put("temperature", 0.0)
             val messages = JSONArray()
             val userMsg = JSONObject().apply {
                 put("role", "user")
                 val content = JSONArray()
                 content.put(JSONObject().apply {
                     put("type", "text")
-                    put("text", "Extract all text from this image exactly as written. Return only the extracted text with no commentary.")
+                    put("text", "Perform STRICT OPTICAL CHARACTER RECOGNITION (OCR) ONLY. Transcribe the exact text from the image verbatim without translating, explaining, summarizing, or adding any commentary. If no text is visible, return empty string.")
                 })
                 content.put(JSONObject().apply {
                     put("type", "image_url")
@@ -88,7 +89,6 @@ internal class OpenRouterOcrEngine(
                 choices.getJSONObject(0).optJSONObject("message")?.optString("content", "") ?: ""
             } else ""
 
-            // Token tracking indicator calculation
             val usage = jsonResponse.optJSONObject("usage")
             val totalTokens = usage?.optLong("total_tokens", 100L) ?: 100L
             ocrPreferences.incrementTokens(totalTokens)

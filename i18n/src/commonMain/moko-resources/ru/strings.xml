@@ -947,6 +947,16 @@
     <string name="action_open_cbz_file">Открыть CBZ / ZIP архив</string>
     <string name="cbz_no_files_found">Архивы CBZ не выбраны. Нажмите «Открыть CBZ / ZIP архив» для прямого чтения без кэширования.</string>
 
+    <!-- Proxy & Storage Settings -->
+    <string name="pref_proxy_category">Настройки прокси-сервера</string>
+    <string name="pref_enable_proxy">Включить прокси-сервер</string>
+    <string name="pref_proxy_type">Тип прокси</string>
+    <string name="pref_proxy_host">Хост / IP-адрес прокси</string>
+    <string name="pref_proxy_port">Порт прокси</string>
+    <string name="pref_proxy_user">Имя пользователя прокси (необязательно)</string>
+    <string name="pref_proxy_password">Пароль прокси (необязательно)</string>
+    <string name="action_select_local_folder">Выбрать папку хранилища</string>
+
     <!-- Dictionary Recommendations -->
     <string name="recommended_dictionaries">Рекомендуемые словари</string>
     <string name="recommended_dict_jitendex_title">[Словарь] Jitendex (Японско-английский)</string>

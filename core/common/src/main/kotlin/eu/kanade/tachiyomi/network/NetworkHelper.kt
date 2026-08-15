@@ -8,6 +8,10 @@ import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.File
+import java.net.Authenticator
+import java.net.InetSocketAddress
+import java.net.PasswordAuthentication
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 class NetworkHelper(
@@ -31,6 +35,29 @@ class NetworkHelper(
             )
             .addInterceptor(UncaughtExceptionInterceptor())
             .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+
+        if (preferences.enableProxy.get() && preferences.proxyHost.get().isNotBlank()) {
+            try {
+                val type = if (preferences.proxyType.get() == 1) Proxy.Type.SOCKS else Proxy.Type.HTTP
+                val socketAddress = InetSocketAddress(
+                    preferences.proxyHost.get().trim(),
+                    preferences.proxyPort.get(),
+                )
+                builder.proxy(Proxy(type, socketAddress))
+
+                val user = preferences.proxyUser.get().trim()
+                val password = preferences.proxyPassword.get()
+                if (user.isNotBlank()) {
+                    Authenticator.setDefault(object : Authenticator() {
+                        override fun getPasswordAuthentication(): PasswordAuthentication {
+                            return PasswordAuthentication(user, password.toCharArray())
+                        }
+                    })
+                }
+            } catch (e: Exception) {
+                // Ignore proxy setup errors gracefully
+            }
+        }
 
         if (preferences.verboseLogging.get()) {
             val httpLoggingInterceptor = HttpLoggingInterceptor().apply {

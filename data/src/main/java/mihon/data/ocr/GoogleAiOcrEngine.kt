@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * OCR Engine backed by Google AI / Gemini Vision API.
+ * OCR Engine backed by Google AI / Gemini Vision API with strict verbatim transcription.
  */
 internal class GoogleAiOcrEngine(
     private val context: Context,
@@ -30,11 +30,15 @@ internal class GoogleAiOcrEngine(
         val base64Image = encodeBitmapToBase64(image)
 
         val jsonBody = JSONObject().apply {
+            val generationConfig = JSONObject().apply {
+                put("temperature", 0.0)
+            }
+            put("generationConfig", generationConfig)
             val contents = JSONArray()
             val contentItem = JSONObject().apply {
                 val parts = JSONArray()
                 parts.put(JSONObject().apply {
-                    put("text", "Extract all text from this image as accurately as possible. Return only the extracted text.")
+                    put("text", "Perform STRICT OPTICAL CHARACTER RECOGNITION (OCR) ONLY. Transcribe the exact characters seen in this image verbatim. Do not hallucinate, do not translate, do not add any markdown formatting or commentary.")
                 })
                 parts.put(JSONObject().apply {
                     put("inline_data", JSONObject().apply {
@@ -80,7 +84,6 @@ internal class GoogleAiOcrEngine(
                 } else ""
             } else ""
 
-            // Increment usage tokens indicator
             val usageMetadata = jsonResponse.optJSONObject("usageMetadata")
             val totalTokens = usageMetadata?.optLong("totalTokenCount", 120L) ?: 120L
             ocrPreferences.incrementTokens(totalTokens)

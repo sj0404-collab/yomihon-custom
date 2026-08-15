@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.SnackbarDuration
@@ -86,6 +87,11 @@ fun BrowseSourceContent(
             },
             actions = if (source is LocalSource) {
                 listOf(
+                    EmptyScreenAction(
+                        stringRes = MR.strings.action_select_local_folder,
+                        icon = Icons.Outlined.FolderOpen,
+                        onClick = onLocalSourceHelpClick,
+                    ),
                     EmptyScreenAction(
                         stringRes = MR.strings.local_source_help_guide,
                         icon = Icons.AutoMirrored.Outlined.HelpOutline,
