@@ -918,4 +918,19 @@
     <string name="extensionStoresScreen.deleteStore.body">Вы хотите удалить хранилище расширений \"%1$s\" (%2$s)?</string>
     <string name="pref_webtoon_vertical_navigator_on_left">Разместить вертикальную навигацию с левой стороны</string>
     <string name="considering">Рассматривается</string>
+
+    <!-- Dictionary Recommendations -->
+    <string name="recommended_dictionaries">Рекомендуемые словари</string>
+    <string name="recommended_dict_jitendex_title">[Словарь] Jitendex (Японско-английский)</string>
+    <string name="recommended_dict_jitendex_description">Улучшенная версия JMdict с расширенным форматированием и подробной информацией о терминах.</string>
+    <string name="recommended_dict_jmdict_ru_title">[Словарь] JMdict (Японско-русский)</string>
+    <string name="recommended_dict_jmdict_ru_description">Словарь японско-русского языка на основе базового JMdict.</string>
+    <string name="recommended_dict_jmdict_en_title">[Словарь] JMdict (Японско-английский с примерами)</string>
+    <string name="recommended_dict_jmdict_en_description">Подробный японско-английский словарь с примерами предложений.</string>
+    <string name="recommended_dict_openrussian_title">[Словарь] OpenRussian (Англо-русский / Русско-английский)</string>
+    <string name="recommended_dict_openrussian_description">Англо-русский и русско-английский словарь с грамматическими пометками и определениями.</string>
+    <string name="recommended_dict_jpdb_title">[Частотный] JPDB v2.2 Frequency Kana</string>
+    <string name="recommended_dict_jpdb_description">Частотный рейтинг JPDB с раздельной частотой каны и кандзи.</string>
+    <string name="recommended_dict_bccwj_title">[Частотный] BCCWJ SUW LUW</string>
+    <string name="recommended_dict_bccwj_description">Список частоты слов из различных текстов.</string>
 </resources>

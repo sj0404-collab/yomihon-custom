@@ -158,6 +158,21 @@ object SettingsDictionaryScreen : Screen {
             @Suppress("ktlint:standard:max-line-length")
             val recommended = listOf(
                 RecommendedDictionary(
+                    title = stringResource(MR.strings.recommended_dict_jmdict_ru_title),
+                    description = stringResource(MR.strings.recommended_dict_jmdict_ru_description),
+                    url = "https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMdict_russian.zip",
+                ),
+                RecommendedDictionary(
+                    title = stringResource(MR.strings.recommended_dict_jmdict_en_title),
+                    description = stringResource(MR.strings.recommended_dict_jmdict_en_description),
+                    url = "https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMdict_english_with_examples.zip",
+                ),
+                RecommendedDictionary(
+                    title = stringResource(MR.strings.recommended_dict_openrussian_title),
+                    description = stringResource(MR.strings.recommended_dict_openrussian_description),
+                    url = "https://github.com/ImenaOphelia/openrussian-to-yomitan/releases/latest/download/opr-ru-en.zip",
+                ),
+                RecommendedDictionary(
                     title = stringResource(MR.strings.recommended_dict_jitendex_title),
                     description = stringResource(MR.strings.recommended_dict_jitendex_description),
                     url = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip",

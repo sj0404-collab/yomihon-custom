@@ -1206,6 +1206,12 @@
     <string name="recommended_dictionaries">Recommended Dictionaries</string>
     <string name="recommended_dict_jitendex_title">[Terms] Jitendex</string>
     <string name="recommended_dict_jitendex_description">An improved version of JMdict with advanced formatting, polish, and term info.</string>
+    <string name="recommended_dict_jmdict_ru_title">[Terms] JMdict (Russian)</string>
+    <string name="recommended_dict_jmdict_ru_description">Japanese-Russian vocabulary dictionary based on JMdict.</string>
+    <string name="recommended_dict_jmdict_en_title">[Terms] JMdict (English with Examples)</string>
+    <string name="recommended_dict_jmdict_en_description">Comprehensive Japanese-English vocabulary dictionary with example sentences.</string>
+    <string name="recommended_dict_openrussian_title">[Terms] OpenRussian (English - Russian)</string>
+    <string name="recommended_dict_openrussian_description">Russian-English and English-Russian dictionary with grammar tags and definitions.</string>
     <string name="recommended_dict_jpdb_title">[Freq] JPDB v2.2 Frequency Kana</string>
     <string name="recommended_dict_jpdb_description">JPDB frequency ranks with split kana and kanji frequency ranks.</string>
     <string name="recommended_dict_bccwj_title">[Freq] BCCWJ SUW LUW</string>
