@@ -238,7 +238,13 @@ class OcrRepositoryImpl(
         image: OcrImage,
     ): OcrPageResult {
         return withActiveOperation {
-            val result = image.useBitmap { bitmap ->
+            val regionChoice = ocrPreferences.scanRegion().get()
+            val result = image.useBitmap { originalBitmap ->
+                val bitmap = when (regionChoice) {
+                    mihon.domain.ocr.service.ScanRegion.TOP_HALF -> Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.width, originalBitmap.height / 2)
+                    mihon.domain.ocr.service.ScanRegion.BOTTOM_HALF -> Bitmap.createBitmap(originalBitmap, 0, originalBitmap.height / 2, originalBitmap.width, originalBitmap.height / 2)
+                    else -> originalBitmap
+                }
                 when (val selectedModel = ocrModelPref.get()) {
                     OcrModel.GLENS -> scanWithGlens(
                         chapterId = chapterId,

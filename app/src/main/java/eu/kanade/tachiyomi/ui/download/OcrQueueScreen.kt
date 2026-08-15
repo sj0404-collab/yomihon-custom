@@ -53,6 +53,7 @@ import eu.kanade.tachiyomi.databinding.DownloadListBinding
 import kotlinx.collections.immutable.toPersistentList
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
+import mihon.domain.ocr.service.ScanRegion
 import mihon.feature.ocr.titleRes
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
@@ -94,6 +95,12 @@ object OcrQueueScreen : Screen() {
         val tokenCount by tokenCountPref.changes().collectAsState(initial = tokenCountPref.get())
         val voiceNamePref = remember { ocrPreferences.voiceName() }
         val voiceName by voiceNamePref.changes().collectAsState(initial = voiceNamePref.get())
+        val scanRegionPref = remember { ocrPreferences.scanRegion() }
+        val scanRegion by scanRegionPref.changes().collectAsState(initial = scanRegionPref.get())
+        val isMangaOcrDownPref = remember { ocrPreferences.isMangaOcrDownloaded() }
+        val isMangaOcrDown by isMangaOcrDownPref.changes().collectAsState(initial = isMangaOcrDownPref.get())
+        val isFastOcrDownPref = remember { ocrPreferences.isFastOcrDownloaded() }
+        val isFastOcrDown by isFastOcrDownPref.changes().collectAsState(initial = isFastOcrDownPref.get())
 
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
         var fabExpanded by remember { mutableStateOf(true) }
@@ -197,6 +204,23 @@ object OcrQueueScreen : Screen() {
             ) {
                 PreferenceGroupHeader(title = stringResource(MR.strings.label_settings))
                 ListPreferenceWidget(
+                    value = scanRegion,
+                    title = "Область сканирования страницы",
+                    subtitle = when (scanRegion) {
+                        ScanRegion.FULL_PAGE -> "Сканировать всю страницу целиком (100%)"
+                        ScanRegion.TOP_HALF -> "Сканировать верхнюю часть страницы (Top 50%)"
+                        ScanRegion.BOTTOM_HALF -> "Сканировать нижнюю часть страницы (Bottom 50%)"
+                    },
+                    icon = null,
+                    entries = mapOf(
+                        ScanRegion.FULL_PAGE to "1. Вся страница целиком (100%)",
+                        ScanRegion.TOP_HALF to "2. Верхняя часть страницы (50%)",
+                        ScanRegion.BOTTOM_HALF to "3. Нижняя часть страницы (50%)",
+                    ),
+                    onValueChange = scanRegionPref::set,
+                )
+
+                ListPreferenceWidget(
                     value = ocrModel,
                     title = stringResource(MR.strings.pref_ocr_model),
                     subtitle = stringResource(ocrModel.titleRes),
@@ -211,6 +235,20 @@ object OcrQueueScreen : Screen() {
                         OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
                     ),
                     onValueChange = ocrModelPreference::set,
+                )
+
+                PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
+                SwitchPreferenceWidget(
+                    checked = isMangaOcrDown,
+                    title = "Manga OCR (Full Float32)",
+                    subtitle = if (isMangaOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
+                    onCheckedChanged = isMangaOcrDownPref::set,
+                )
+                SwitchPreferenceWidget(
+                    checked = isFastOcrDown,
+                    title = "Fast Manga OCR (ARM FP16)",
+                    subtitle = if (isFastOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
+                    onCheckedChanged = isFastOcrDownPref::set,
                 )
                 if (ocrModel == OcrModel.OWOCR) {
                     EditTextPreferenceWidget(

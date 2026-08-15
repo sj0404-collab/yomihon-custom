@@ -94,6 +94,7 @@ fun ReaderAppBars(
                 navigateUp = navigateUp,
                 bookmarked = bookmarked,
                 onToggleBookmarked = onToggleBookmarked,
+                onOpenOcrSettings = onClickSettings,
                 onOpenInWebView = onOpenInWebView,
                 onOpenInBrowser = onOpenInBrowser,
                 onShare = onShare,

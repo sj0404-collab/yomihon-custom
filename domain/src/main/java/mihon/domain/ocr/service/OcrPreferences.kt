@@ -4,11 +4,19 @@ import mihon.domain.ocr.model.OcrModel
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
 
+enum class ScanRegion {
+    FULL_PAGE,   // Сканировать всю страницу (100%)
+    TOP_HALF,    // Сканировать верхнюю часть (Top 50%)
+    BOTTOM_HALF, // Сканировать нижнюю часть (Bottom 50%)
+}
+
 class OcrPreferences(
     private val preferenceStore: PreferenceStore,
 ) {
 
     fun ocrModel() = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+
+    fun scanRegion() = preferenceStore.getEnum("pref_scan_region", ScanRegion.FULL_PAGE)
 
     fun autoOcrOnDownload() = preferenceStore.getBoolean("auto_ocr_on_download", false)
 
@@ -39,4 +47,9 @@ class OcrPreferences(
     fun voiceName() = preferenceStore.getString("pref_voice_name", "ru-ru-x-dfa-network")
     fun speechRate() = preferenceStore.getFloat("pref_speech_rate", 1.0f)
     fun speechPitch() = preferenceStore.getFloat("pref_speech_pitch", 1.0f)
+
+    // Local Model Management
+    fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", true)
+    fun isFastOcrDownloaded() = preferenceStore.getBoolean("pref_model_fast_ocr_downloaded", true)
+    fun isPanelDetectorDownloaded() = preferenceStore.getBoolean("pref_model_panel_detector_downloaded", true)
 }
