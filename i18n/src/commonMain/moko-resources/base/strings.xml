@@ -1212,12 +1212,37 @@
     <string name="recommended_dict_jmdict_en_description">Comprehensive Japanese-English vocabulary dictionary with example sentences.</string>
     <string name="recommended_dict_openrussian_title">[Terms] OpenRussian (English - Russian)</string>
     <string name="recommended_dict_openrussian_description">Russian-English and English-Russian dictionary with grammar tags and definitions.</string>
+    <string name="recommended_dict_ru_explanatory_title">[Terms] Russian Explanatory Dictionary</string>
+    <string name="recommended_dict_ru_explanatory_description">Monolingual Russian dictionary with word definitions and meanings.</string>
+    <string name="recommended_dict_lat_cyr_title">[Translit] Latin to Cyrillic Dictionary</string>
+    <string name="recommended_dict_lat_cyr_description">Transliteration and dictionary for converting Latin/Romaji characters and text to Cyrillic script.</string>
     <string name="recommended_dict_jpdb_title">[Freq] JPDB v2.2 Frequency Kana</string>
     <string name="recommended_dict_jpdb_description">JPDB frequency ranks with split kana and kanji frequency ranks.</string>
     <string name="recommended_dict_bccwj_title">[Freq] BCCWJ SUW LUW</string>
     <string name="recommended_dict_bccwj_description">A list of word frequencies from diverse texts.</string>
 
     <!-- OCR Related -->
+    <string name="ocr_model_legacy">Legacy Local (On-Device)</string>
+    <string name="ocr_model_fast">Fast Local ARM (On-Device)</string>
+    <string name="ocr_model_glens">Google Lens (Online)</string>
+    <string name="ocr_model_owocr">OwOCR (Self-Hosted Websocket)</string>
+    <string name="ocr_model_openrouter">OpenRouter AI Vision</string>
+    <string name="ocr_model_google">Google AI / Gemini Vision</string>
+    <string name="ocr_model_zen_free">Zen Free (Zero-Config, Free without API key)</string>
+
+    <!-- Voice / Text-to-Speech Settings -->
+    <string name="pref_category_voice">Voices &amp; Text-to-Speech</string>
+    <string name="pref_voice_engine">Voice Engine</string>
+    <string name="pref_voice_name">Selected Voice</string>
+    <string name="pref_speech_rate">Speech Rate</string>
+    <string name="pref_speech_pitch">Speech Pitch</string>
+
+    <!-- Indicators &amp; Token Counters -->
+    <string name="pref_token_usage">Token Usage Counter</string>
+    <string name="pref_token_usage_summary">Total tokens consumed across AI OCR requests</string>
+    <string name="token_indicator_label">Tokens Used: %1$d</string>
+    <string name="zen_free_status_label">Zen Free Active (No API Key Required)</string>
+
     <string name="action_ocr">Trigger region selection for text recognition</string>
     <string name="action_preprocess_ocr">Scan OCR</string>
     <string name="action_copy">Copy</string>

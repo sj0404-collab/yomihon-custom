@@ -8,6 +8,9 @@ internal class OcrEngineLocks {
     private val fastMutex = Mutex()
     private val glensMutex = Mutex()
     private val owOcrMutex = Mutex()
+    private val openRouterMutex = Mutex()
+    private val googleAiMutex = Mutex()
+    private val zenFreeMutex = Mutex()
     private val detectionMutex = Mutex()
 
     suspend fun <T> withTextEngineLock(
@@ -30,8 +33,14 @@ internal class OcrEngineLocks {
             fastMutex.withLock {
                 glensMutex.withLock {
                     owOcrMutex.withLock {
-                        detectionMutex.withLock {
-                            block()
+                        openRouterMutex.withLock {
+                            googleAiMutex.withLock {
+                                zenFreeMutex.withLock {
+                                    detectionMutex.withLock {
+                                        block()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -45,6 +54,9 @@ internal class OcrEngineLocks {
             OcrRepositoryImpl.EngineType.FAST -> fastMutex
             OcrRepositoryImpl.EngineType.GLENS -> glensMutex
             OcrRepositoryImpl.EngineType.OWOCR -> owOcrMutex
+            OcrRepositoryImpl.EngineType.OPENROUTER -> openRouterMutex
+            OcrRepositoryImpl.EngineType.GOOGLE -> googleAiMutex
+            OcrRepositoryImpl.EngineType.ZEN_FREE -> zenFreeMutex
         }
     }
 }

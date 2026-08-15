@@ -86,6 +86,14 @@ object OcrQueueScreen : Screen() {
         val useFallbackModels by useFallbackModelsPreference
             .changes()
             .collectAsState(initial = useFallbackModelsPreference.get())
+        val openrouterKeyPref = remember { ocrPreferences.openrouterApiKey() }
+        val openrouterKey by openrouterKeyPref.changes().collectAsState(initial = openrouterKeyPref.get())
+        val googleKeyPref = remember { ocrPreferences.googleApiKey() }
+        val googleKey by googleKeyPref.changes().collectAsState(initial = googleKeyPref.get())
+        val tokenCountPref = remember { ocrPreferences.tokenUsageCount() }
+        val tokenCount by tokenCountPref.changes().collectAsState(initial = tokenCountPref.get())
+        val voiceNamePref = remember { ocrPreferences.voiceName() }
+        val voiceName by voiceNamePref.changes().collectAsState(initial = voiceNamePref.get())
 
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
         var fabExpanded by remember { mutableStateOf(true) }
@@ -198,6 +206,9 @@ object OcrQueueScreen : Screen() {
                         OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
                         OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
                         OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
+                        OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
+                        OcrModel.GOOGLE to stringResource(OcrModel.GOOGLE.titleRes),
+                        OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
                     ),
                     onValueChange = ocrModelPreference::set,
                 )
@@ -214,6 +225,48 @@ object OcrQueueScreen : Screen() {
                     )
                     InfoWidget(text = stringResource(MR.strings.pref_owocr_address_note))
                 }
+                if (ocrModel == OcrModel.OPENROUTER) {
+                    EditTextPreferenceWidget(
+                        title = "OpenRouter API Key",
+                        subtitle = "Key for OpenRouter vision model access",
+                        icon = null,
+                        value = openrouterKey,
+                        onConfirm = {
+                            openrouterKeyPref.set(it)
+                            true
+                        },
+                    )
+                }
+                if (ocrModel == OcrModel.GOOGLE) {
+                    EditTextPreferenceWidget(
+                        title = "Google AI API Key",
+                        subtitle = "Key for Gemini Vision model access",
+                        icon = null,
+                        value = googleKey,
+                        onConfirm = {
+                            googleKeyPref.set(it)
+                            true
+                        },
+                    )
+                }
+                if (ocrModel == OcrModel.ZEN_FREE) {
+                    InfoWidget(text = stringResource(MR.strings.zen_free_status_label))
+                }
+
+                PreferenceGroupHeader(title = stringResource(MR.strings.pref_category_voice))
+                EditTextPreferenceWidget(
+                    title = stringResource(MR.strings.pref_voice_name),
+                    subtitle = "Selected voice engine identifier",
+                    icon = null,
+                    value = voiceName,
+                    onConfirm = {
+                        voiceNamePref.set(it)
+                        true
+                    },
+                )
+
+                PreferenceGroupHeader(title = stringResource(MR.strings.pref_token_usage))
+                InfoWidget(text = stringResource(MR.strings.token_indicator_label, tokenCount))
                 SwitchPreferenceWidget(
                     checked = autoOcrOnDownload,
                     title = stringResource(MR.strings.pref_auto_ocr_on_download),

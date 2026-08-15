@@ -173,6 +173,16 @@ object SettingsDictionaryScreen : Screen {
                     url = "https://github.com/ImenaOphelia/openrussian-to-yomitan/releases/latest/download/opr-ru-en.zip",
                 ),
                 RecommendedDictionary(
+                    title = stringResource(MR.strings.recommended_dict_ru_explanatory_title),
+                    description = stringResource(MR.strings.recommended_dict_ru_explanatory_description),
+                    url = "https://github.com/yomihon/yomihon/raw/main/dictionaries/Russian_Explanatory.zip",
+                ),
+                RecommendedDictionary(
+                    title = stringResource(MR.strings.recommended_dict_lat_cyr_title),
+                    description = stringResource(MR.strings.recommended_dict_lat_cyr_description),
+                    url = "https://github.com/yomihon/yomihon/raw/main/dictionaries/Latin_to_Cyrillic.zip",
+                ),
+                RecommendedDictionary(
                     title = stringResource(MR.strings.recommended_dict_jitendex_title),
                     description = stringResource(MR.strings.recommended_dict_jitendex_description),
                     url = "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip",

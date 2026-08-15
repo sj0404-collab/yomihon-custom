@@ -919,6 +919,28 @@
     <string name="pref_webtoon_vertical_navigator_on_left">Разместить вертикальную навигацию с левой стороны</string>
     <string name="considering">Рассматривается</string>
 
+    <!-- OCR Related -->
+    <string name="ocr_model_legacy">Локальная Legacy (На устройстве)</string>
+    <string name="ocr_model_fast">Быстрая ARM (На устройстве)</string>
+    <string name="ocr_model_glens">Google Lens (Онлайн)</string>
+    <string name="ocr_model_owocr">OwOCR (Собственный сервер)</string>
+    <string name="ocr_model_openrouter">OpenRouter AI Vision</string>
+    <string name="ocr_model_google">Google AI / Gemini Vision</string>
+    <string name="ocr_model_zen_free">Zen Free (Бесплатно, без API ключа)</string>
+
+    <!-- Voice / Text-to-Speech Settings -->
+    <string name="pref_category_voice">Голоса и Озвучка (TTS)</string>
+    <string name="pref_voice_engine">Движок озвучки</string>
+    <string name="pref_voice_name">Выбранный голос</string>
+    <string name="pref_speech_rate">Скорость речи</string>
+    <string name="pref_speech_pitch">Высота голоса</string>
+
+    <!-- Indicators &amp; Token Counters -->
+    <string name="pref_token_usage">Счётчик токенов</string>
+    <string name="pref_token_usage_summary">Всего токенов использовано в ИИ-запросах OCR</string>
+    <string name="token_indicator_label">Использовано токенов: %1$d</string>
+    <string name="zen_free_status_label">Zen Free Активен (Без API ключа)</string>
+
     <!-- Dictionary Recommendations -->
     <string name="recommended_dictionaries">Рекомендуемые словари</string>
     <string name="recommended_dict_jitendex_title">[Словарь] Jitendex (Японско-английский)</string>
@@ -929,6 +951,10 @@
     <string name="recommended_dict_jmdict_en_description">Подробный японско-английский словарь с примерами предложений.</string>
     <string name="recommended_dict_openrussian_title">[Словарь] OpenRussian (Англо-русский / Русско-английский)</string>
     <string name="recommended_dict_openrussian_description">Англо-русский и русско-английский словарь с грамматическими пометками и определениями.</string>
+    <string name="recommended_dict_ru_explanatory_title">[Словарь] Толковый словарь русского языка</string>
+    <string name="recommended_dict_ru_explanatory_description">Одноязычный толковый словарь русского языка с определениями слов.</string>
+    <string name="recommended_dict_lat_cyr_title">[Транслит] Латиница -> Кириллица</string>
+    <string name="recommended_dict_lat_cyr_description">Словарь и транслитерация латинских символов и ромадзи в кириллицу.</string>
     <string name="recommended_dict_jpdb_title">[Частотный] JPDB v2.2 Frequency Kana</string>
     <string name="recommended_dict_jpdb_description">Частотный рейтинг JPDB с раздельной частотой каны и кандзи.</string>
     <string name="recommended_dict_bccwj_title">[Частотный] BCCWJ SUW LUW</string>

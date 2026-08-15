@@ -48,11 +48,15 @@ class OcrRepositoryImpl(
 
     private val textPostprocessor by lazy { TextPostprocessor() }
     private val cacheStore by lazy { OcrCacheStore(context) }
+    private val ocrPreferences by lazy { mihon.domain.ocr.service.OcrPreferences(preferenceStore) }
 
     private var legacyEngine: LegacyOcrEngine? = null
     private var fastEngine: FastOcrEngine? = null
     private var glensEngine: GlensOcrEngine? = null
     private var owOcrEngine: OwOcrEngine? = null
+    private var openRouterEngine: OpenRouterOcrEngine? = null
+    private var googleAiEngine: GoogleAiOcrEngine? = null
+    private var zenFreeEngine: ZenFreeOcrEngine? = null
     private var detEngine: DetOcrEngine? = null
 
     private val engineLocks = OcrEngineLocks()
@@ -76,6 +80,9 @@ class OcrRepositoryImpl(
         FAST,
         GLENS,
         OWOCR,
+        OPENROUTER,
+        GOOGLE,
+        ZEN_FREE,
     }
 
     private fun selectedEngineType(): EngineType {
@@ -84,6 +91,9 @@ class OcrRepositoryImpl(
             OcrModel.FAST -> EngineType.FAST
             OcrModel.GLENS -> EngineType.GLENS
             OcrModel.OWOCR -> EngineType.OWOCR
+            OcrModel.OPENROUTER -> EngineType.OPENROUTER
+            OcrModel.GOOGLE -> EngineType.GOOGLE
+            OcrModel.ZEN_FREE -> EngineType.ZEN_FREE
         }
     }
 
@@ -109,6 +119,9 @@ class OcrRepositoryImpl(
             EngineType.FAST -> EngineType.GLENS
             EngineType.LEGACY -> EngineType.GLENS
             EngineType.OWOCR -> EngineType.GLENS
+            EngineType.OPENROUTER -> EngineType.ZEN_FREE
+            EngineType.GOOGLE -> EngineType.ZEN_FREE
+            EngineType.ZEN_FREE -> EngineType.GLENS
         }
     }
 
@@ -142,6 +155,21 @@ class OcrRepositoryImpl(
             EngineType.OWOCR -> {
                 owOcrEngine ?: OwOcrEngine(context).also {
                     owOcrEngine = it
+                }
+            }
+            EngineType.OPENROUTER -> {
+                openRouterEngine ?: OpenRouterOcrEngine(context, ocrPreferences).also {
+                    openRouterEngine = it
+                }
+            }
+            EngineType.GOOGLE -> {
+                googleAiEngine ?: GoogleAiOcrEngine(context, ocrPreferences).also {
+                    googleAiEngine = it
+                }
+            }
+            EngineType.ZEN_FREE -> {
+                zenFreeEngine ?: ZenFreeOcrEngine(context, ocrPreferences).also {
+                    zenFreeEngine = it
                 }
             }
         }
@@ -567,6 +595,15 @@ class OcrRepositoryImpl(
 
             owOcrEngine?.close()
             owOcrEngine = null
+
+            openRouterEngine?.close()
+            openRouterEngine = null
+
+            googleAiEngine?.close()
+            googleAiEngine = null
+
+            zenFreeEngine?.close()
+            zenFreeEngine = null
 
             detEngine?.close()
             detEngine = null

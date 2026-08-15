@@ -10,4 +10,7 @@ val OcrModel.titleRes: StringResource
         OcrModel.FAST -> MR.strings.ocr_model_fast
         OcrModel.GLENS -> MR.strings.ocr_model_glens
         OcrModel.OWOCR -> MR.strings.ocr_model_owocr
+        OcrModel.OPENROUTER -> MR.strings.ocr_model_openrouter
+        OcrModel.GOOGLE -> MR.strings.ocr_model_google
+        OcrModel.ZEN_FREE -> MR.strings.ocr_model_zen_free
     }
