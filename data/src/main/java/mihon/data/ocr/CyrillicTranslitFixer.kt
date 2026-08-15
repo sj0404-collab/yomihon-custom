@@ -36,16 +36,16 @@ object CyrillicTranslitFixer {
     )
 
     private val TRANSLIT_SINGLE_MAP = mapOf(
-        'a' to 'а', 'b' to 'б', 'v' to 'в', 'g' to 'г', 'd' to 'д',
-        'e' to 'е', 'z' to 'з', 'i' to 'и', 'k' to 'к', 'l' to 'л',
-        'm' to 'м', 'n' to 'н', 'o' to 'о', 'p' to 'п', 'r' to 'р',
-        's' to 'с', 't' to 'т', 'u' to 'у', 'f' to 'ф', 'h' to 'х',
-        'y' to 'ы', 'j' to 'й', 'w' to 'в', 'q' to 'к', 'x' to 'кс',
-        'A' to 'А', 'B' to 'Б', 'V' to 'В', 'G' to 'Г', 'D' to 'Д',
-        'E' to 'Е', 'Z' to 'З', 'I' to 'И', 'K' to 'К', 'L' to 'Л',
-        'M' to 'М', 'N' to 'Н', 'O' to 'О', 'P' to 'П', 'R' to 'Р',
-        'S' to 'С', 'T' to 'Т', 'U' to 'У', 'F' to 'Ф', 'H' to 'Х',
-        'Y' to 'Ы', 'J' to 'Й', 'W' to 'В', 'Q' to 'К',
+        'a' to "а", 'b' to "б", 'v' to "в", 'g' to "г", 'd' to "д",
+        'e' to "е", 'z' to "з", 'i' to "и", 'k' to "к", 'l' to "л",
+        'm' to "м", 'n' to "н", 'o' to "о", 'p' to "п", 'r' to "р",
+        's' to "с", 't' to "т", 'u' to "у", 'f' to "ф", 'h' to "х",
+        'y' to "ы", 'j' to "й", 'w' to "в", 'q' to "к", 'x' to "кс",
+        'A' to "А", 'B' to "Б", 'V' to "В", 'G' to "Г", 'D' to "Д",
+        'E' to "Е", 'Z' to "З", 'I' to "И", 'K' to "К", 'L' to "Л",
+        'M' to "М", 'N' to "Н", 'O' to "О", 'P' to "П", 'R' to "Р",
+        'S' to "С", 'T' to "Т", 'U' to "У", 'F' to "Ф", 'H' to "Х",
+        'Y' to "Ы", 'J' to "Й", 'W' to "В", 'Q' to "К",
     )
 
     /**
@@ -68,9 +68,14 @@ object CyrillicTranslitFixer {
             result = result.replace(latin, cyrillic)
         }
 
-        val sb = StringBuilder(result.length)
+        val sb = StringBuilder(result.length * 2)
         for (char in result) {
-            sb.append(TRANSLIT_SINGLE_MAP[char] ?: char)
+            val mapped = TRANSLIT_SINGLE_MAP[char]
+            if (mapped != null) {
+                sb.append(mapped)
+            } else {
+                sb.append(char)
+            }
         }
         return sb.toString()
     }
@@ -81,7 +86,6 @@ object CyrillicTranslitFixer {
     fun autoFixCyrillic(text: String): String {
         if (text.isBlank()) return text
 
-        // If text contains mostly Latin characters, convert translit
         val latinCount = text.count { it in 'a'..'z' || it in 'A'..'Z' }
         val cyrillicCount = text.count { it in '\u0400'..'\u04FF' }
 
