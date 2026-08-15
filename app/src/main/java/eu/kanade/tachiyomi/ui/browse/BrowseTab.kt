@@ -16,6 +16,7 @@ import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.components.TabbedScreen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.ui.browse.cbz.cbzDirectTab
 import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsScreenModel
 import eu.kanade.tachiyomi.ui.browse.extension.extensionsTab
 import eu.kanade.tachiyomi.ui.browse.migration.sources.migrateSourceTab
@@ -52,8 +53,6 @@ data object BrowseTab : Tab {
     fun showExtension() {
         switchToExtensionTabChannel.trySend(Unit)
     }
-
-import eu.kanade.tachiyomi.ui.browse.cbz.cbzDirectTab
 
     @Composable
     override fun Content() {

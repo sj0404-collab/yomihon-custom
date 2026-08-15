@@ -1243,6 +1243,12 @@
     <string name="token_indicator_label">Tokens Used: %1$d</string>
     <string name="zen_free_status_label">Zen Free Active (No API Key Required)</string>
 
+    <!-- CBZ Direct Reader -->
+    <string name="cbz_direct_reader">CBZ Direct Reader</string>
+    <string name="cbz_direct_reader_summary">Directly read CBZ, ZIP, CBR archives from device storage without copy-caching (CDisplayEx mode)</string>
+    <string name="action_open_cbz_file">Open CBZ / ZIP Archive</string>
+    <string name="cbz_no_files_found">No CBZ archives selected. Click Open CBZ / ZIP Archive for direct reading without caching.</string>
+
     <string name="action_ocr">Trigger region selection for text recognition</string>
     <string name="action_preprocess_ocr">Scan OCR</string>
     <string name="action_copy">Copy</string>

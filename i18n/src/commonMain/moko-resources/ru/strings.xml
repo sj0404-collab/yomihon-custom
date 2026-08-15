@@ -941,6 +941,12 @@
     <string name="token_indicator_label">Использовано токенов: %1$d</string>
     <string name="zen_free_status_label">Zen Free Активен (Без API ключа)</string>
 
+    <!-- CBZ Direct Reader -->
+    <string name="cbz_direct_reader">Прямое чтение CBZ</string>
+    <string name="cbz_direct_reader_summary">Прямое чтение CBZ, ZIP, CBR архивов без копирования в кэш (режим CDisplayEx)</string>
+    <string name="action_open_cbz_file">Открыть CBZ / ZIP архив</string>
+    <string name="cbz_no_files_found">Архивы CBZ не выбраны. Нажмите «Открыть CBZ / ZIP архив» для прямого чтения без кэширования.</string>
+
     <!-- Dictionary Recommendations -->
     <string name="recommended_dictionaries">Рекомендуемые словари</string>
     <string name="recommended_dict_jitendex_title">[Словарь] Jitendex (Японско-английский)</string>
