@@ -1222,6 +1222,7 @@
     <string name="recommended_dict_bccwj_description">A list of word frequencies from diverse texts.</string>
 
     <!-- OCR Related -->
+    <string name="pref_category_ocr">OCR Settings</string>
     <string name="ocr_model_legacy">Legacy Local (On-Device)</string>
     <string name="ocr_model_fast">Fast Local ARM (On-Device)</string>
     <string name="ocr_model_glens">Google Lens (Online)</string>

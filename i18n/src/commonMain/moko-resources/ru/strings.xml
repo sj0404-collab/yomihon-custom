@@ -920,6 +920,7 @@
     <string name="considering">Рассматривается</string>
 
     <!-- OCR Related -->
+    <string name="pref_category_ocr">Настройки OCR</string>
     <string name="ocr_model_legacy">Локальная Legacy (На устройстве)</string>
     <string name="ocr_model_fast">Быстрая ARM (На устройстве)</string>
     <string name="ocr_model_glens">Google Lens (Онлайн)</string>
