@@ -63,8 +63,8 @@ fun BrowseSourceContent(
         if (uri != null) {
             val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, flags)
-            storagePreferences.baseStorageDirectory().set(uri.toString())
-            eu.kanade.tachiyomi.util.system.toast("Папка хранилища локальной манги успешно изменена")
+            storagePreferences.baseStorageDirectory.set(uri.toString())
+            context.toast(MR.strings.requires_app_restart)
             mangaList.refresh()
         }
     }
