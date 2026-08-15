@@ -51,6 +51,19 @@ fun BrowseSourceContent(
     onMangaLongClick: (Manga) -> Unit,
 ) {
     val context = LocalContext.current
+    val storagePreferences = remember { uy.kohesive.injekt.Injekt.get<tachiyomi.domain.storage.service.StoragePreferences>() }
+
+    val pickFolderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+            storagePreferences.baseStorageDirectory().set(uri.toString())
+            eu.kanade.tachiyomi.util.system.toast("Папка хранилища локальной манги успешно изменена")
+            mangaList.refresh()
+        }
+    }
 
     val errorState = mangaList.loadState.refresh.takeIf { it is LoadState.Error }
         ?: mangaList.loadState.append.takeIf { it is LoadState.Error }
@@ -90,7 +103,7 @@ fun BrowseSourceContent(
                     EmptyScreenAction(
                         stringRes = MR.strings.action_select_local_folder,
                         icon = Icons.Outlined.FolderOpen,
-                        onClick = onLocalSourceHelpClick,
+                        onClick = { pickFolderLauncher.launch(null) },
                     ),
                     EmptyScreenAction(
                         stringRes = MR.strings.local_source_help_guide,

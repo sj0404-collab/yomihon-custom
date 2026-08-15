@@ -1,5 +1,10 @@
 package eu.kanade.presentation.reader
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
+import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.GTranslate
 import androidx.compose.material.icons.outlined.Spellcheck
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -17,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,9 +35,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationCompat
 import eu.kanade.tachiyomi.util.system.toast
 import mihon.data.ocr.CyrillicTranslitFixer
 import mihon.data.ocr.MangaTranslatorService
+import java.util.Locale
 
 @Composable
 fun TranslationCard(
@@ -42,7 +52,24 @@ fun TranslationCard(
     var translationText by remember(originalText) { mutableStateOf<String?>(null) }
     var restoredCyrillic by remember(originalText) { mutableStateOf<String?>(null) }
     var isTranslating by remember(originalText) { mutableStateOf(true) }
+    var isSpeaking by remember(originalText) { mutableStateOf(false) }
     val context = LocalContext.current
+
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+
+    DisposableEffect(Unit) {
+        var tts: TextToSpeech? = null
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("ru", "RU")
+                ttsEngine = tts
+            }
+        }
+        onDispose {
+            tts?.stop()
+            tts?.shutdown()
+        }
+    }
 
     LaunchedEffect(originalText, targetLanguage) {
         isTranslating = true
@@ -53,8 +80,12 @@ fun TranslationCard(
             restoredCyrillic = null
         }
 
-        translationText = MangaTranslatorService.translate(fixedText, targetLanguage)
+        val translated = MangaTranslatorService.translate(fixedText, targetLanguage)
+        translationText = translated
         isTranslating = false
+
+        // Post translation to system notifications
+        showTranslationNotification(context, translated)
     }
 
     Card(
@@ -123,9 +154,26 @@ fun TranslationCard(
                 Row {
                     IconButton(
                         onClick = {
+                            val textToSpeak = translationText ?: restoredCyrillic ?: originalText
+                            if (isSpeaking) {
+                                ttsEngine?.stop()
+                                isSpeaking = false
+                            } else {
+                                ttsEngine?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "yomihon_tts")
+                                isSpeaking = true
+                            }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeaking) Icons.Outlined.Stop else Icons.Outlined.VolumeUp,
+                            contentDescription = "Озвучить / Остановить",
+                        )
+                    }
+                    IconButton(
+                        onClick = {
                             val textToCopy = restoredCyrillic ?: translationText
                             textToCopy?.let { text ->
-                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                 val clip = android.content.ClipData.newPlainText("Translation", text)
                                 clipboard.setPrimaryClip(clip)
                                 context.toast("Текст скопирован")
@@ -155,5 +203,35 @@ fun TranslationCard(
                 )
             }
         }
+    }
+}
+
+private fun showTranslationNotification(context: Context, text: String) {
+    if (text.isBlank()) return
+    try {
+        val channelId = "yomihon_translation_channel"
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Перевод OCR Yomihon",
+                NotificationManager.IMPORTANCE_LOW,
+            )
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_menu_search)
+            .setContentTitle("Yomihon: Перевод OCR")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(7001, notification)
+    } catch (e: Exception) {
+        // Handle notification permission or service absence gracefully
     }
 }

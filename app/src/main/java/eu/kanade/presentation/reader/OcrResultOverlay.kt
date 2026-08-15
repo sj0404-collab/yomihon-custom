@@ -44,7 +44,7 @@ fun OcrResultOverlay(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (dimBackground) {
+        if (false) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
