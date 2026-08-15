@@ -8,9 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.GTranslate
-import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Spellcheck
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.util.system.toast
+import mihon.data.ocr.CyrillicTranslitFixer
 import mihon.data.ocr.MangaTranslatorService
 
 @Composable
@@ -38,12 +40,20 @@ fun TranslationCard(
     if (originalText.isBlank()) return
 
     var translationText by remember(originalText) { mutableStateOf<String?>(null) }
+    var restoredCyrillic by remember(originalText) { mutableStateOf<String?>(null) }
     var isTranslating by remember(originalText) { mutableStateOf(true) }
     val context = LocalContext.current
 
     LaunchedEffect(originalText, targetLanguage) {
         isTranslating = true
-        translationText = MangaTranslatorService.translate(originalText, targetLanguage)
+        val fixedText = CyrillicTranslitFixer.autoFixCyrillic(originalText)
+        if (fixedText != originalText) {
+            restoredCyrillic = fixedText
+        } else {
+            restoredCyrillic = null
+        }
+
+        translationText = MangaTranslatorService.translate(fixedText, targetLanguage)
         isTranslating = false
     }
 
@@ -55,8 +65,40 @@ fun TranslationCard(
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            restoredCyrillic?.let { cyrillic ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Spellcheck,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "Восстановленный русский текст (Кириллица):",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                Text(
+                    text = cyrillic,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                HorizontalDivider()
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -81,17 +123,18 @@ fun TranslationCard(
                 Row {
                     IconButton(
                         onClick = {
-                            translationText?.let { text ->
+                            val textToCopy = restoredCyrillic ?: translationText
+                            textToCopy?.let { text ->
                                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                 val clip = android.content.ClipData.newPlainText("Translation", text)
                                 clipboard.setPrimaryClip(clip)
-                                context.toast("Перевод скопирован")
+                                context.toast("Текст скопирован")
                             }
                         },
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.ContentCopy,
-                            contentDescription = "Копировать перевод",
+                            contentDescription = "Копировать текст",
                         )
                     }
                 }
