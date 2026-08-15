@@ -67,6 +67,10 @@ fun OcrResultBottomSheet(
                     HorizontalDivider()
                 }
 
+                if (searchState.query.isNotBlank()) {
+                    TranslationCard(originalText = searchState.query)
+                }
+
                 DictionaryResults(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     query = searchState.results?.query ?: "",

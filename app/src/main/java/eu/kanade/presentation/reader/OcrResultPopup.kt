@@ -120,27 +120,38 @@ fun OcrResultPopup(
                     CompositionLocalProvider(
                         LocalDensity provides scaledDensity,
                     ) {
-                        DictionaryResults(
+                        androidx.compose.foundation.layout.Column(
                             modifier = Modifier.fillMaxSize(),
-                            query = searchState.results?.query ?: "",
-                            highlightRange = searchState.results?.highlightRange,
-                            showQueryHeader = false,
-                            isLoading = searchState.isLoading,
-                            isSearching = searchState.isSearching,
-                            hasSearched = searchState.hasSearched,
-                            searchResults = searchState.results?.items ?: emptyList(),
-                            dictionaries = searchState.dictionaries,
-                            enabledDictionaryIds = searchState.enabledDictionaryIds.toSet(),
-                            termMetaMap = searchState.results?.termMetaMap ?: emptyMap(),
-                            existingTermExpressions = searchState.existingTermExpressions,
-                            audioStates = searchState.audioStates,
-                            onTermGroupClick = onTermGroupClick,
-                            onPlayAudioClick = onPlayAudioClick,
-                            onQueryChange = onQueryChange,
-                            onSearch = onSearch,
-                            onCopyText = null,
-                            contentPadding = PaddingValues(8.dp),
-                        )
+                        ) {
+                            if (searchState.query.isNotBlank()) {
+                                TranslationCard(
+                                    originalText = searchState.query,
+                                    modifier = Modifier.padding(8.dp),
+                                )
+                            }
+
+                            DictionaryResults(
+                                modifier = Modifier.fillMaxSize().weight(1f),
+                                query = searchState.results?.query ?: "",
+                                highlightRange = searchState.results?.highlightRange,
+                                showQueryHeader = false,
+                                isLoading = searchState.isLoading,
+                                isSearching = searchState.isSearching,
+                                hasSearched = searchState.hasSearched,
+                                searchResults = searchState.results?.items ?: emptyList(),
+                                dictionaries = searchState.dictionaries,
+                                enabledDictionaryIds = searchState.enabledDictionaryIds.toSet(),
+                                termMetaMap = searchState.results?.termMetaMap ?: emptyMap(),
+                                existingTermExpressions = searchState.existingTermExpressions,
+                                audioStates = searchState.audioStates,
+                                onTermGroupClick = onTermGroupClick,
+                                onPlayAudioClick = onPlayAudioClick,
+                                onQueryChange = onQueryChange,
+                                onSearch = onSearch,
+                                onCopyText = null,
+                                contentPadding = PaddingValues(8.dp),
+                            )
+                        }
                     }
                 }
             }
