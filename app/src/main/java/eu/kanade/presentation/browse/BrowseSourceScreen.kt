@@ -13,6 +13,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import eu.kanade.tachiyomi.util.system.toast
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.paging.LoadState
@@ -51,7 +55,7 @@ fun BrowseSourceContent(
     onMangaLongClick: (Manga) -> Unit,
 ) {
     val context = LocalContext.current
-    val storagePreferences = remember { uy.kohesive.injekt.Injekt.get<tachiyomi.domain.storage.service.StoragePreferences>() }
+    val storagePreferences = remember { Injekt.get<tachiyomi.domain.storage.service.StoragePreferences>() }
 
     val pickFolderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
