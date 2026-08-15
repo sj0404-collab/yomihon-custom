@@ -266,6 +266,27 @@ class OcrRepositoryImpl(
                         image = bitmap,
                         modelKey = selectedModel,
                     )
+                    OcrModel.OPENROUTER -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.OPENROUTER,
+                    )
+                    OcrModel.GOOGLE -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.GOOGLE,
+                    )
+                    OcrModel.ZEN_FREE -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.ZEN_FREE,
+                    )
                 }
             }
 
@@ -314,6 +335,43 @@ class OcrRepositoryImpl(
                 activeScanSessions--
             }
             performDeferredCleanupIfIdle()
+        }
+    }
+
+    private suspend fun scanWithEngineOrFallback(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+        type: EngineType,
+    ): OcrPageResult {
+        return try {
+            val text = recognizeWithEngine(type, image)
+            val bbox = OcrBoundingBox(0f, 0f, 1f, 1f)
+            val region = OcrRegion(
+                order = 0,
+                text = text,
+                boundingBox = bbox,
+                textOrientation = OcrTextOrientation.Horizontal,
+            )
+            OcrPageResult(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                modelKey = modelKey,
+                regions = if (text.isBlank()) emptyList() else listOf(region),
+                text = text,
+                createdAt = System.currentTimeMillis(),
+            )
+        } catch (e: Throwable) {
+            if (!useFallbackModelsPref.get()) {
+                throw e
+            }
+            scanWithGlens(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+            )
         }
     }
 
