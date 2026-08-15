@@ -75,7 +75,12 @@ class ExtensionStoreRepositoryImpl(
     override suspend fun fetchExtensions(): List<Extension.Available> {
         return try {
             supervisorScope {
-                database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList().map { store ->
+                var stores = database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList()
+                if (stores.isEmpty()) {
+                    ensureDefaultStore()
+                    stores = database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList()
+                }
+                stores.map { store ->
                     async {
                         service.getExtensions(store).onFailure {
                             this@ExtensionStoreRepositoryImpl.logcat(LogPriority.ERROR, it) {
@@ -93,8 +98,21 @@ class ExtensionStoreRepositoryImpl(
         }
     }
 
+    private suspend fun ensureDefaultStore() {
+        try {
+            insert("https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json")
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Failed to insert default Keiyoushi extension store" }
+        }
+    }
+
     override suspend fun getAll(): List<ExtensionStore> {
-        return database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList()
+        val stores = database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList()
+        if (stores.isEmpty()) {
+            ensureDefaultStore()
+            return database.extension_storeQueries.getAll(::extensionStoreMapper).awaitAsList()
+        }
+        return stores
     }
 
     override fun getAllAsFlow(): Flow<List<ExtensionStore>> {

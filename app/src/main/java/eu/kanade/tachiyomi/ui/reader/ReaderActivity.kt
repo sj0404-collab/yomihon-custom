@@ -148,6 +148,14 @@ class ReaderActivity : BaseActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
         }
+
+        fun newIntent(context: Context, uri: android.net.Uri): Intent {
+            return Intent(context, ReaderActivity::class.java).apply {
+                data = uri
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
     }
 
     private val readerPreferences = Injekt.get<ReaderPreferences>()

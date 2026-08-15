@@ -53,6 +53,8 @@ data object BrowseTab : Tab {
         switchToExtensionTabChannel.trySend(Unit)
     }
 
+import eu.kanade.tachiyomi.ui.browse.cbz.cbzDirectTab
+
     @Composable
     override fun Content() {
         val context = LocalContext.current
@@ -64,6 +66,7 @@ data object BrowseTab : Tab {
         val tabs = listOf(
             sourcesTab(),
             extensionsTab(extensionsScreenModel),
+            cbzDirectTab(),
             migrateSourceTab(),
         )
 
