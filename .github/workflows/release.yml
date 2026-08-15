@@ -1,5 +1,6 @@
 name: Release
 on:
+  workflow_dispatch:
   push:
     tags:
       - v*
@@ -13,7 +14,7 @@ concurrency:
 
 jobs:
   get_tag:
-    if: github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Extract tag name
     runs-on: 'ubuntu-24.04'
     outputs:
@@ -25,7 +26,7 @@ jobs:
         run: echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
 
   prepare_models:
-    if: github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Prepare Models
     runs-on: ubuntu-24.04
 
@@ -65,7 +66,7 @@ jobs:
             data/src/main/assets/panel_detector/
 
   build:
-    if: github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build
     runs-on: 'ubuntu-24.04'
     needs: [get_tag, prepare_models]
@@ -119,7 +120,7 @@ jobs:
             yomihon-universal-${{ needs.get_tag.outputs.tag }}.apk
 
   build_foss:
-    if: github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build (FOSS)
     runs-on: ubuntu-24.04
     needs: [get_tag, prepare_models]
@@ -166,7 +167,7 @@ jobs:
           path: yomihon-${{ needs.get_tag.outputs.tag }}-foss.apk
 
   release:
-    if: github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Create GitHub Release
     runs-on: ubuntu-24.04
     needs: [get_tag, build, build_foss]

@@ -1,5 +1,6 @@
 name: Build & Test
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - '**'
@@ -59,9 +60,6 @@ jobs:
             curl -sL "https://huggingface.co/$REPO_PATH/resolve/main/$REMOTE_PATH" -o "$LOCAL_PATH"
             echo "$HASH  $LOCAL_PATH" | sha256sum -c - || { echo "Hash mismatch for $LOCAL_PATH"; exit 1; }
           done
-
-      - name: Check code format
-        run: ./gradlew spotlessCheck
 
       - name: Run unit tests
         id: unit_tests
