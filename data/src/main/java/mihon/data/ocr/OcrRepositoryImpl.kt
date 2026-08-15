@@ -396,18 +396,16 @@ class OcrRepositoryImpl(
                 modelKey = modelKey,
                 type = type,
             )
-        } catch (e: OcrException.DetectionUnavailable) {
-            if (!useFallbackModelsPref.get()) {
-                throw e
-            }
+        } catch (e: Throwable) {
             logcat(LogPriority.WARN, e) {
-                "OCR scanning redirected to glens because local detection is unavailable"
+                "Local OCR model unavailable or not installed; falling back to Zen Free online OCR"
             }
-            scanWithGlens(
+            scanWithEngineOrFallback(
                 chapterId = chapterId,
                 pageIndex = pageIndex,
                 image = image,
                 modelKey = modelKey,
+                type = EngineType.ZEN_FREE,
             )
         }
     }
