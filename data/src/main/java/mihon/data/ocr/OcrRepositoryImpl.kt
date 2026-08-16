@@ -1,0 +1,674 @@
+package mihon.data.ocr
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Rect
+import com.google.ai.edge.litert.Environment
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import logcat.LogPriority
+import mihon.domain.ocr.exception.OcrException
+import mihon.domain.ocr.model.OcrBoundingBox
+import mihon.domain.ocr.model.OcrImage
+import mihon.domain.ocr.model.OcrModel
+import mihon.domain.ocr.model.OcrPageResult
+import mihon.domain.ocr.model.OcrRegion
+import mihon.domain.ocr.model.OcrTextOrientation
+import mihon.domain.ocr.repository.OcrRepository
+import tachiyomi.core.common.preference.AndroidPreferenceStore
+import tachiyomi.core.common.preference.getEnum
+import tachiyomi.core.common.util.system.logcat
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+
+/**
+ * OCR repository implementation that manages engine selection, page scanning, and OCR cache.
+ */
+class OcrRepositoryImpl(
+    private val context: Context,
+) : OcrRepository {
+    private val preferenceStore = AndroidPreferenceStore(context)
+    private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+    private val useFallbackModelsPref = preferenceStore.getBoolean("pref_use_fallback_models", true)
+
+    private val environmentResult by lazy {
+        runCatching { Environment.create() }
+            .onFailure { error ->
+                logcat(LogPriority.WARN, error) {
+                    "LiteRT environment unavailable; local OCR engines will fall back"
+                }
+            }
+    }
+
+    private val textPostprocessor by lazy { TextPostprocessor() }
+    private val cacheStore by lazy { OcrCacheStore(context) }
+    private val ocrPreferences by lazy { mihon.domain.ocr.service.OcrPreferences(preferenceStore) }
+
+    private var legacyEngine: LegacyOcrEngine? = null
+    private var fastEngine: FastOcrEngine? = null
+    private var glensEngine: GlensOcrEngine? = null
+    private var owOcrEngine: OwOcrEngine? = null
+    private var openRouterEngine: OpenRouterOcrEngine? = null
+    private var googleAiEngine: GoogleAiOcrEngine? = null
+    private var zenFreeEngine: ZenFreeOcrEngine? = null
+    private var detEngine: DetOcrEngine? = null
+
+    private val engineLocks = OcrEngineLocks()
+    private val cleanupMutex = Mutex()
+    private val sessionMutex = Mutex()
+    private val operationMutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val taskQueue = PrioritizedTaskQueue(scope) {
+        scope.launch {
+            performDeferredCleanupIfIdle()
+        }
+    }
+
+    private var cleanupRequested = false
+
+    private var activeScanSessions = 0
+    private var activeOperations = 0
+
+    internal enum class EngineType {
+        LEGACY,
+        FAST,
+        GLENS,
+        OWOCR,
+        OPENROUTER,
+        GOOGLE,
+        ZEN_FREE,
+    }
+
+    private fun selectedEngineType(): EngineType {
+        return when (ocrModelPref.get()) {
+            OcrModel.LEGACY -> EngineType.LEGACY
+            OcrModel.FAST -> EngineType.FAST
+            OcrModel.GLENS -> EngineType.GLENS
+            OcrModel.OWOCR -> EngineType.OWOCR
+            OcrModel.OPENROUTER -> EngineType.OPENROUTER
+            OcrModel.GOOGLE -> EngineType.GOOGLE
+            OcrModel.ZEN_FREE -> EngineType.ZEN_FREE
+        }
+    }
+
+    private fun isConnectivityFailure(error: Throwable): Boolean {
+        var current: Throwable? = error
+        while (current != null) {
+            if (
+                current is UnknownHostException ||
+                current is ConnectException ||
+                current is SocketTimeoutException ||
+                current.message?.contains("Unable to resolve host", ignoreCase = true) == true
+            ) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
+    }
+
+    private fun fallbackFor(type: EngineType): EngineType {
+        return when (type) {
+            EngineType.GLENS -> EngineType.FAST
+            EngineType.FAST -> EngineType.GLENS
+            EngineType.LEGACY -> EngineType.GLENS
+            EngineType.OWOCR -> EngineType.GLENS
+            EngineType.OPENROUTER -> EngineType.ZEN_FREE
+            EngineType.GOOGLE -> EngineType.ZEN_FREE
+            EngineType.ZEN_FREE -> EngineType.GLENS
+        }
+    }
+
+    private fun requireEnvironment(): Environment {
+        return environmentResult.getOrElse { cause ->
+            throw OcrException.InitializationError(cause)
+        }
+    }
+
+    private fun localOcrAvailable(): Boolean {
+        return environmentResult.isSuccess
+    }
+
+    private fun engineFor(type: EngineType): OcrEngine {
+        return when (type) {
+            EngineType.FAST -> {
+                fastEngine ?: FastOcrEngine(context, requireEnvironment(), textPostprocessor).also {
+                    fastEngine = it
+                }
+            }
+            EngineType.LEGACY -> {
+                legacyEngine ?: LegacyOcrEngine(context, requireEnvironment(), textPostprocessor).also {
+                    legacyEngine = it
+                }
+            }
+            EngineType.GLENS -> {
+                glensEngine ?: GlensOcrEngine().also {
+                    glensEngine = it
+                }
+            }
+            EngineType.OWOCR -> {
+                owOcrEngine ?: OwOcrEngine(context).also {
+                    owOcrEngine = it
+                }
+            }
+            EngineType.OPENROUTER -> {
+                openRouterEngine ?: OpenRouterOcrEngine(context, ocrPreferences).also {
+                    openRouterEngine = it
+                }
+            }
+            EngineType.GOOGLE -> {
+                googleAiEngine ?: GoogleAiOcrEngine(context, ocrPreferences).also {
+                    googleAiEngine = it
+                }
+            }
+            EngineType.ZEN_FREE -> {
+                zenFreeEngine ?: ZenFreeOcrEngine(context, ocrPreferences).also {
+                    zenFreeEngine = it
+                }
+            }
+        }
+    }
+
+    private fun detectionEngine(): DetOcrEngine {
+        return detEngine ?: (
+            if (localOcrAvailable()) {
+                UnavailableDetOcrEngine() // TODO: replace with real DetOcrEngine with a local model
+            } else {
+                UnavailableDetOcrEngine()
+            }
+            ).also {
+            detEngine = it
+        }
+    }
+
+    private suspend fun recognizeWithEngine(type: EngineType, image: Bitmap): String {
+        return engineLocks.withTextEngineLock(type) {
+            engineFor(type).recognizeText(image)
+        }
+    }
+
+    private suspend fun recognizeWithFallback(primary: EngineType, image: Bitmap): String {
+        return try {
+            recognizeWithEngine(primary, image)
+        } catch (primaryError: Throwable) {
+            if (primaryError is CancellationException) throw primaryError
+
+            if (!useFallbackModelsPref.get()) {
+                throw primaryError
+            }
+
+            val fallback = fallbackFor(primary)
+            if (fallback == primary) {
+                throw primaryError
+            }
+
+            logcat(LogPriority.WARN, primaryError) {
+                "OCR (${primary.name.lowercase()}) failed, falling back to ${fallback.name.lowercase()}"
+            }
+
+            try {
+                recognizeWithEngine(fallback, image)
+            } catch (fallbackError: Throwable) {
+                if (fallbackError is CancellationException) throw fallbackError
+                primaryError.addSuppressed(fallbackError)
+                throw primaryError
+            }
+        }
+    }
+
+    override suspend fun recognizeText(image: OcrImage): String {
+        return withActiveOperation {
+            submitTask(PrioritizedTaskQueue.Priority.HIGH) {
+                image.useBitmap { bitmap ->
+                    recognizeWithFallback(selectedEngineType(), bitmap)
+                }
+            }
+        }
+    }
+
+    override suspend fun scanPage(
+        chapterId: Long,
+        pageIndex: Int,
+        image: OcrImage,
+    ): OcrPageResult {
+        return withActiveOperation {
+            val regionChoice = ocrPreferences.scanRegion().get()
+            val result = image.useBitmap { originalBitmap ->
+                val bitmap = when (regionChoice) {
+                    mihon.domain.ocr.service.ScanRegion.TOP_HALF -> Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.width, originalBitmap.height / 2)
+                    mihon.domain.ocr.service.ScanRegion.BOTTOM_HALF -> Bitmap.createBitmap(originalBitmap, 0, originalBitmap.height / 2, originalBitmap.width, originalBitmap.height / 2)
+                    else -> originalBitmap
+                }
+                when (val selectedModel = ocrModelPref.get()) {
+                    OcrModel.GLENS -> scanWithGlens(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                    )
+                    OcrModel.LEGACY -> scanLocalOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.LEGACY,
+                    )
+                    OcrModel.FAST -> scanLocalOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.FAST,
+                    )
+                    OcrModel.OWOCR -> scanOwOcrOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                    )
+                    OcrModel.OPENROUTER -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.OPENROUTER,
+                    )
+                    OcrModel.GOOGLE -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.GOOGLE,
+                    )
+                    OcrModel.ZEN_FREE -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.ZEN_FREE,
+                    )
+                }
+            }
+
+            cacheStore.upsert(result)
+            result
+        }
+    }
+
+    override suspend fun getCachedPage(
+        chapterId: Long,
+        pageIndex: Int,
+    ): OcrPageResult? {
+        return cacheStore.getPage(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+        )
+    }
+
+    override suspend fun getCachedChapterIds(chapterIds: Collection<Long>): Set<Long> {
+        return cacheStore.getCachedChapterIds(
+            chapterIds = chapterIds,
+        )
+    }
+
+    override suspend fun clearCachedChapter(chapterId: Long) {
+        cacheStore.clearChapter(chapterId)
+    }
+
+    override suspend fun clearCache() {
+        cacheStore.clear()
+    }
+
+    override suspend fun getCacheSizeBytes(): Long {
+        return cacheStore.sizeBytes()
+    }
+
+    override suspend fun <T> withScanSession(block: suspend () -> T): T {
+        sessionMutex.withLock {
+            activeScanSessions++
+        }
+
+        return try {
+            block()
+        } finally {
+            sessionMutex.withLock {
+                activeScanSessions--
+            }
+            performDeferredCleanupIfIdle()
+        }
+    }
+
+    private suspend fun scanWithEngineOrFallback(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+        type: EngineType,
+    ): OcrPageResult {
+        return try {
+            val text = recognizeWithEngine(type, image)
+            val bbox = OcrBoundingBox(0f, 0f, 1f, 1f)
+            val region = OcrRegion(
+                order = 0,
+                text = text,
+                boundingBox = bbox,
+                textOrientation = OcrTextOrientation.Horizontal,
+            )
+            OcrPageResult(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                ocrModel = modelKey,
+                imageWidth = image.width,
+                imageHeight = image.height,
+                regions = if (text.isBlank()) emptyList() else listOf(region),
+            )
+        } catch (e: Throwable) {
+            if (!useFallbackModelsPref.get()) {
+                throw e
+            }
+            scanWithGlens(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+            )
+        }
+    }
+
+    private suspend fun scanLocalOrFallback(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+        type: EngineType,
+    ): OcrPageResult {
+        return try {
+            scanLocally(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+                type = type,
+            )
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) {
+                "Local OCR model unavailable or not installed; falling back to Zen Free online OCR"
+            }
+            scanWithEngineOrFallback(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+                type = EngineType.ZEN_FREE,
+            )
+        }
+    }
+
+    private suspend fun scanWithGlens(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+    ): OcrPageResult {
+        val result = try {
+            submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                engineLocks.withTextEngineLock(EngineType.GLENS) {
+                    val engine = glensEngine ?: GlensOcrEngine().also {
+                        glensEngine = it
+                    }
+                    engine.recognizePage(image)
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (isConnectivityFailure(error)) {
+                throw OcrException.ConnectionError(error)
+            }
+            throw error
+        }
+        return OcrPageResult(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            ocrModel = modelKey,
+            imageWidth = image.width,
+            imageHeight = image.height,
+            regions = result.regions,
+        )
+    }
+
+    private suspend fun scanWithOwOcr(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+    ): OcrPageResult {
+        val result = try {
+            submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                engineLocks.withTextEngineLock(EngineType.OWOCR) {
+                    val engine = owOcrEngine ?: OwOcrEngine(context).also {
+                        owOcrEngine = it
+                    }
+                    engine.recognizePage(image)
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (isConnectivityFailure(error)) {
+                throw OcrException.ConnectionError(error)
+            }
+            throw error
+        }
+        return OcrPageResult(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            ocrModel = modelKey,
+            imageWidth = image.width,
+            imageHeight = image.height,
+            regions = result,
+        )
+    }
+
+    private suspend fun scanOwOcrOrFallback(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+    ): OcrPageResult {
+        return try {
+            scanWithOwOcr(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+            )
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            if (!useFallbackModelsPref.get()) {
+                throw e
+            }
+            logcat(LogPriority.WARN, e) {
+                "OwOCR scanning failed, falling back to glens"
+            }
+            scanWithGlens(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                image = image,
+                modelKey = modelKey,
+            )
+        }
+    }
+
+    private suspend fun scanLocally(
+        chapterId: Long,
+        pageIndex: Int,
+        image: Bitmap,
+        modelKey: OcrModel,
+        type: EngineType,
+    ): OcrPageResult {
+        val boxes = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+            engineLocks.withDetectionLock {
+                val engine = detectionEngine()
+                engine.detectTextRegions(image)
+            }
+        }
+            .filter(OcrBoundingBox::isValid)
+
+        val regions = boxes.mapIndexedNotNull { index, box ->
+            val crop = cropBitmap(image, box) ?: return@mapIndexedNotNull null
+            try {
+                val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                    recognizeWithEngine(type, crop)
+                }.trim()
+                if (text.isBlank()) {
+                    null
+                } else {
+                    OcrRegion(
+                        order = index,
+                        text = text,
+                        boundingBox = box,
+                        textOrientation = OcrTextOrientation.Horizontal,
+                    )
+                }
+            } finally {
+                if (!crop.isRecycled) {
+                    crop.recycle()
+                }
+            }
+        }
+
+        return OcrPageResult(
+            chapterId = chapterId,
+            pageIndex = pageIndex,
+            ocrModel = modelKey,
+            imageWidth = image.width,
+            imageHeight = image.height,
+            regions = regions,
+        )
+    }
+
+    private fun cropBitmap(
+        image: Bitmap,
+        box: OcrBoundingBox,
+    ): Bitmap? {
+        val left = (box.left * image.width).toInt().coerceIn(0, image.width - 1)
+        val top = (box.top * image.height).toInt().coerceIn(0, image.height - 1)
+        val right = (box.right * image.width).toInt().coerceIn(left + 1, image.width)
+        val bottom = (box.bottom * image.height).toInt().coerceIn(top + 1, image.height)
+
+        val rect = Rect(left, top, right, bottom)
+        if (rect.width() <= 0 || rect.height() <= 0) {
+            return null
+        }
+
+        return Bitmap.createBitmap(image, rect.left, rect.top, rect.width(), rect.height())
+    }
+
+    override fun cleanup() {
+        scope.launch {
+            cleanupMutex.withLock {
+                cleanupRequested = true
+            }
+            performDeferredCleanupIfIdle()
+        }
+    }
+
+    private suspend fun <T> submitTask(
+        priority: PrioritizedTaskQueue.Priority,
+        block: suspend () -> T,
+    ): T {
+        return taskQueue.submit(priority, block)
+    }
+
+    private suspend fun <T> withActiveOperation(block: suspend () -> T): T {
+        operationMutex.withLock {
+            activeOperations++
+        }
+
+        return try {
+            block()
+        } finally {
+            operationMutex.withLock {
+                activeOperations--
+            }
+            performDeferredCleanupIfIdle()
+        }
+    }
+
+    private suspend fun performDeferredCleanupIfIdle() {
+        val shouldCleanup = cleanupMutex.withLock {
+            if (!cleanupRequested || !taskQueue.isIdle() || hasActiveOperations() || hasActiveScanSessions()) {
+                return@withLock false
+            }
+
+            cleanupRequested = false
+            true
+        }
+
+        if (!shouldCleanup) {
+            return
+        }
+
+        try {
+            closeEngines()
+            cacheStore.close()
+            logcat(LogPriority.INFO) { "OcrRepositoryImpl cleaned up successfully" }
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "Error cleaning up OcrRepositoryImpl" }
+        }
+    }
+
+    private suspend fun <T> OcrImage.useBitmap(
+        block: suspend (Bitmap) -> T,
+    ): T {
+        val bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        return try {
+            block(bitmap)
+        } finally {
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    private suspend fun hasActiveScanSessions(): Boolean {
+        return sessionMutex.withLock { activeScanSessions > 0 }
+    }
+
+    private suspend fun hasActiveOperations(): Boolean {
+        return operationMutex.withLock { activeOperations > 0 }
+    }
+
+    private suspend fun closeEngines() {
+        engineLocks.withAllLocks {
+            legacyEngine?.close()
+            legacyEngine = null
+
+            fastEngine?.close()
+            fastEngine = null
+
+            glensEngine?.close()
+            glensEngine = null
+
+            owOcrEngine?.close()
+            owOcrEngine = null
+
+            openRouterEngine?.close()
+            openRouterEngine = null
+
+            googleAiEngine?.close()
+            googleAiEngine = null
+
+            zenFreeEngine?.close()
+            zenFreeEngine = null
+
+            detEngine?.close()
+            detEngine = null
+        }
+    }
+}
