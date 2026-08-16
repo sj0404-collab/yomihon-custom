@@ -83,6 +83,14 @@ object HomeScreen : Screen() {
 
     @Composable
     override fun Content() {
+        val uiPreferences = remember { Injekt.get<eu.kanade.domain.ui.UiPreferences>() }
+        val usePwaMode by uiPreferences.usePwaMode.collectAsState()
+
+        if (usePwaMode) {
+            eu.kanade.presentation.pwa.PwaScreen.Content()
+            return
+        }
+
         val navigator = LocalNavigator.currentOrThrow
         TabNavigator(
             tab = LibraryTab,

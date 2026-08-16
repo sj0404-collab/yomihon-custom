@@ -33,7 +33,8 @@ class AppModeStep : OnboardingStep {
 
     @Composable
     override fun Content() {
-        var selectedMode by remember { mutableIntStateOf(0) } // 0 = PWA, 1 = Native
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        var selectedMode by remember { mutableIntStateOf(if (uiPreferences.usePwaMode.get()) 0 else 1) }
 
         Column(
             modifier = Modifier
@@ -65,7 +66,10 @@ class AppModeStep : OnboardingStep {
 
             // Mode 1: Yomihon PWA HTML Mode
             Card(
-                onClick = { selectedMode = 0 },
+                onClick = {
+                    selectedMode = 0
+                    uiPreferences.usePwaMode.set(true)
+                },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = if (selectedMode == 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
@@ -98,7 +102,10 @@ class AppModeStep : OnboardingStep {
 
             // Mode 2: Yomihon Native Android Mode
             Card(
-                onClick = { selectedMode = 1 },
+                onClick = {
+                    selectedMode = 1
+                    uiPreferences.usePwaMode.set(false)
+                },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = if (selectedMode == 1) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
