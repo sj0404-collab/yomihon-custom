@@ -2,10 +2,15 @@ package eu.kanade.tachiyomi.ui.reader.html
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.speech.tts.TextToSpeech
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
+import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
+import eu.kanade.tachiyomi.data.ocr.ResolvedOcrPages
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -16,18 +21,30 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import mihon.domain.ocr.interactor.ScanPageOcr
+import mihon.domain.ocr.model.OcrImage
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
 import mihon.domain.ocr.service.ScanRegion
 import org.json.JSONArray
 import org.json.JSONObject
 import tachiyomi.core.common.Constants
+import tachiyomi.domain.chapter.interactor.GetChapter
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
+import tachiyomi.domain.chapter.interactor.UpdateChapter
+import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.history.interactor.GetNextChapters
+import tachiyomi.domain.history.model.HistoryUpdate
+import tachiyomi.domain.history.interactor.UpsertHistory
 import tachiyomi.domain.manga.interactor.GetLibraryManga
+import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.updates.interactor.GetUpdates
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.ByteArrayOutputStream
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +65,17 @@ class YomihonWebBridge(
     private val getUpdates: GetUpdates by lazy { Injekt.get() }
     private val getHistory: GetHistory by lazy { Injekt.get() }
     private val getNextChapters: GetNextChapters by lazy { Injekt.get() }
+    private val getManga: GetManga by lazy { Injekt.get() }
+    private val getChapter: GetChapter by lazy { Injekt.get() }
+    private val getChaptersByMangaId: GetChaptersByMangaId by lazy { Injekt.get() }
+    private val updateChapter: UpdateChapter by lazy { Injekt.get() }
+    private val upsertHistory: UpsertHistory by lazy { Injekt.get() }
+    private val coverCache: CoverCache by lazy { Injekt.get() }
+    private val scanPageOcr: ScanPageOcr by lazy { Injekt.get() }
+    private val pageSourceResolver: OcrPageSourceResolver by lazy { Injekt.get() }
+
+    private var readerPages: ResolvedOcrPages? = null
+    private var readerChapterId: Long = -1L
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -331,6 +359,173 @@ class YomihonWebBridge(
     @JavascriptInterface
     fun openCbzFilePicker() {
         onOpenCbzFile()
+    }
+
+    // endregion
+
+
+    // region In-HTML reader: manga details, chapter pages, progress, per-page OCR
+
+    @JavascriptInterface
+    fun getMangaDetails(mangaId: Long): String {
+        return runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking "{}"
+                val chapters = getChaptersByMangaId.await(mangaId, applyScanlatorFilter = true)
+                    .sortedWith(getChapterSort(manga, sortDescending = true))
+                JSONObject().apply {
+                    put("id", manga.id)
+                    put("title", manga.title)
+                    put("author", manga.author ?: "")
+                    put("artist", manga.artist ?: "")
+                    put("description", manga.description ?: "")
+                    put("genres", JSONArray(manga.genre.orEmpty()))
+                    put("status", manga.status)
+                    put("favorite", manga.favorite)
+                    put(
+                        "chapters",
+                        JSONArray().apply {
+                            chapters.forEach { c ->
+                                put(
+                                    JSONObject().apply {
+                                        put("id", c.id)
+                                        put("name", c.name)
+                                        put("chapterNumber", c.chapterNumber)
+                                        put("read", c.read)
+                                        put("bookmark", c.bookmark)
+                                        put("lastPageRead", c.lastPageRead)
+                                        put("dateUpload", c.dateUpload)
+                                        put("scanlator", c.scanlator ?: "")
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }.toString()
+            }
+        }.getOrDefault("{}")
+    }
+
+    /** Обложка манги из кэша как data-URI (пустая строка если ещё не закэширована). */
+    @JavascriptInterface
+    fun getCover(mangaId: Long): String {
+        return runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking ""
+                val custom = coverCache.getCustomCoverFile(mangaId)
+                val file = if (custom.exists()) custom else coverCache.getCoverFile(manga.thumbnailUrl)
+                if (file == null || !file.exists() || file.length() == 0L) return@runBlocking ""
+                val bytes = file.readBytes()
+                val mime = if (bytes.size > 4 && bytes[1] == 'P'.code.toByte()) "image/png" else "image/jpeg"
+                "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+            }
+        }.getOrDefault("")
+    }
+
+    /** Открывает главу для HTML-читалки. Возвращает количество страниц (0 = ошибка). */
+    @JavascriptInterface
+    fun openChapterPages(chapterId: Long): Int {
+        return runCatching {
+            runBlocking {
+                val chapter = getChapter.await(chapterId) ?: return@runBlocking 0
+                val manga = getManga.await(chapter.mangaId) ?: return@runBlocking 0
+                readerPages?.close()
+                readerPages = pageSourceResolver.resolve(manga, chapter)
+                readerChapterId = chapterId
+                readerPages?.pages?.size ?: 0
+            }
+        }.getOrDefault(0)
+    }
+
+    /** Страница открытой главы как JPEG data-URI (скачивается/читается лениво). */
+    @JavascriptInterface
+    fun getPageImage(pageIndex: Int): String {
+        return runCatching {
+            runBlocking {
+                val input = readerPages?.getPageInput(pageIndex) ?: return@runBlocking ""
+                val bitmap = input.openBitmap() ?: return@runBlocking ""
+                try {
+                    val maxWidth = 1440
+                    val scaled = if (bitmap.width > maxWidth) {
+                        val h = (bitmap.height.toLong() * maxWidth / bitmap.width).toInt().coerceAtLeast(1)
+                        Bitmap.createScaledBitmap(bitmap, maxWidth, h, true)
+                    } else {
+                        bitmap
+                    }
+                    val output = ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+                    if (scaled !== bitmap && !scaled.isRecycled) scaled.recycle()
+                    "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                } finally {
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+            }
+        }.getOrDefault("")
+    }
+
+    @JavascriptInterface
+    fun closeChapterPages() {
+        runCatching { readerPages?.close() }
+        readerPages = null
+        readerChapterId = -1L
+    }
+
+    /** Сохраняет прогресс чтения + историю (та же БД, что у нативной читалки). */
+    @JavascriptInterface
+    fun saveChapterProgress(chapterId: Long, lastPageRead: Int, completed: Boolean) {
+        runCatching {
+            runBlocking {
+                updateChapter.await(
+                    ChapterUpdate(
+                        id = chapterId,
+                        lastPageRead = lastPageRead.toLong(),
+                        read = if (completed) true else null,
+                    ),
+                )
+                upsertHistory.await(HistoryUpdate(chapterId, Date(), 0L))
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun setChapterRead(chapterId: Long, read: Boolean) {
+        runCatching {
+            runBlocking {
+                updateChapter.await(
+                    ChapterUpdate(id = chapterId, read = read, lastPageRead = if (!read) 0L else null),
+                )
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun setChapterBookmark(chapterId: Long, bookmark: Boolean) {
+        runCatching {
+            runBlocking { updateChapter.await(ChapterUpdate(id = chapterId, bookmark = bookmark)) }
+        }
+    }
+
+    /** OCR текущей страницы открытой главы выбранным движком (онлайн по умолчанию). */
+    @JavascriptInterface
+    fun ocrPage(pageIndex: Int): String {
+        return runCatching {
+            runBlocking {
+                val input = readerPages?.getPageInput(pageIndex) ?: return@runBlocking ""
+                val bitmap = input.openBitmap() ?: return@runBlocking ""
+                try {
+                    val pixels = IntArray(bitmap.width * bitmap.height)
+                    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                    val result = scanPageOcr.await(
+                        readerChapterId,
+                        pageIndex,
+                        OcrImage(bitmap.width, bitmap.height, pixels),
+                    )
+                    result.regions.joinToString("\n") { it.text }.trim()
+                } finally {
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+            }
+        }.getOrDefault("")
     }
 
     // endregion
