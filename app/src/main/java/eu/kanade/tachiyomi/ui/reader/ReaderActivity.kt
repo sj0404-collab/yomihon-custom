@@ -750,7 +750,32 @@ class ReaderActivity : BaseActivity() {
                         menuToggleToast = toast(if (enabled) MR.strings.on else MR.strings.off)
                     },
                     onClickSettings = viewModel::openSettingsDialog,
+                    onClickOcrSettings = {
+                        val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
+                            putExtra("open_ocr_settings", true)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        }
+                        startActivity(intent)
+                    },
                     onClickOcr = ::enterOcrMode,
+                )
+
+                eu.kanade.presentation.reader.components.ReaderFloatingControls(
+                    onTriggerOcr = ::enterOcrMode,
+                    onOpenOcrSettings = {
+                        val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
+                            putExtra("open_ocr_settings", true)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        }
+                        startActivity(intent)
+                    },
+                    onScanRegionChange = { region ->
+                        uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().scanRegion().set(region)
+                        toast("Область сканирования изменена")
+                    },
+                    onAutoscrollToggle = { active, speed ->
+                        toast(if (active) "Автопрокрутка запущенa (скорость x${speed.toInt()})" else "Автопрокрутка остановлена")
+                    },
                 )
 
                 // OCR selection overlay

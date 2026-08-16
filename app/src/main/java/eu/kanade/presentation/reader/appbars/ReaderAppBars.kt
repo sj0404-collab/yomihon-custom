@@ -73,6 +73,7 @@ fun ReaderAppBars(
     cropEnabled: Boolean,
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
+    onClickOcrSettings: (() -> Unit)? = null,
     onClickOcr: () -> Unit,
 ) {
     val backgroundColor = MaterialTheme.colorScheme
@@ -94,7 +95,7 @@ fun ReaderAppBars(
                 navigateUp = navigateUp,
                 bookmarked = bookmarked,
                 onToggleBookmarked = onToggleBookmarked,
-                onOpenOcrSettings = onClickSettings,
+                onOpenOcrSettings = onClickOcrSettings,
                 onOpenInWebView = onOpenInWebView,
                 onOpenInBrowser = onOpenInBrowser,
                 onShare = onShare,
