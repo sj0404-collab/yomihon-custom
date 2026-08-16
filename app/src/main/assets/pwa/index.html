@@ -559,11 +559,15 @@ function BrowseTab() {
         📖 Открыть архив</button>
     <//>
     <${Card} title="🔌 Источники и расширения"
-      desc="Каталоги, расширения и глобальный поиск открываются в нативной части приложения.">
+      desc="Каталоги, расширения и глобальный поиск открываются в нативной части приложения. Кнопка Назад вернёт в PWA.">
       <div class="grid2">
         <button class="btn sec" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'browse') : needApp(); }}>🌐 Источники</button>
         <button class="btn sec" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'extensions') : needApp(); }}>🧩 Расширения</button>
       </div>
+    <//>
+    <${Card} title="🗂 Нативная библиотека"
+      desc="Полная нативная библиотека с категориями, фильтрами и локальной мангой из выбранной папки.">
+      <button class="btn block" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'library') : needApp(); }}>📚 Открыть нативную библиотеку</button>
     <//>
   </div>`;
 }

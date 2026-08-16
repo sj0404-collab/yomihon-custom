@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -87,10 +88,17 @@ object HomeScreen : Screen() {
     override fun Content() {
         val uiPreferences = remember { Injekt.get<eu.kanade.domain.ui.UiPreferences>() }
         val usePwaMode by uiPreferences.usePwaMode.collectAsState()
+        val pwaHidden by pwaTemporarilyHidden.collectAsState()
 
-        if (usePwaMode) {
+        if (usePwaMode && !pwaHidden) {
             eu.kanade.presentation.pwa.PwaScreen.Content()
             return
+        }
+
+        // Внутри нативного режима, открытого из PWA: системная кнопка "Назад"
+        // (когда мы уже на вкладке Библиотека) возвращает обратно в PWA.
+        BackHandler(enabled = usePwaMode && pwaHidden) {
+            returnToPwa()
         }
 
         val navigator = LocalNavigator.currentOrThrow
@@ -309,6 +317,21 @@ object HomeScreen : Screen() {
 
     suspend fun openTab(tab: Tab) {
         openTabEvent.send(tab)
+    }
+
+    /**
+     * Когда включён PWA-режим, нативные экраны недоступны напрямую.
+     * PWA-мост поднимает этот флаг, чтобы временно показать нативный UI
+     * (библиотека/обзор/расширения/загрузки), а кнопка "Назад" возвращает в PWA.
+     */
+    val pwaTemporarilyHidden = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    fun showNativeUi() {
+        pwaTemporarilyHidden.value = true
+    }
+
+    fun returnToPwa() {
+        pwaTemporarilyHidden.value = false
     }
 
     suspend fun showBottomNav(show: Boolean) {

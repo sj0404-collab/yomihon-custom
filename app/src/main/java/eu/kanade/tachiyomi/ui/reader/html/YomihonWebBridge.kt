@@ -6,10 +6,15 @@ import android.speech.tts.TextToSpeech
 import android.webkit.JavascriptInterface
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
+import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
@@ -43,6 +48,8 @@ class YomihonWebBridge(
     private val getUpdates: GetUpdates by lazy { Injekt.get() }
     private val getHistory: GetHistory by lazy { Injekt.get() }
     private val getNextChapters: GetNextChapters by lazy { Injekt.get() }
+
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var ttsEngine: TextToSpeech? = null
 
@@ -147,6 +154,7 @@ class YomihonWebBridge(
     @JavascriptInterface
     fun openManga(mangaId: Long) {
         runCatching {
+            mainScope.launch { HomeScreen.showNativeUi() }
             val intent = Intent(context, MainActivity::class.java).apply {
                 action = Constants.SHORTCUT_MANGA
                 putExtra(Constants.MANGA_EXTRA, mangaId)
@@ -187,22 +195,39 @@ class YomihonWebBridge(
 
     @JavascriptInterface
     fun openNativeScreen(screen: String) {
-        val action = when (screen) {
-            "library" -> Constants.SHORTCUT_LIBRARY
-            "updates" -> Constants.SHORTCUT_UPDATES
-            "history" -> Constants.SHORTCUT_HISTORY
-            "browse" -> Constants.SHORTCUT_SOURCES
-            "extensions" -> Constants.SHORTCUT_EXTENSIONS
-            "downloads" -> Constants.SHORTCUT_DOWNLOADS
+        // ВАЖНО: при usePwaMode HomeScreen всегда рисует PWA поверх нативных
+        // вкладок, поэтому интентов недостаточно — сначала временно скрываем PWA.
+        val tab: HomeScreen.Tab = when (screen) {
+            "library" -> HomeScreen.Tab.Library()
+            "updates" -> HomeScreen.Tab.Updates
+            "history" -> HomeScreen.Tab.History
+            "browse" -> HomeScreen.Tab.Browse(toExtensions = false)
+            "extensions" -> HomeScreen.Tab.Browse(toExtensions = true)
+            "downloads" -> {
+                openNativeMore()
+                return
+            }
             else -> return
         }
-        runCatching {
-            val intent = Intent(context, MainActivity::class.java).apply {
-                this.action = action
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            context.startActivity(intent)
+        mainScope.launch {
+            HomeScreen.showNativeUi()
+            HomeScreen.openTab(tab)
         }
+    }
+
+    /** Открывает нативный раздел "Ещё" (очереди загрузок/OCR, настройки). */
+    @JavascriptInterface
+    fun openNativeMore() {
+        mainScope.launch {
+            HomeScreen.showNativeUi()
+            HomeScreen.openTab(HomeScreen.Tab.More(toDownloads = true))
+        }
+    }
+
+    /** Возврат из нативного UI обратно в PWA (используется системной кнопкой Назад). */
+    @JavascriptInterface
+    fun returnToPwa() {
+        mainScope.launch { HomeScreen.returnToPwa() }
     }
 
     // endregion
