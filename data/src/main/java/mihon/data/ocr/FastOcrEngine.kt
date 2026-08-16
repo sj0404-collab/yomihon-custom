@@ -144,6 +144,16 @@ internal class FastOcrEngine(
     }
 
     private fun init(): Boolean {
+        val encoderFile = OcrModelFiles.resolve(context, encoderModelPath)
+        val decoderFile = OcrModelFiles.resolve(context, decoderModelPath)
+
+        if (encoderFile == null || decoderFile == null) {
+            logcat(LogPriority.INFO) {
+                "OCR (fast) model files are not installed externally; skipping local engine"
+            }
+            return false
+        }
+
         return try {
             val cpuThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
             val encoderOptions = CompiledModel.Options(Accelerator.CPU).apply {
@@ -154,15 +164,13 @@ internal class FastOcrEngine(
             }
 
             encoderModel = CompiledModel.create(
-                context.assets,
-                encoderModelPath,
+                encoderFile,
                 encoderOptions,
                 environment,
             )
 
             decoderModel = CompiledModel.create(
-                context.assets,
-                decoderModelPath,
+                decoderFile,
                 decoderOptions,
                 environment,
             )

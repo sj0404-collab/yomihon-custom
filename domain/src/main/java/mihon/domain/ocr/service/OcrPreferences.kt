@@ -48,8 +48,9 @@ class OcrPreferences(
     fun speechRate() = preferenceStore.getFloat("pref_speech_rate", 1.0f)
     fun speechPitch() = preferenceStore.getFloat("pref_speech_pitch", 1.0f)
 
-    // Local Model Management
-    fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", true)
-    fun isFastOcrDownloaded() = preferenceStore.getBoolean("pref_model_fast_ocr_downloaded", true)
-    fun isPanelDetectorDownloaded() = preferenceStore.getBoolean("pref_model_panel_detector_downloaded", true)
+    // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
+    // из коробки работают только онлайн-движки)
+    fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)
+    fun isFastOcrDownloaded() = preferenceStore.getBoolean("pref_model_fast_ocr_downloaded", false)
+    fun isPanelDetectorDownloaded() = preferenceStore.getBoolean("pref_model_panel_detector_downloaded", false)
 }

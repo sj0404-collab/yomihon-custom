@@ -107,14 +107,16 @@ private class YoloPanelDetectionEngine(
     private val cacheMutex = Mutex()
 
     init {
+        val modelFile = mihon.data.ocr.OcrModelFiles.resolve(context, MODEL_PATH)
+            ?: error("Panel detector model is not installed externally (expected in ocr_models/panel_detector.tflite)")
+
         val cpuThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
         val options = CompiledModel.Options(Accelerator.CPU).apply {
             cpuOptions = CompiledModel.CpuOptions(cpuThreads, null, null)
         }
 
         compiledModel = CompiledModel.create(
-            context.assets,
-            MODEL_PATH,
+            modelFile,
             options,
             environment,
         )

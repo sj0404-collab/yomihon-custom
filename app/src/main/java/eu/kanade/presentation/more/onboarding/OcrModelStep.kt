@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
 import mihon.domain.ocr.service.OcrPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -35,8 +37,9 @@ class OcrModelStep : OnboardingStep {
 
     @Composable
     override fun Content() {
+        val context = LocalContext.current
         val ocrPreferences = remember { Injekt.get<OcrPreferences>() }
-        var selectedChoice by remember { mutableStateOf(0) } // 0 = All, 1 = None, 2 = Select One
+        var selectedChoice by remember { mutableStateOf(1) } // 0 = All, 1 = None (default), 2 = Fast only
 
         Column(
             modifier = Modifier
@@ -70,9 +73,15 @@ class OcrModelStep : OnboardingStep {
             Card(
                 onClick = {
                     selectedChoice = 0
-                    ocrPreferences.isMangaOcrDownloaded().set(true)
-                    ocrPreferences.isFastOcrDownloaded().set(true)
-                    ocrPreferences.isPanelDetectorDownloaded().set(true)
+                    OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
+                        ocrPreferences.isMangaOcrDownloaded().set(ok)
+                    }
+                    OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
+                        ocrPreferences.isFastOcrDownloaded().set(ok)
+                    }
+                    OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->
+                        ocrPreferences.isPanelDetectorDownloaded().set(ok)
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -97,7 +106,7 @@ class OcrModelStep : OnboardingStep {
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Установить Manga OCR, Fast OCR и Panel Detector для точной работы офлайн.",
+                            text = "Скачать Manga OCR, Fast OCR и Panel Detector (~160 МБ) в папку приложения для работы офлайн. APK останется лёгким — модели хранятся снаружи.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -135,7 +144,7 @@ class OcrModelStep : OnboardingStep {
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Экономия памяти (~80 МБ). Использовать бесплатные онлайн/ИИ модели (Zen Free, OpenRouter, Gemini).",
+                            text = "Рекомендуется. Используются бесплатные онлайн ИИ-модели (Zen Free, Google Lens, Gemini, OpenRouter). Локальные модели можно доустановить позже в Настройки → OCR.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -147,8 +156,10 @@ class OcrModelStep : OnboardingStep {
                 onClick = {
                     selectedChoice = 2
                     ocrPreferences.isMangaOcrDownloaded().set(false)
-                    ocrPreferences.isFastOcrDownloaded().set(true) // Fast OCR only
                     ocrPreferences.isPanelDetectorDownloaded().set(false)
+                    OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
+                        ocrPreferences.isFastOcrDownloaded().set(ok) // Fast OCR only
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -173,7 +184,7 @@ class OcrModelStep : OnboardingStep {
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Загрузить только быструю модель Fast OCR для работы без интернета.",
+                            text = "Скачать только быструю модель Fast OCR (~30 МБ) для базовой работы без интернета.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }

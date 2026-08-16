@@ -78,20 +78,29 @@ internal class LegacyOcrEngine(
     }
 
     private fun init(): Boolean {
+        val encoderFile = OcrModelFiles.resolve(context, encoderModelPath)
+        val decoderFile = OcrModelFiles.resolve(context, decoderModelPath)
+        val embeddingsFile = OcrModelFiles.resolve(context, embeddingsPath)
+
+        if (encoderFile == null || decoderFile == null || embeddingsFile == null) {
+            logcat(LogPriority.INFO) {
+                "OCR (legacy) model files are not installed externally; skipping local engine"
+            }
+            return false
+        }
+
         fun initModels(accelerator: Accelerator) {
             val encoderOptions = CompiledModel.Options(accelerator)
             val decoderOptions = CompiledModel.Options(accelerator)
 
             encoderModel = CompiledModel.create(
-                context.assets,
-                encoderModelPath,
+                encoderFile,
                 encoderOptions,
                 environment,
             )
 
             decoderModel = CompiledModel.create(
-                context.assets,
-                decoderModelPath,
+                decoderFile,
                 decoderOptions,
                 environment,
             )
@@ -112,7 +121,7 @@ internal class LegacyOcrEngine(
         }
 
         return try {
-            embeddings = context.assets.open(embeddingsPath).use { stream ->
+            embeddings = java.io.File(embeddingsFile).inputStream().use { stream ->
                 val bytes = stream.readBytes()
                 val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
                 FloatArray(buffer.remaining()).apply { buffer.get(this) }

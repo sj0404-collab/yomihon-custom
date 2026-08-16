@@ -102,6 +102,15 @@ object OcrQueueScreen : Screen() {
         val isMangaOcrDown by isMangaOcrDownPref.changes().collectAsState(initial = isMangaOcrDownPref.get())
         val isFastOcrDownPref = remember { ocrPreferences.isFastOcrDownloaded() }
         val isFastOcrDown by isFastOcrDownPref.changes().collectAsState(initial = isFastOcrDownPref.get())
+        val isPanelDetectorDownPref = remember { ocrPreferences.isPanelDetectorDownloaded() }
+        val isPanelDetectorDown by isPanelDetectorDownPref.changes().collectAsState(initial = isPanelDetectorDownPref.get())
+
+        // Синхронизация флагов с реальным наличием файлов на диске
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            isMangaOcrDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr"))
+            isFastOcrDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr_fast"))
+            isPanelDetectorDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "panel_detector"))
+        }
 
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
         var fabExpanded by remember { mutableStateOf(true) }
@@ -239,33 +248,52 @@ object OcrQueueScreen : Screen() {
                 )
 
                 PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
+                InfoWidget(
+                    text = "Модели хранятся снаружи приложения (Android/data/…/files/ocr_models) и не увеличивают размер APK. " +
+                        "Их также можно положить вручную в папку Yomihon/OCR на внутренней памяти.",
+                )
                 SwitchPreferenceWidget(
                     checked = isMangaOcrDown,
-                    title = "Manga OCR (Full Float32)",
-                    subtitle = if (isMangaOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
+                    title = "Manga OCR (Full Float32, ~120 МБ)",
+                    subtitle = if (isMangaOcrDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
                     onCheckedChanged = { checked ->
-                        isMangaOcrDownPref.set(checked)
                         if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadModel(
-                                context,
-                                "manga_ocr_float32.tar.xz",
-                                "https://github.com/sj0404-collab/yomihon-custom/releases/download/v0.5.0-lightweight/manga_ocr_float32.tar.xz",
-                            )
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
+                                isMangaOcrDownPref.set(ok)
+                            }
+                        } else {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr")
+                            isMangaOcrDownPref.set(false)
                         }
                     },
                 )
                 SwitchPreferenceWidget(
                     checked = isFastOcrDown,
-                    title = "Fast Manga OCR (ARM FP16)",
-                    subtitle = if (isFastOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
+                    title = "Fast Manga OCR (ARM FP16, ~30 МБ)",
+                    subtitle = if (isFastOcrDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
                     onCheckedChanged = { checked ->
-                        isFastOcrDownPref.set(checked)
                         if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadModel(
-                                context,
-                                "manga_ocr_fast_fp16.tar.xz",
-                                "https://github.com/sj0404-collab/yomihon-custom/releases/download/v0.5.0-lightweight/manga_ocr_fast_fp16.tar.xz",
-                            )
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
+                                isFastOcrDownPref.set(ok)
+                            }
+                        } else {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr_fast")
+                            isFastOcrDownPref.set(false)
+                        }
+                    },
+                )
+                SwitchPreferenceWidget(
+                    checked = isPanelDetectorDown,
+                    title = "Panel Detector (YOLO, ~6 МБ)",
+                    subtitle = if (isPanelDetectorDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
+                    onCheckedChanged = { checked ->
+                        if (checked) {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->
+                                isPanelDetectorDownPref.set(ok)
+                            }
+                        } else {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "panel_detector")
+                            isPanelDetectorDownPref.set(false)
                         }
                     },
                 )

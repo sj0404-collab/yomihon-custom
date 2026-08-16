@@ -25,51 +25,11 @@ jobs:
         id: extract
         run: echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
 
-  prepare_models:
-    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
-    name: Prepare Models
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Download and Verify Models
-        run: |
-          # SHA256 hashes for file verification
-          # Format: "owner/repo:remote_path:local_path:hash"
-          FILES=(
-            "bluolightning/manga-ocr-tflite:mocr_2025_decoder_float32.tflite:app/src/main/assets/ocr/decoder.tflite:b6f0b49e7537abc24de4d5e7f44c71c3e04b4f30a9dac6b5704db94c963ce31b"
-            "bluolightning/manga-ocr-tflite:mocr_2025_encoder_fp32.tflite:app/src/main/assets/ocr/encoder.tflite:126441c11edb3f3c9da639647ba82d846872a7ad51d62cdbc50767fa5abf4f43"
-            "bluolightning/manga-ocr-tflite:mocr_2025_embeddings_float32.bin:app/src/main/assets/ocr/embeddings.bin:ef1959fd6b2ed011b782722d975a67332b859ccc717688ad06a16d170145bc6c"
-            "bluolightning/manga-ocr-mobile:v1_fp16/decoder.tflite:app/src/main/assets/ocr_fast/decoder.tflite:116db3f02364ceac91f86f46e54979d4fd7209e8d8820f3812410b0d732ee2b8"
-            "bluolightning/manga-ocr-mobile:v1_fp16/encoder.tflite:app/src/main/assets/ocr_fast/encoder.tflite:d724e5682c874b98202d4ac8f3e84848cd9d06a5e27cb0dadb27ebaea1b35f47"
-            "leoxs22/manga-panel-detector-yolo26n:manga_panel_detector_int8.tflite:data/src/main/assets/panel_detector/model.tflite:b1a7d8d4492e04a777ae0d3efd9dc1fbd6e8f361971eadb813279ce3dfd1b464"
-          )
-
-          for item in "${FILES[@]}"; do
-            IFS=":" read -r REPO_PATH REMOTE_PATH LOCAL_PATH HASH <<< "$item"
-            
-            mkdir -p "$(dirname "$LOCAL_PATH")"
-            
-            echo "Downloading $REMOTE_PATH from $REPO_PATH as $LOCAL_PATH..."
-            curl -L "https://huggingface.co/$REPO_PATH/resolve/main/$REMOTE_PATH" -o "$LOCAL_PATH"
-
-            # Verification
-            echo "$HASH  $LOCAL_PATH" | sha256sum -c - || { echo "Hash mismatch for $LOCAL_PATH"; exit 1; }
-          done
-
-      - name: Upload Models
-        uses: actions/upload-artifact@v4
-        with:
-          name: ocr-models
-          path: |
-            app/src/main/assets/ocr/
-            app/src/main/assets/ocr_fast/
-            data/src/main/assets/panel_detector/
-
   build:
     if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build
     runs-on: 'ubuntu-24.04'
-    needs: [get_tag, prepare_models]
+    needs: [get_tag]
 
     steps:
       - name: Checkout
@@ -83,12 +43,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-
-      - name: Download Models
-        uses: actions/download-artifact@v4
-        with:
-          name: ocr-models
-          path: .
 
       - name: Build
         run: ./gradlew assembleRelease -Pinclude-telemetry -Penable-updater
@@ -123,7 +77,7 @@ jobs:
     if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build (FOSS)
     runs-on: ubuntu-24.04
-    needs: [get_tag, prepare_models]
+    needs: [get_tag]
 
     steps:
       - name: Checkout
@@ -139,12 +93,6 @@ jobs:
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
           cache-disabled: true
-
-      - name: Download Models
-        uses: actions/download-artifact@v4
-        with:
-          name: ocr-models
-          path: .
 
       - name: Build
         run: ./gradlew assembleFoss -Penable-updater
@@ -187,7 +135,6 @@ jobs:
           name: |
             yomihon
             yomihon-foss
-            ocr-models
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
