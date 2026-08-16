@@ -399,7 +399,7 @@ class YomihonWebBridge(
                 .forEach { src ->
                     array.put(
                         JSONObject().apply {
-                            put("id", src.id)
+                            put("id", src.id.toString())
                             put("name", src.name)
                             put("lang", src.lang)
                             put("supportsLatest", src.supportsLatest)
@@ -415,9 +415,13 @@ class YomihonWebBridge(
      * Манги сразу сохраняются в БД (insertNetworkManga) — фронт получает стабильные id.
      */
     @JavascriptInterface
-    fun browseSource(sourceId: Long, mode: String, query: String, page: Int): String {
+    fun browseSource(sourceIdStr: String, mode: String, query: String, page: Int): String {
         return runCatching {
             runBlocking {
+                // ID источников — 63-битные Long и НЕ влезают в точность чисел JS,
+                // поэтому принимаем их строкой.
+                val sourceId = sourceIdStr.toLongOrNull()
+                    ?: return@runBlocking """{"error":"некорректный id источника"}"""
                 val source = sourceManager.get(sourceId) as? CatalogueSource
                     ?: return@runBlocking """{"error":"источник не найден"}"""
                 val mangasPage = when (mode) {
@@ -559,11 +563,12 @@ class YomihonWebBridge(
 
     /** Обложка по прямому URL через нативный HTTP-клиент источника недоступна из WebView (CORS/referer) — грузим здесь. */
     @JavascriptInterface
-    fun fetchCoverUrl(sourceId: Long, url: String): String {
+    fun fetchCoverUrl(sourceIdStr: String, url: String): String {
         return runCatching {
             runBlocking {
                 if (url.isBlank()) return@runBlocking ""
-                val source = sourceManager.get(sourceId) as? eu.kanade.tachiyomi.source.online.HttpSource
+                val source = sourceIdStr.toLongOrNull()
+                    ?.let { sourceManager.get(it) } as? eu.kanade.tachiyomi.source.online.HttpSource
                 val client = source?.client ?: Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
                 val reqBuilder = okhttp3.Request.Builder().url(url)
                 source?.headers?.let { reqBuilder.headers(it) }
