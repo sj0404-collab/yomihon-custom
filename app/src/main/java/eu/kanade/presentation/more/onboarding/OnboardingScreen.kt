@@ -33,7 +33,7 @@ fun OnboardingScreen(
 
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
     val steps = remember {
-        listOf(
+        listOf<OnboardingStep>(
             ThemeStep(),
             StorageStep(),
             PermissionStep(),

@@ -242,13 +242,31 @@ object OcrQueueScreen : Screen() {
                     checked = isMangaOcrDown,
                     title = "Manga OCR (Full Float32)",
                     subtitle = if (isMangaOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
-                    onCheckedChanged = isMangaOcrDownPref::set,
+                    onCheckedChanged = { checked ->
+                        isMangaOcrDownPref.set(checked)
+                        if (checked) {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadModel(
+                                context,
+                                "manga_ocr_float32.tar.xz",
+                                "https://github.com/sj0404-collab/yomihon-custom/releases/download/v0.5.0-lightweight/manga_ocr_float32.tar.xz",
+                            )
+                        }
+                    },
                 )
                 SwitchPreferenceWidget(
                     checked = isFastOcrDown,
                     title = "Fast Manga OCR (ARM FP16)",
                     subtitle = if (isFastOcrDown) "Модель установлена • Нажмите чтобы удалить" else "Модель не установлена • Нажмите чтобы скачать",
-                    onCheckedChanged = isFastOcrDownPref::set,
+                    onCheckedChanged = { checked ->
+                        isFastOcrDownPref.set(checked)
+                        if (checked) {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadModel(
+                                context,
+                                "manga_ocr_fast_fp16.tar.xz",
+                                "https://github.com/sj0404-collab/yomihon-custom/releases/download/v0.5.0-lightweight/manga_ocr_fast_fp16.tar.xz",
+                            )
+                        }
+                    },
                 )
                 if (ocrModel == OcrModel.OWOCR) {
                     EditTextPreferenceWidget(
