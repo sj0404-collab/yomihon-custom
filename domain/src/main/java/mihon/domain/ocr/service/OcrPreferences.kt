@@ -14,7 +14,7 @@ class OcrPreferences(
     private val preferenceStore: PreferenceStore,
 ) {
 
-    fun ocrModel() = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+    fun ocrModel() = preferenceStore.getEnum("pref_ocr_model", OcrModel.ZEN_FREE)
 
     fun scanRegion() = preferenceStore.getEnum("pref_scan_region", ScanRegion.FULL_PAGE)
 
