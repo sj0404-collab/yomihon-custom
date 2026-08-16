@@ -1,2 +1,0 @@
--- Add styles column to store dictionary CSS
-ALTER TABLE dictionaries ADD COLUMN styles TEXT;

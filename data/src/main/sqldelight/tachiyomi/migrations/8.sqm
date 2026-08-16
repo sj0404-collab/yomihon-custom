@@ -1,3 +1,0 @@
--- Add language columns for multi-language dictionary support
-ALTER TABLE dictionaries ADD COLUMN source_language TEXT;
-ALTER TABLE dictionaries ADD COLUMN target_language TEXT;
