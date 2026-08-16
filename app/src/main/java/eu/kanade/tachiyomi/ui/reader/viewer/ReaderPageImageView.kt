@@ -765,8 +765,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     private fun drawActiveOcrOverlay(canvas: Canvas) {
         val overlayLayout = getOrBuildActiveOverlayLayout() ?: return
-        canvas.drawRect(overlayLayout.bubbleRect, ocrOverlayBackgroundPaint)
-        canvas.drawRect(overlayLayout.bubbleRect, ocrOverlayStrokePaint)
+        // Draw OCR overlay text highlights without opaque blocking box
         ocrOverlayRenderer.drawOverlay(canvas, overlayLayout)
     }
 
