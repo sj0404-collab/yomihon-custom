@@ -7,6 +7,7 @@ import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
@@ -49,7 +50,6 @@ import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
-import tachiyomi.domain.manga.interactor.UpdateManga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.updates.interactor.GetUpdates
