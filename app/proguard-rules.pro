@@ -86,3 +86,11 @@
 # Firebase
 -keep class com.google.firebase.installations.** { *; }
 -keep interface com.google.firebase.installations.** { *; }
+
+# --- WebView JavaScript bridge (PWA mode) ---
+# R8 must keep all @JavascriptInterface methods, otherwise the PWA WebView
+# sees an empty YomihonBridge object in release builds.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class eu.kanade.tachiyomi.ui.reader.html.YomihonWebBridge { public *; }
