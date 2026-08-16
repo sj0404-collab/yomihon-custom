@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Yomihon PWA Dashboard & Manga Reader</title>
+    <title>Yomihon PWA Live — Manga Reader & OCR</title>
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#0F172A">
     <style>
         :root {
             --bg-dark: #0F172A;
@@ -22,8 +24,7 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            user-select: none;
-            -webkit-user-select: none;
+            touch-action: manipulation;
         }
 
         body {
@@ -49,7 +50,7 @@
         }
 
         .header-title {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 700;
             color: var(--text-main);
             display: flex;
@@ -59,17 +60,17 @@
 
         .header-actions {
             display: flex;
-            gap: 12px;
+            gap: 8px;
         }
 
         .icon-btn {
-            background: transparent;
-            border: none;
+            background: var(--surface-light);
+            border: 1px solid var(--border);
             color: var(--text-main);
-            font-size: 20px;
+            font-size: 18px;
             cursor: pointer;
-            padding: 6px;
-            border-radius: 50%;
+            padding: 8px 12px;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -98,41 +99,38 @@
             display: flex;
         }
 
-        /* Bottom Navigation Bar */
-        .bottom-nav {
-            height: 64px;
-            background-color: var(--surface-dark);
-            border-top: 1px solid var(--border);
+        /* Top Navigation Tabs Bar */
+        .top-nav-bar {
             display: flex;
-            justify-content: space-around;
-            align-items: center;
-            padding: 4px 0;
-            z-index: 100;
+            background-color: var(--surface-dark);
+            border-bottom: 1px solid var(--border);
+            padding: 4px;
+            gap: 4px;
+            overflow-x: auto;
         }
 
-        .nav-item {
+        .nav-btn {
+            flex: 1;
+            min-width: 60px;
+            padding: 10px 6px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 11px;
-            font-weight: 600;
             gap: 4px;
-            cursor: pointer;
-            background: transparent;
-            border: none;
-            flex: 1;
-            min-width: 0;
+            text-align: center;
         }
 
-        .nav-item.active {
-            color: var(--accent);
-        }
-
-        .nav-icon {
-            font-size: 20px;
+        .nav-btn.active {
+            background-color: var(--primary);
+            color: #FFFFFF;
         }
 
         /* Cards & Controls */
@@ -204,33 +202,6 @@
             background-color: var(--surface-light);
         }
 
-        /* Sub-tab Bar */
-        .sub-tabs {
-            display: flex;
-            background-color: var(--surface-dark);
-            border-radius: 8px;
-            padding: 4px;
-            margin-bottom: 16px;
-            gap: 4px;
-        }
-
-        .sub-btn {
-            flex: 1;
-            padding: 8px;
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            font-size: 12px;
-            font-weight: 600;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-
-        .sub-btn.active {
-            background-color: var(--primary);
-            color: #FFFFFF;
-        }
-
         /* Fullscreen Reader Overlay */
         #fullscreen-reader {
             position: fixed;
@@ -254,7 +225,7 @@
             left: 0;
             width: 100%;
             height: 56px;
-            background: rgba(15, 23, 42, 0.85);
+            background: rgba(15, 23, 42, 0.9);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -276,10 +247,10 @@
             display: block;
         }
 
-        /* Floating OCR Button */
+        /* Floating FAB */
         .floating-fab {
             position: fixed;
-            bottom: 80px;
+            bottom: 32px;
             right: 20px;
             width: 56px;
             height: 56px;
@@ -320,33 +291,65 @@
 
     <!-- Top Header Bar -->
     <div class="header-bar">
-        <div id="header-title-text" class="header-title">📚 Yomihon PWA v0.6.0</div>
+        <div id="header-title-text" class="header-title">📚 Yomihon PWA Live</div>
         <div class="header-actions">
-            <button class="icon-btn" onclick="openOcrSettings()">🧠</button>
-            <button class="icon-btn" onclick="openSafFolderPicker()">📁</button>
+            <button class="icon-btn" id="btn-ocr-settings">🧠 OCR</button>
+            <button class="icon-btn" id="btn-saf-folder">📁 Папка</button>
         </div>
+    </div>
+
+    <!-- Navigation Bar -->
+    <div class="top-nav-bar">
+        <button class="nav-btn active" data-panel="library">
+            <span style="font-size:16px;">📚</span>
+            <span>Библиотека</span>
+        </button>
+        <button class="nav-btn" data-panel="updates">
+            <span style="font-size:16px;">🔄</span>
+            <span>Обновления</span>
+        </button>
+        <button class="nav-btn" data-panel="history">
+            <span style="font-size:16px;">🕒</span>
+            <span>История</span>
+        </button>
+        <button class="nav-btn" data-panel="browse">
+            <span style="font-size:16px;">🌐</span>
+            <span>Обзор</span>
+        </button>
+        <button class="nav-btn" data-panel="ocr">
+            <span style="font-size:16px;">🧠</span>
+            <span>OCR & ИИ</span>
+        </button>
+        <button class="nav-btn" data-panel="voices">
+            <span style="font-size:16px;">🗣</span>
+            <span>Голоса</span>
+        </button>
+        <button class="nav-btn" data-panel="settings">
+            <span style="font-size:16px;">⚙️</span>
+            <span>Настройки</span>
+        </button>
     </div>
 
     <!-- App Views Container -->
     <div class="app-container">
 
+        <!-- Live Sync Status Banner -->
+        <div style="background: rgba(16, 185, 129, 0.15); border-bottom: 1px solid #10B981; padding: 8px 16px; font-size: 12px; color: var(--success); font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+            <span>🌐 Авто-обновление PWA с GitHub активна</span>
+            <span>v0.6.5</span>
+        </div>
+
         <!-- 1. Библиотека (Library Panel) -->
         <div id="panel-library" class="page-panel active">
-            <div class="sub-tabs">
-                <button class="sub-btn active" onclick="switchSubTab(this)">Читаю</button>
-                <button class="sub-btn" onclick="switchSubTab(this)">Завершено</button>
-                <button class="sub-btn" onclick="switchSubTab(this)">Закладки</button>
-            </div>
-
-            <div class="card-box" onclick="openSampleReader('Месть железногрудого пса')">
+            <div class="card-box" id="item-manga-1">
                 <div class="box-title">📖 Месть железногрудого пса</div>
-                <div class="box-desc">Том 1 Глава 1 • Нажмите чтобы открыть интерактивную HTML-читалку</div>
+                <div class="box-desc">Том 1 Глава 1 • Нажмите чтобы открыть интерактивную читалку</div>
                 <button class="btn">▶ Открыть читалку</button>
             </div>
 
-            <div class="card-box" onclick="openSampleReader('Вечно регрессирующий охотник')">
+            <div class="card-box" id="item-manga-2">
                 <div class="box-title">📖 Вечно регрессирующий охотник</div>
-                <div class="box-desc">Том 1 Глава 0 • Нажмите чтобы открыть интерактивную HTML-читалку</div>
+                <div class="box-desc">Том 1 Глава 0 • Нажмите чтобы открыть интерактивную читалку</div>
                 <button class="btn btn-sec">▶ Открыть читалку</button>
             </div>
         </div>
@@ -356,7 +359,7 @@
             <div class="card-box">
                 <div class="box-title">🔄 Свежие главы</div>
                 <div class="box-desc">Месть железногрудого пса — Глава 1 (Сегодня)</div>
-                <button class="btn btn-sec" onclick="openSampleReader('Месть железногрудого пса')">📖 Читать главу 1</button>
+                <button class="btn btn-sec" id="btn-read-update">📖 Читать главу 1</button>
             </div>
         </div>
 
@@ -370,44 +373,32 @@
 
         <!-- 4. Обзор (Browse Panel) -->
         <div id="panel-browse" class="page-panel">
-            <div class="sub-tabs">
-                <button class="sub-btn active" onclick="switchBrowseTab('sources')">Источники</button>
-                <button class="sub-btn" onclick="switchBrowseTab('extensions')">Расширения</button>
-                <button class="sub-btn" onclick="switchBrowseTab('cbz')">CBZ Ридер</button>
+            <div class="card-box">
+                <div class="box-title">📂 Локальный источник (SAF)</div>
+                <div class="box-desc">Чтение манги и комиксов из любой выбранной папки вашего телефона или SD-карты.</div>
+                <button class="btn" id="btn-browse-saf">📁 Выбрать папку локальной манги (SAF)</button>
             </div>
 
-            <div id="browse-sources" class="browse-tab-view">
-                <div class="card-box">
-                    <div class="box-title">📂 Локальный источник</div>
-                    <div class="box-desc">Чтение манги и комиксов из выбранной папки устройства.</div>
-                    <button class="btn" onclick="openSafFolderPicker()">📁 Выбрать папку локальной манги (SAF)</button>
-                </div>
+            <div class="card-box">
+                <div class="box-title">🔌 Keiyoushi (Tachiyomi / Mihon Extensions)</div>
+                <div class="box-desc">Подключён основной репозиторий расширений Keiyoushi (более 500 расширений).</div>
+                <div style="color: var(--success); font-weight: 600; font-size: 13px;">✓ Репозиторий активен</div>
             </div>
 
-            <div id="browse-extensions" class="browse-tab-view" style="display: none;">
-                <div class="card-box">
-                    <div class="box-title">🔌 Keiyoushi (Tachiyomi / Mihon Extensions)</div>
-                    <div class="box-desc">Подключён репозиторий Keiyoushi (более 500 расширений).</div>
-                    <div style="color: var(--success); font-weight: 600; font-size: 13px;">✓ Репозиторий активен</div>
-                </div>
-            </div>
-
-            <div id="browse-cbz" class="browse-tab-view" style="display: none;">
-                <div class="card-box">
-                    <div class="box-title">📦 Прямое чтение CBZ / ZIP (Режим CDisplayEx)</div>
-                    <div class="box-desc">Прямое потоковое чтение архивов без копирования в кэш.</div>
-                    <button class="btn" onclick="openCbzFilePicker()">📖 Открыть CBZ / ZIP архив</button>
-                </div>
+            <div class="card-box">
+                <div class="box-title">📦 Прямое чтение CBZ / ZIP (Режим CDisplayEx)</div>
+                <div class="box-desc">Прямое потоковое чтение архивов без копирования в кэш и без распаковки.</div>
+                <button class="btn btn-sec" id="btn-browse-cbz">📖 Открыть CBZ / ZIP архив</button>
             </div>
         </div>
 
-        <!-- 5. Словари & OCR (Dictionaries & OCR Panel) -->
-        <div id="panel-dicts" class="page-panel">
+        <!-- 5. OCR & ИИ Panel -->
+        <div id="panel-ocr" class="page-panel">
             <div class="card-box">
                 <div class="box-title">🧠 Модель распознавания OCR</div>
                 <div class="form-row">
                     <label>Выберите модель:</label>
-                    <select id="pwa-ocr-model" onchange="updateOcrModel(this.value)">
+                    <select id="select-ocr-model">
                         <option value="ZEN_FREE" selected>Zen Free (Бесплатно, без API ключа)</option>
                         <option value="GOOGLE">Google AI / Gemini Vision</option>
                         <option value="OPENROUTER">OpenRouter AI Vision</option>
@@ -416,215 +407,187 @@
                 </div>
                 <div class="form-row">
                     <label>Область сканирования страницы:</label>
-                    <select id="pwa-scan-region" onchange="updateScanRegion(this.value)">
+                    <select id="select-scan-region">
                         <option value="FULL_PAGE" selected>1. Вся страница целиком (100%)</option>
                         <option value="TOP_HALF">2. Верхняя часть страницы (50%)</option>
                         <option value="BOTTOM_HALF">3. Нижняя часть страницы (50%)</option>
                     </select>
                 </div>
             </div>
+        </div>
 
+        <!-- 6. Голоса Panel -->
+        <div id="panel-voices" class="page-panel">
             <div class="card-box">
-                <div class="box-title">🗣 Голоса и Озвучка (TTS)</div>
+                <div class="box-title">🗣 Настройка голосов и дикторов (TTS)</div>
                 <div class="form-row">
                     <label>Выбранный системный голос:</label>
-                    <select id="pwa-voice-select">
+                    <select id="select-voice">
                         <option value="ru-ru-x-dfa-network">Русский (Нейросетевой Русский)</option>
                         <option value="ru-ru-x-sfg-local">Русский (Системный локальный)</option>
                     </select>
                 </div>
-                <button class="btn btn-sec" onclick="testVoice()">🔊 Проверить выбранный голос</button>
+                <button class="btn btn-sec" id="btn-test-voice">🔊 Проверить выбранный голос</button>
             </div>
         </div>
 
-        <!-- 6. Ещё / Настройки (More / Settings Panel) -->
-        <div id="panel-more" class="page-panel">
+        <!-- 7. Настройки Panel -->
+        <div id="panel-settings" class="page-panel">
             <div class="card-box">
                 <div class="box-title">🌐 Настройки Прокси-сервера</div>
                 <div class="form-row">
                     <label>Тип прокси:</label>
-                    <select id="proxy-type">
+                    <select id="select-proxy-type">
                         <option value="HTTP">HTTP Proxy</option>
                         <option value="SOCKS5">SOCKS5 Proxy</option>
                     </select>
                 </div>
                 <div class="form-row">
                     <label>Хост / IP-адрес прокси:</label>
-                    <input type="text" id="proxy-host" placeholder="127.0.0.1 или IP">
+                    <input type="text" id="input-proxy-host" placeholder="127.0.0.1 или IP">
                 </div>
-                <div class="form-row">
-                    <label>Порт прокси:</label>
-                    <input type="number" id="proxy-port" placeholder="8080 или 1080">
-                </div>
-                <button class="btn" onclick="saveProxySettings()">Сохранить настройки прокси</button>
+                <button class="btn" id="btn-save-proxy">Сохранить настройки прокси</button>
             </div>
         </div>
 
-    </div>
-
-    <!-- Bottom Navigation Bar -->
-    <div class="bottom-nav">
-        <button class="nav-item active" onclick="switchNav('library', '📚 Библиотека', this)">
-            <span class="nav-icon">📚</span>
-            <span>Библиотека</span>
-        </button>
-        <button class="nav-item" onclick="switchNav('updates', '🔄 Обновления', this)">
-            <span class="nav-icon">🔄</span>
-            <span>Обновления</span>
-        </button>
-        <button class="nav-item" onclick="switchNav('history', '🕒 История', this)">
-            <span class="nav-icon">🕒</span>
-            <span>История</span>
-        </button>
-        <button class="nav-item" onclick="switchNav('browse', '🌐 Обзор', this)">
-            <span class="nav-icon">🌐</span>
-            <span>Обзор</span>
-        </button>
-        <button class="nav-item" onclick="switchNav('dicts', '🧠 OCR & Словари', this)">
-            <span class="nav-icon">🧠</span>
-            <span>OCR</span>
-        </button>
-        <button class="nav-item" onclick="switchNav('more', '⚙️ Настройки', this)">
-            <span class="nav-icon">⚙️</span>
-            <span>Настройки</span>
-        </button>
     </div>
 
     <!-- Fullscreen Reader -->
     <div id="fullscreen-reader">
         <div class="reader-header">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <button class="icon-btn" onclick="closeReader()">←</button>
+                <button class="icon-btn" id="btn-close-reader">←</button>
                 <div id="reader-title" style="font-weight: 700; font-size: 14px;">Месть железногрудого пса</div>
             </div>
             <div>
-                <button class="icon-btn" onclick="openOcrSettings()">🧠</button>
+                <button class="icon-btn" id="btn-reader-ocr-settings">🧠</button>
             </div>
         </div>
 
         <div class="reader-canvas">
-            <img src="https://picsum.photos/800/1200?random=10" alt="Manga Page 1">
-            <img src="https://picsum.photos/800/1200?random=11" alt="Manga Page 2">
+            <img src="https://picsum.photos/800/1200?random=20" alt="Manga Page 1">
+            <img src="https://picsum.photos/800/1200?random=21" alt="Manga Page 2">
         </div>
 
-        <button class="floating-fab" onclick="triggerPwaOcr()">🔍</button>
+        <button class="floating-fab" id="btn-reader-fab-ocr">🔍</button>
 
         <div id="translation-sheet" class="translation-sheet">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div style="font-weight: 700; font-size: 13px; color: var(--accent);">🌐 ПЕРЕВОД OCR НА РУССКИЙ</div>
-                <button class="icon-btn" onclick="closeTranslationSheet()">✕</button>
+                <button class="icon-btn" id="btn-close-translation">✕</button>
             </div>
             <div id="pwa-translation-text" style="font-size: 15px; font-weight: 600; line-height: 1.4;">
                 «Я обязательно изменю свою судьбу и верну всё, что было утеряно!»
             </div>
             <div style="display: flex; gap: 8px; margin-top: 12px;">
-                <button class="btn btn-sec" style="flex: 1;" onclick="speakPwaTranslation()">🔊 Озвучить</button>
-                <button class="btn btn-sec" style="flex: 1;" onclick="stopPwaSpeech()">⏹ Остановить</button>
+                <button class="btn btn-sec" style="flex: 1;" id="btn-speak-translation">🔊 Озвучить</button>
+                <button class="btn btn-sec" style="flex: 1;" id="btn-stop-translation">⏹ Остановить</button>
             </div>
         </div>
     </div>
 
     <script>
-        function switchNav(panelId, title, btn) {
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
-            
-            btn.classList.add('active');
-            document.getElementById('panel-' + panelId).classList.add('active');
-            document.getElementById('header-title-text').innerText = title;
-        }
+        // Explicit Event Listeners for Reliable Clicks in Android WebView
+        document.addEventListener('DOMContentLoaded', () => {
 
-        function switchBrowseTab(view) {
-            document.querySelectorAll('#panel-browse .sub-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.browse-tab-view').forEach(v => v.style.display = 'none');
-            
-            event.target.classList.add('active');
-            document.getElementById('browse-' + view).style.display = 'block';
-        }
+            // Tab Navigation
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
 
-        function switchSubTab(btn) {
-            document.querySelectorAll('#panel-library .sub-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
+                    btn.classList.add('active');
+                    const targetPanel = btn.getAttribute('data-panel');
+                    document.getElementById('panel-' + targetPanel).classList.add('active');
+                });
+            });
 
-        function openSampleReader(title) {
-            document.getElementById('reader-title').innerText = title;
-            document.getElementById('fullscreen-reader').classList.add('active');
-        }
+            // Readers
+            const openReader = (title) => {
+                document.getElementById('reader-title').innerText = title;
+                document.getElementById('fullscreen-reader').classList.add('active');
+            };
 
-        function closeReader() {
-            document.getElementById('fullscreen-reader').classList.remove('active');
-        }
+            document.getElementById('item-manga-1')?.addEventListener('click', () => openReader('Месть железногрудого пса'));
+            document.getElementById('item-manga-2')?.addEventListener('click', () => openReader('Вечно регрессирующий охотник'));
+            document.getElementById('btn-read-update')?.addEventListener('click', () => openReader('Месть железногрудого пса'));
 
-        function triggerPwaOcr() {
-            document.getElementById('translation-sheet').classList.add('active');
-            if (window.YomihonBridge && window.YomihonBridge.scanCurrentPage) {
-                window.YomihonBridge.scanCurrentPage();
+            document.getElementById('btn-close-reader')?.addEventListener('click', () => {
+                document.getElementById('fullscreen-reader').classList.remove('active');
+            });
+
+            // OCR & Translation
+            document.getElementById('btn-reader-fab-ocr')?.addEventListener('click', () => {
+                document.getElementById('translation-sheet').classList.add('active');
+                if (window.YomihonBridge && window.YomihonBridge.scanCurrentPage) {
+                    window.YomihonBridge.scanCurrentPage();
+                }
+            });
+
+            document.getElementById('btn-close-translation')?.addEventListener('click', () => {
+                document.getElementById('translation-sheet').classList.remove('active');
+            });
+
+            // SAF Folder & CBZ Pickers
+            const triggerSaf = () => {
+                if (window.YomihonBridge && window.YomihonBridge.openSafFolderPicker) {
+                    window.YomihonBridge.openSafFolderPicker();
+                } else {
+                    alert("Открываем системный выбор папки SAF...");
+                }
+            };
+
+            const triggerCbz = () => {
+                if (window.YomihonBridge && window.YomihonBridge.openCbzFilePicker) {
+                    window.YomihonBridge.openCbzFilePicker();
+                } else {
+                    alert("Открываем выбор файла CBZ / ZIP...");
+                }
+            };
+
+            document.getElementById('btn-saf-folder')?.addEventListener('click', triggerSaf);
+            document.getElementById('btn-browse-saf')?.addEventListener('click', triggerSaf);
+            document.getElementById('btn-browse-cbz')?.addEventListener('click', triggerCbz);
+
+            // Settings
+            document.getElementById('btn-ocr-settings')?.addEventListener('click', () => {
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
+                document.querySelector('.nav-btn[data-panel="ocr"]')?.classList.add('active');
+                document.getElementById('panel-ocr')?.classList.add('active');
+            });
+
+            document.getElementById('btn-reader-ocr-settings')?.addEventListener('click', () => {
+                document.getElementById('fullscreen-reader').classList.remove('active');
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
+                document.querySelector('.nav-btn[data-panel="ocr"]')?.classList.add('active');
+                document.getElementById('panel-ocr')?.classList.add('active');
+            });
+
+            // Speech
+            document.getElementById('btn-speak-translation')?.addEventListener('click', () => {
+                const text = document.getElementById('pwa-translation-text').innerText;
+                if (window.YomihonBridge && window.YomihonBridge.speakText) {
+                    window.YomihonBridge.speakText(text, "ru-ru-x-dfa-network", 1.0);
+                }
+            });
+
+            document.getElementById('btn-stop-translation')?.addEventListener('click', () => {
+                if (window.YomihonBridge && window.YomihonBridge.stopSpeech) {
+                    window.YomihonBridge.stopSpeech();
+                }
+            });
+
+            document.getElementById('btn-save-proxy')?.addEventListener('click', () => {
+                alert("Настройки прокси успешно сохранены!");
+            });
+
+            // Register PWA Service Worker
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW Error:', err));
             }
-        }
-
-        function closeTranslationSheet() {
-            document.getElementById('translation-sheet').classList.remove('active');
-        }
-
-        function openOcrSettings() {
-            switchNav('dicts', '🧠 OCR & Словари', document.querySelectorAll('.nav-item')[4]);
-            closeReader();
-        }
-
-        function openSafFolderPicker() {
-            if (window.YomihonBridge && window.YomihonBridge.openSafFolderPicker) {
-                window.YomihonBridge.openSafFolderPicker();
-            } else {
-                alert("Открываем системный выбор папки SAF...");
-            }
-        }
-
-        function openCbzFilePicker() {
-            if (window.YomihonBridge && window.YomihonBridge.openCbzFilePicker) {
-                window.YomihonBridge.openCbzFilePicker();
-            } else {
-                alert("Открываем выбор файла CBZ / ZIP...");
-            }
-        }
-
-        function updateOcrModel(model) {
-            if (window.YomihonBridge && window.YomihonBridge.setOcrModel) {
-                window.YomihonBridge.setOcrModel(model);
-            }
-        }
-
-        function updateScanRegion(region) {
-            if (window.YomihonBridge && window.YomihonBridge.setScanRegion) {
-                window.YomihonBridge.setScanRegion(region);
-            }
-        }
-
-        function testVoice() {
-            const voice = document.getElementById('pwa-voice-select').value;
-            if (window.YomihonBridge && window.YomihonBridge.speakText) {
-                window.YomihonBridge.speakText("Тестовое воспроизведение голоса в Yomihon PWA", voice, 1.0);
-            } else {
-                alert("Тестирование голоса...");
-            }
-        }
-
-        function speakPwaTranslation() {
-            const text = document.getElementById('pwa-translation-text').innerText;
-            if (window.YomihonBridge && window.YomihonBridge.speakText) {
-                window.YomihonBridge.speakText(text, "ru-ru-x-dfa-network", 1.0);
-            }
-        }
-
-        function stopPwaSpeech() {
-            if (window.YomihonBridge && window.YomihonBridge.stopSpeech) {
-                window.YomihonBridge.stopSpeech();
-            }
-        }
-
-        function saveProxySettings() {
-            alert("Настройки прокси успешно сохранены!");
-        }
+        });
     </script>
 </body>
 </html>
