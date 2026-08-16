@@ -113,7 +113,7 @@ fun ReaderFloatingControls(
             // Autoscroll Control Widget Bar
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
             ) {
                 Row(
