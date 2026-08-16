@@ -67,6 +67,7 @@ object OcrQueueScreen : Screen() {
 
     @Composable
     override fun Content() {
+        val context = androidx.compose.ui.platform.LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { OcrQueueScreenModel() }
         val state by screenModel.state.collectAsState()
