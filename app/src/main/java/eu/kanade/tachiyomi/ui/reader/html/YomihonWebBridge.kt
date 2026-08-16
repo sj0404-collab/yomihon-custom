@@ -8,6 +8,7 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.cache.CoverCache
+import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
 import eu.kanade.tachiyomi.data.ocr.ResolvedOcrPages
@@ -21,7 +22,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.model.FilterList
+import mihon.domain.manga.model.toDomainManga
 import mihon.domain.ocr.interactor.ScanPageOcr
+import mihon.domain.source.interactor.UpdateMangaFromRemote
 import mihon.domain.ocr.model.OcrImage
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
@@ -39,7 +44,14 @@ import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.history.interactor.UpsertHistory
 import tachiyomi.domain.manga.interactor.GetLibraryManga
+import tachiyomi.domain.category.interactor.CreateCategoryWithName
+import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.manga.interactor.GetManga
+import tachiyomi.domain.manga.interactor.NetworkToLocalManga
+import tachiyomi.domain.manga.interactor.UpdateManga
+import tachiyomi.domain.manga.model.MangaUpdate
+import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.updates.interactor.GetUpdates
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -76,6 +88,15 @@ class YomihonWebBridge(
 
     private var readerPages: ResolvedOcrPages? = null
     private var readerChapterId: Long = -1L
+
+    private val sourceManager: SourceManager by lazy { Injekt.get() }
+    private val networkToLocalManga: NetworkToLocalManga by lazy { Injekt.get() }
+    private val updateManga: UpdateManga by lazy { Injekt.get() }
+    private val updateMangaFromRemote: UpdateMangaFromRemote by lazy { Injekt.get() }
+    private val downloadManager: DownloadManager by lazy { Injekt.get() }
+    private val getCategories: GetCategories by lazy { Injekt.get() }
+    private val setMangaCategories: SetMangaCategories by lazy { Injekt.get() }
+    private val createCategoryWithName: CreateCategoryWithName by lazy { Injekt.get() }
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -363,6 +384,202 @@ class YomihonWebBridge(
 
     // endregion
 
+
+
+    // region Browse: каталоги источников, поиск, добавление в библиотеку — всё в HTML
+
+    /** Список включённых каталожных источников. */
+    @JavascriptInterface
+    fun getSources(): String {
+        val array = JSONArray()
+        runCatching {
+            sourceManager.getOnlineSources()
+                .filterIsInstance<CatalogueSource>()
+                .sortedBy { it.name.lowercase() }
+                .forEach { src ->
+                    array.put(
+                        JSONObject().apply {
+                            put("id", src.id)
+                            put("name", src.name)
+                            put("lang", src.lang)
+                            put("supportsLatest", src.supportsLatest)
+                        },
+                    )
+                }
+        }
+        return array.toString()
+    }
+
+    /**
+     * Каталог источника: mode = popular | latest | search.
+     * Манги сразу сохраняются в БД (insertNetworkManga) — фронт получает стабильные id.
+     */
+    @JavascriptInterface
+    fun browseSource(sourceId: Long, mode: String, query: String, page: Int): String {
+        return runCatching {
+            runBlocking {
+                val source = sourceManager.get(sourceId) as? CatalogueSource
+                    ?: return@runBlocking """{"error":"источник не найден"}"""
+                val mangasPage = when (mode) {
+                    "latest" -> source.getLatestUpdates(page)
+                    "search" -> source.getSearchManga(page, query, FilterList())
+                    else -> source.getPopularManga(page)
+                }
+                val local = networkToLocalManga(mangasPage.mangas.map { it.toDomainManga(sourceId) })
+                JSONObject().apply {
+                    put("hasNextPage", mangasPage.hasNextPage)
+                    put(
+                        "items",
+                        JSONArray().apply {
+                            local.forEach { m ->
+                                put(
+                                    JSONObject().apply {
+                                        put("mangaId", m.id)
+                                        put("title", m.title)
+                                        put("thumbnailUrl", m.thumbnailUrl ?: "")
+                                        put("favorite", m.favorite)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }.toString()
+            }
+        }.getOrElse { e -> """{"error":${JSONObject.quote(e.message ?: "ошибка сети")}}""" }
+    }
+
+    /** Добавить/убрать из библиотеки. Возвращает новое состояние favorite. */
+    @JavascriptInterface
+    fun toggleFavorite(mangaId: Long): Boolean {
+        return runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking false
+                val now = !manga.favorite
+                updateManga.await(
+                    MangaUpdate(
+                        id = mangaId,
+                        favorite = now,
+                        dateAdded = if (now) System.currentTimeMillis() else null,
+                    ),
+                )
+                now
+            }
+        }.getOrDefault(false)
+    }
+
+    /** Обновить детали и главы манги из источника (как pull-to-refresh в нативе). */
+    @JavascriptInterface
+    fun refreshManga(mangaId: Long): String {
+        return runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking "not_found"
+                updateMangaFromRemote(
+                    manga = manga,
+                    fetchDetails = true,
+                    fetchChapters = true,
+                    manualFetch = true,
+                ).fold(
+                    onSuccess = { "ok:" + it.newChapters.size },
+                    onFailure = { "error:" + (it.message ?: "сбой") },
+                )
+            }
+        }.getOrDefault("error:internal")
+    }
+
+    // endregion
+
+    // region Downloads & categories — управление из HTML
+
+    @JavascriptInterface
+    fun downloadChapters(mangaId: Long, chapterIdsCsv: String): Boolean {
+        return runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking false
+                val ids = chapterIdsCsv.split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
+                val chapters = getChaptersByMangaId.await(mangaId).filter { it.id in ids }
+                if (chapters.isEmpty()) return@runBlocking false
+                downloadManager.downloadChapters(manga, chapters, autoStart = true)
+                true
+            }
+        }.getOrDefault(false)
+    }
+
+    @JavascriptInterface
+    fun getDownloadedChapterIds(mangaId: Long): String {
+        val array = JSONArray()
+        runCatching {
+            runBlocking {
+                val manga = getManga.await(mangaId) ?: return@runBlocking
+                getChaptersByMangaId.await(mangaId).forEach { c ->
+                    if (downloadManager.isChapterDownloaded(c.name, c.scanlator, c.url, manga.title, manga.source)) {
+                        array.put(c.id)
+                    }
+                }
+            }
+        }
+        return array.toString()
+    }
+
+    @JavascriptInterface
+    fun getCategoriesList(): String {
+        val array = JSONArray()
+        runCatching {
+            runBlocking {
+                getCategories.await().forEach { c ->
+                    array.put(JSONObject().apply { put("id", c.id); put("name", c.name) })
+                }
+            }
+        }
+        return array.toString()
+    }
+
+    @JavascriptInterface
+    fun getMangaCategories(mangaId: Long): String {
+        val array = JSONArray()
+        runCatching {
+            runBlocking { getCategories.await(mangaId).forEach { array.put(it.id) } }
+        }
+        return array.toString()
+    }
+
+    @JavascriptInterface
+    fun setMangaCategoriesCsv(mangaId: Long, categoryIdsCsv: String) {
+        runCatching {
+            runBlocking {
+                val ids = categoryIdsCsv.split(',').mapNotNull { it.trim().toLongOrNull() }
+                setMangaCategories.await(mangaId, ids)
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun createCategory(name: String): Boolean {
+        return runCatching { runBlocking { createCategoryWithName.await(name) }; true }.getOrDefault(false)
+    }
+
+    /** Обложка по прямому URL через нативный HTTP-клиент источника недоступна из WebView (CORS/referer) — грузим здесь. */
+    @JavascriptInterface
+    fun fetchCoverUrl(sourceId: Long, url: String): String {
+        return runCatching {
+            runBlocking {
+                if (url.isBlank()) return@runBlocking ""
+                val source = sourceManager.get(sourceId) as? eu.kanade.tachiyomi.source.online.HttpSource
+                val client = source?.client ?: Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
+                val reqBuilder = okhttp3.Request.Builder().url(url)
+                source?.headers?.let { reqBuilder.headers(it) }
+                val response = client.newCall(reqBuilder.build()).execute()
+                response.use {
+                    if (!it.isSuccessful) return@runBlocking ""
+                    val bytes = it.body.bytes()
+                    if (bytes.size > 3_000_000) return@runBlocking ""
+                    val mime = it.header("Content-Type") ?: "image/jpeg"
+                    "data:" + mime + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+                }
+            }
+        }.getOrDefault("")
+    }
+
+    // endregion
 
     // region In-HTML reader: manga details, chapter pages, progress, per-page OCR
 

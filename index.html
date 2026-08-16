@@ -93,6 +93,12 @@ input[type=range]{width:100%}
 .rnav{display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:rgba(15,23,42,.94);border-top:1px solid var(--bg3)}
 .rslider{flex:1}
 .ibtn.ocr{background:var(--accent);color:#fff;border:none}
+
+.cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
+.ccell{position:relative;cursor:pointer}
+.ccover{width:100%;aspect-ratio:2/3;border-radius:10px;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:rgba(255,255,255,.92)}
+.ctitle{font-size:11px;font-weight:600;margin-top:5px;line-height:1.3;max-height:29px;overflow:hidden}
+.cfav{position:absolute;top:6px;left:6px;background:var(--accent);color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px}
 </style>
 </head>
 <body>
@@ -464,6 +470,28 @@ function Toast() {
 }
 function needApp() { toast('Доступно только внутри приложения Yomihon'); }
 
+
+/* ---------- Кэш обложек (data URI через нативный HTTP) ---------- */
+var coverCache = {};
+function CoverImg(props) {
+  var st = useState(coverCache[props.mangaId] || null), src = st[0], setSrc = st[1];
+  useEffect(function () {
+    if (coverCache[props.mangaId] !== undefined) { setSrc(coverCache[props.mangaId]); return; }
+    coverCache[props.mangaId] = null;
+    var t = setTimeout(function () {
+      var c = bridgeCall('getCover', props.mangaId) || '';
+      if (!c && props.thumbnailUrl && props.sourceId) {
+        c = bridgeCall('fetchCoverUrl', props.sourceId, props.thumbnailUrl) || '';
+      }
+      coverCache[props.mangaId] = c;
+      setSrc(c);
+    }, props.delay || 30);
+    return function () { clearTimeout(t); };
+  }, [props.mangaId]);
+  if (src) return html`<img class=${props.cls || 'thumb'} src=${src} style=${{ objectFit: 'cover' }} />`;
+  return html`<div class=${props.cls || 'thumb'} style=${{ background: gradFor(props.title) }}>${firstLetter(props.title)}</div>`;
+}
+
 /* ---------- Shared components ---------- */
 function Thumb(props) {
   return html`<div class="thumb" style=${{ background: gradFor(props.title) }}>${firstLetter(props.title)}</div>`;
@@ -522,7 +550,7 @@ function LibraryTab() {
     ${shown.map(function (m) {
       var pct = m.totalChapters > 0 ? Math.round(m.readCount * 100 / m.totalChapters) : 0;
       return html`<div class="item" key=${m.mangaId} onClick=${function () { open(m); }}>
-        <${Thumb} title=${m.title} />
+        <${CoverImg} mangaId=${m.mangaId} title=${m.title} />
         <div class="body">
           <div class="t">${m.title}</div>
           <div class="s">Прочитано ${m.readCount} из ${m.totalChapters}${m.lastRead ? ' • ' + timeAgo(m.lastRead) : ''}</div>
@@ -573,30 +601,105 @@ function HistoryTab() {
   })}</div>`;
 }
 
-/* ---------- Обзор ---------- */
+/* ---------- Обзор: каталоги источников в HTML ---------- */
 function BrowseTab() {
+  var sv = useState(null), view = sv[0], setView = sv[1]; // null | {source}
+  var ss = useState([]), sources = ss[0], setSources = ss[1];
+  useEffect(function () { setSources(bridgeJson('getSources', [])); }, []);
+
+  if (view) {
+    return html`<${SourceCatalog} source=${view} onBack=${function () { setView(null); }} />`;
+  }
   return html`<div>
     <${Card} title="📂 Локальный источник (SAF)"
-      desc="Чтение манги и комиксов из любой папки телефона или SD-карты. Выбранная папка становится хранилищем локальной библиотеки.">
-      <button class="btn block" onClick=${function () { hasBridge ? bridgeCall('openSafFolderPicker') : needApp(); }}>
-        📁 Выбрать папку локальной манги</button>
-    <//>
-    <${Card} title="📦 Прямое чтение CBZ / ZIP / EPUB"
-      desc="Открытие архива напрямую в нативной читалке — без распаковки и копирования в кэш.">
-      <button class="btn sec block" onClick=${function () { hasBridge ? bridgeCall('openCbzFilePicker') : needApp(); }}>
-        📖 Открыть архив</button>
-    <//>
-    <${Card} title="🔌 Источники и расширения"
-      desc="Каталоги, расширения и глобальный поиск открываются в нативной части приложения. Кнопка Назад вернёт в PWA.">
+      desc="Чтение манги из любой папки телефона. Выбранная папка становится хранилищем локальной библиотеки.">
       <div class="grid2">
-        <button class="btn sec" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'browse') : needApp(); }}>🌐 Источники</button>
-        <button class="btn sec" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'extensions') : needApp(); }}>🧩 Расширения</button>
+        <button class="btn" onClick=${function () { hasBridge ? bridgeCall('openSafFolderPicker') : needApp(); }}>📁 Папка</button>
+        <button class="btn sec" onClick=${function () { hasBridge ? bridgeCall('openCbzFilePicker') : needApp(); }}>📦 CBZ/ZIP</button>
       </div>
     <//>
-    <${Card} title="🗂 Нативная библиотека"
-      desc="Полная нативная библиотека с категориями, фильтрами и локальной мангой из выбранной папки.">
-      <button class="btn block" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'library') : needApp(); }}>📚 Открыть нативную библиотеку</button>
+    <div class="secH">Каталоги источников</div>
+    ${sources.length ? sources.map(function (src) {
+      return html`<div class="item" key=${src.id} onClick=${function () { setView(src); }}>
+        <div class="thumb" style=${{ background: gradFor(src.name), height: '44px', width: '44px', fontSize: '16px', borderRadius: '10px' }}>${firstLetter(src.name)}</div>
+        <div class="body"><div class="t">${src.name}</div>
+          <div class="s">${(src.lang || '').toUpperCase()}${src.supportsLatest ? ' • есть «Последнее»' : ''}</div></div>
+        <span class="badge muted">›</span>
+      </div>`;
+    }) : html`<${Empty} icon="🔌">Нет включённых источников.<br/>Установите расширения в нативном разделе (кнопка ниже) — после установки каталоги появятся здесь.<//>`}
+    <${Card} title="🧩 Расширения"
+      desc="Установка и обновление расширений-источников выполняется в нативном менеджере (системная установка пакетов).">
+      <button class="btn sec block" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'extensions') : needApp(); }}>Открыть менеджер расширений</button>
     <//>
+  </div>`;
+}
+
+/* ---------- Каталог конкретного источника ---------- */
+function SourceCatalog(props) {
+  var src = props.source;
+  var md = useState('popular'), mode = md[0], setMode = md[1];
+  var qq = useState(''), q = qq[0], setQ = qq[1];
+  var qd = useState(''), debQ = qd[0], setDebQ = qd[1];
+  var it = useState([]), items = it[0], setItems = it[1];
+  var pg = useState(1), page = pg[0], setPage = pg[1];
+  var hn = useState(false), hasNext = hn[0], setHasNext = hn[1];
+  var ld = useState(false), loading = ld[0], setLoading = ld[1];
+  var er = useState(null), error = er[0], setError = er[1];
+
+  useEffect(function () {
+    var t = setTimeout(function () { setDebQ(q); }, 450);
+    return function () { clearTimeout(t); };
+  }, [q]);
+
+  var effMode = debQ ? 'search' : mode;
+
+  var load = useCallback(function (pageNum, append) {
+    setLoading(true); setError(null);
+    setTimeout(function () {
+      var r = bridgeCall('browseSource', src.id, effMode, debQ, pageNum);
+      var d = null;
+      try { d = JSON.parse(r); } catch (e) {}
+      setLoading(false);
+      if (!d || d.error) { setError((d && d.error) || 'Не удалось загрузить'); return; }
+      setHasNext(!!d.hasNextPage);
+      setPage(pageNum);
+      setItems(function (prev) { return append ? prev.concat(d.items || []) : (d.items || []); });
+    }, 30);
+  }, [src.id, effMode, debQ]);
+
+  useEffect(function () { setItems([]); load(1, false); }, [effMode, debQ]);
+
+  return html`<div>
+    <div class="mhead" style=${{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <button class="ibtn" onClick=${props.onBack}>←</button>
+      <div style=${{ fontWeight: 800, flex: 1 }}>${src.name}</div>
+    </div>
+    <div class="toolbar">
+      <input class="search" placeholder="🔍 Поиск в источнике…" value=${q}
+        onInput=${function (e) { setQ(e.target.value); }} />
+      ${!debQ ? html`<select class="sortsel" value=${mode} onChange=${function (e) { setMode(e.target.value); }}>
+        <option value="popular">Популярное</option>
+        ${src.supportsLatest ? html`<option value="latest">Последнее</option>` : null}
+      </select>` : null}
+    </div>
+    ${error ? html`<${Card} title="⚠️ Ошибка" desc=${error}>
+      <button class="btn sec block" onClick=${function () { load(1, false); }}>Повторить</button><//>` : null}
+    <div class="cgrid">
+      ${items.map(function (m, i) {
+        return html`<div class="ccell" key=${m.mangaId + '_' + i} onClick=${function () {
+          if (window.__openManga) window.__openManga(m.mangaId);
+        }}>
+          <${CoverImg} mangaId=${m.mangaId} title=${m.title} cls="ccover"
+            thumbnailUrl=${m.thumbnailUrl} sourceId=${src.id} delay=${60 + (i % 12) * 90} />
+          ${m.favorite ? html`<span class="cfav">В библиотеке</span>` : null}
+          <div class="ctitle">${m.title}</div>
+        </div>`;
+      })}
+    </div>
+    ${loading ? html`<div class="empty">⏳ Загрузка…</div>` : null}
+    ${!loading && hasNext ? html`<button class="btn sec block" style=${{ margin: '8px 0 20px' }}
+      onClick=${function () { load(page + 1, true); }}>Показать ещё</button>` : null}
+    ${!loading && !items.length && !error ? html`<${Empty} icon="🔍">Ничего не найдено<//>` : null}
   </div>`;
 }
 
@@ -789,18 +892,57 @@ function OcrSheet(props) {
 }
 
 
+
+/* ---------- Категории ---------- */
+function CategoryPicker(props) {
+  var ca = useState([]), cats = ca[0], setCats = ca[1];
+  var se = useState([]), sel = se[0], setSel = se[1];
+  var nn = useState(''), newName = nn[0], setNewName = nn[1];
+  var reload = useCallback(function () {
+    setCats(bridgeJson('getCategoriesList', []));
+    setSel(bridgeJson('getMangaCategories', [], props.mangaId));
+  }, [props.mangaId]);
+  useEffect(function () {
+    setCats(bridgeJson('getCategoriesList', []));
+    var r = bridgeCall('getMangaCategories', props.mangaId);
+    try { setSel(JSON.parse(r) || []); } catch (e) { setSel([]); }
+  }, [props.mangaId]);
+  var toggle = function (id) {
+    var next = sel.indexOf(id) >= 0 ? sel.filter(function (x) { return x !== id; }) : sel.concat([id]);
+    setSel(next);
+    bridgeCall('setMangaCategoriesCsv', props.mangaId, next.join(','));
+  };
+  return html`<${Card} title="🗂 Категории">
+    ${cats.filter(function (c) { return c.id !== 0; }).map(function (c) {
+      return html`<${SwitchRow} key=${c.id} label=${c.name}
+        checked=${sel.indexOf(c.id) >= 0}
+        onChange=${function () { toggle(c.id); }} />`;
+    })}
+    <div class="toolbar" style=${{ marginTop: '8px' }}>
+      <input class="search" placeholder="Новая категория…" value=${newName}
+        onInput=${function (e) { setNewName(e.target.value); }} />
+      <button class="btn" onClick=${function () {
+        if (!newName.trim()) return;
+        bridgeCall('createCategory', newName.trim());
+        setNewName('');
+        setTimeout(function () { setCats(bridgeJson('getCategoriesList', [])); }, 300);
+      }}>＋</button>
+    </div>
+  <//>`;
+}
+
 /* ---------- Карточка манги (главы, прогресс, закладки) ---------- */
 function MangaScreen(props) {
   var st = useState(null), d = st[0], setD = st[1];
-  var cv = useState(''), cover = cv[0], setCover = cv[1];
+  var sc = useState(false), showCats = sc[0], setShowCats = sc[1];
+
   var reload = useCallback(function () {
     var r = bridgeCall('getMangaDetails', props.mangaId);
     try { setD(JSON.parse(r)); } catch (e) { setD(null); }
   }, [props.mangaId]);
   useEffect(function () {
     reload();
-    var c = bridgeCall('getCover', props.mangaId);
-    if (c) setCover(c);
+
   }, [props.mangaId]);
   if (!d || !d.id) return html`<${Empty} icon="📖">Загрузка…<//>`;
   var chapters = d.chapters || [];
@@ -812,8 +954,7 @@ function MangaScreen(props) {
       <button class="ibtn" onClick=${props.onBack}>← Назад</button>
     </div>
     <div class="mtop">
-      ${cover ? html`<img class="mcover" src=${cover} />`
-              : html`<div class="mcover ph" style=${{ background: gradFor(d.title) }}>${firstLetter(d.title)}</div>`}
+      <${CoverImg} mangaId=${props.mangaId} title=${d.title} cls="mcover" delay=${10} />
       <div class="minfo">
         <div class="mtitle">${d.title}</div>
         ${d.author ? html`<div class="mauthor">✍ ${d.author}</div>` : null}
@@ -827,6 +968,31 @@ function MangaScreen(props) {
     ${firstUnread ? html`<button class="btn block" style=${{ margin: '10px 0' }}
       onClick=${function () { props.onRead(firstUnread, chapters); }}>
       ▶ ${firstUnread.lastPageRead > 0 ? 'Продолжить: ' : 'Читать: '}${firstUnread.name}</button>` : null}
+    <div class="grid2" style=${{ marginBottom: '10px' }}>
+      <button class="btn ${d.favorite ? 'sec' : ''}" onClick=${function () {
+        var now = bridgeCall('toggleFavorite', d.id);
+        toast(now ? 'Добавлено в библиотеку ✓' : 'Убрано из библиотеки');
+        reload();
+      }}>${d.favorite ? '❤ В библиотеке' : '🤍 В библиотеку'}</button>
+      <button class="btn sec" onClick=${function () {
+        toast('Обновляю главы…');
+        setTimeout(function () {
+          var r = bridgeCall('refreshManga', d.id) || '';
+          if (r.indexOf('ok:') === 0) { toast('Новых глав: ' + r.substring(3)); reload(); }
+          else toast('Не удалось обновить');
+        }, 30);
+      }}>⟳ Обновить</button>
+    </div>
+    <div class="grid2" style=${{ marginBottom: '4px' }}>
+      <button class="btn sec" onClick=${function () {
+        var unreadIds = chapters.filter(function (c) { return !c.read; }).map(function (c) { return c.id; });
+        if (!unreadIds.length) return toast('Все главы прочитаны');
+        bridgeCall('downloadChapters', d.id, unreadIds.join(','));
+        toast('В очередь загрузки: ' + unreadIds.length + ' глав');
+      }}>⬇ Скачать непрочит.</button>
+      <button class="btn sec" onClick=${function () { setShowCats(!showCats); }}>🗂 Категории</button>
+    </div>
+    ${showCats ? html`<${CategoryPicker} mangaId=${d.id} />` : null}
     <div class="secH">Главы</div>
     ${chapters.map(function (c) {
       return html`<div class="item chap ${c.read ? 'read' : ''}" key=${c.id}>
