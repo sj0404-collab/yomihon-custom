@@ -29,6 +29,7 @@ jobs:
     if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build
     runs-on: 'ubuntu-24.04'
+    timeout-minutes: 20
     needs: [get_tag]
 
     steps:
@@ -78,6 +79,7 @@ jobs:
     if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build (FOSS)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     needs: [get_tag]
 
     steps:
