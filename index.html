@@ -45,6 +45,13 @@ input[type=range]{width:100%}
 .badge.muted{background:var(--bg3);color:var(--muted)}
 .empty{text-align:center;color:var(--muted);padding:44px 20px;font-size:14px;line-height:1.6}
 .loadrow{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:13px;font-weight:600;padding:18px 12px}
+.sidepanel{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:1300;display:flex;align-items:center;gap:0}
+.sidepanel .grab{width:26px;height:64px;background:var(--accent);border-radius:12px 0 0 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;box-shadow:-2px 0 8px rgba(0,0,0,.4)}
+.sidepanel .body{width:0;overflow:hidden;transition:width .22s ease;background:var(--bg2);border:1px solid var(--bg3);border-right:none;border-radius:14px 0 0 14px;max-height:70vh}
+.sidepanel.open .body{width:min(78vw,300px);overflow-y:auto}
+.sidepanel .inner{padding:12px;display:flex;flex-direction:column;gap:10px}
+.vslider{display:flex;align-items:center;gap:8px}
+.vslider input[type=range]{flex:1}
 .mlwrap{position:fixed;top:0;left:0;right:0;bottom:calc(56px + var(--sab) + var(--fixb,0px));display:none;z-index:50;background:var(--bg)}
 .mlwrap.on{display:block}
 .mlframe{width:100%;height:100%;border:none;display:block;background:var(--bg)}
@@ -1000,20 +1007,31 @@ function VoicesTab() {
   var sv = useState([]), voices = sv[0], setVoices = sv[1];
   var sc = useState(''), cur = sc[0], setCur = sc[1];
   var sr = useState(1.0), rate = sr[0], setRate = sr[1];
+  var tf = useState('all'), typeF = tf[0], setTypeF = tf[1]; // all|local|network
   useEffect(function () {
-    var v = bridgeJson('getSystemVoices', [
-      { name: 'ru-ru-x-dfa-network', label: 'Русский (Нейросетевой)' },
-      { name: 'ru-ru-x-sfg-local', label: 'Русский (Локальный)' }
-    ]);
+    var v = bridgeJson('getSystemVoices', []);
     setVoices(v);
     var s = bridgeJson('getOcrSettings', null);
     if (s) { if (s.voiceName) setCur(s.voiceName); if (s.speechRate) setRate(s.speechRate); }
     else if (v.length) setCur(v[0].name);
   }, []);
-  return html`<${Card} title="🗣 Озвучка текста (TTS)">
-    <div class="frow"><label>Системный голос</label>
+  var shown = voices.filter(function (v) {
+    if (typeF === 'local' && v.network) return false;
+    if (typeF === 'network' && !v.network) return false;
+    return true;
+  });
+  return html`<div>
+  <${Card} title="🗣 Озвучка текста (TTS)"
+    desc="Показаны все голоса установленных системных движков. Нейросетевые (Dmitry Neural и др.) появляются после установки соответствующего движка.">
+    <div class="frow"><label>Тип голосов</label>
+      <select value=${typeF} onChange=${function (e) { setTypeF(e.target.value); }}>
+        <option value="all">Все (${voices.length})</option>
+        <option value="local">Локальные</option>
+        <option value="network">Сетевые (нейро)</option>
+      </select></div>
+    <div class="frow"><label>Голос (${shown.length})</label>
       <select value=${cur} onChange=${function (e) { setCur(e.target.value); }}>
-        ${voices.map(function (v) { return html`<option key=${v.name} value=${v.name}>${v.label}</option>`; })}
+        ${shown.map(function (v) { return html`<option key=${v.name} value=${v.name}>${v.label}</option>`; })}
       </select></div>
     <div class="frow"><label>Скорость речи: ${Number(rate).toFixed(1)}×</label>
       <input type="range" min="0.5" max="2" step="0.1" value=${rate}
@@ -1030,7 +1048,11 @@ function VoicesTab() {
         hasBridge ? (bridgeCall('setVoice', cur, rate), toast('Голос сохранён ✓')) : needApp();
       }}>💾 Сохранить</button>
     </div>
-  <//>`;
+  <//>
+  <${Card} title="➕ Больше голосов"
+    desc="Нейросетевые голоса (Dmitry, Svetlana Neural и др.) ставятся как системные TTS-движки: RHVoice, Sherpa-ONNX TTS, Edge-TTS для Android. После установки они появятся в списке выше.">
+  <//>
+  </div>`;
 }
 
 /* ---------- Настройки ---------- */
@@ -1211,6 +1233,8 @@ function Reader(props) {
   var ld = useState(true), loading = ld[0], setLoading = ld[1];
   var ocr = useState(null), ocrText = ocr[0], setOcrText = ocr[1];
   var ob = useState(false), ocrBusy = ob[0], setOcrBusy = ob[1];
+  var so = useState(false), sideOpen = so[0], setSideOpen = so[1];
+  var br = useState(100), brightness = br[0], setBrightness = br[1];
   var containerRef = useRef(null);
   var pagesRef = useRef({});
   var totalRef = useRef(0);
@@ -1291,7 +1315,7 @@ function Reader(props) {
       ${!loading && !total ? html`<div class="rload">Не удалось получить страницы.<br/>Проверьте интернет или скачайте главу.</div>` : null}
       ${!loading && total && img === undefined ? html`<div class="rload">⏳ Загрузка страницы…</div>` : null}
       ${!loading && total && img === '' ? html`<div class="rload">⏳ Загрузка страницы…</div>` : null}
-      ${img ? html`<img class="rimg" src=${img} onClick=${function (e) {
+      ${img ? html`<img class="rimg" style=${{ filter: 'brightness(' + brightness / 100 + ')' }} src=${img} onClick=${function (e) {
         var x = e.clientX, w = window.innerWidth;
         if (x < w * 0.35) goto(curPage - 1);
         else if (x > w * 0.65) goto(curPage + 1);
@@ -1302,7 +1326,24 @@ function Reader(props) {
       <input class="rslider" type="range" min="0" max=${Math.max(0, total - 1)} value=${curPage}
         onInput=${function (e) { goto(parseInt(e.target.value, 10)); }} />
       <button class="ibtn" onClick=${function () { goto(curPage + 1); }}>След. ›</button>
-      <button class="ibtn ocr" onClick=${doOcr}>🧠</button>
+    </div>
+    <div class="sidepanel ${sideOpen ? 'open' : ''}">
+      <div class="grab" onClick=${function () { setSideOpen(!sideOpen); }}>${sideOpen ? '›' : '‹'}</div>
+      <div class="body"><div class="inner">
+        <button class="btn block" onClick=${doOcr}>🧠 OCR страницы</button>
+        <div class="vslider"><span>💡</span>
+          <input type="range" min="20" max="100" value=${brightness}
+            onInput=${function (e) { setBrightness(parseInt(e.target.value, 10)); }} />
+          <span>${brightness}%</span></div>
+        <div class="vslider"><span>📄</span>
+          <input type="range" min="0" max=${Math.max(0, total - 1)} value=${curPage}
+            onInput=${function (e) { goto(parseInt(e.target.value, 10)); }} />
+          <span>${curPage + 1}/${total || 1}</span></div>
+        <button class="btn sec block" onClick=${function () {
+          if (ocrText) bridgeCall('speakText', ocrText, '', 0);
+        }}>🔊 Озвучить OCR</button>
+        <button class="btn sec block" onClick=${function () { bridgeCall('stopSpeech'); }}>⏹ Стоп</button>
+      </div></div>
     </div>
     ${ocrText != null ? html`<div class="sheet active">
       <div class="sheet-h"><div class="sheet-t">🧠 OCR СТРАНИЦЫ ${curPage + 1}</div>

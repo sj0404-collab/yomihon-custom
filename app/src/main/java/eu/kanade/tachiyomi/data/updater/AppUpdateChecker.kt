@@ -36,11 +36,12 @@ class AppUpdateChecker {
 }
 
 val GITHUB_REPO: String by lazy {
+    // Обновления берём из нашего форка — раньше чекер смотрел на yomihon/yomihon,
+    // где наших релизов нет, поэтому "обновления не появлялись".
     if (isPreviewBuildType) {
-        // Preview builds/repo aren't available yet.
-        "yomihon/yomihon"
+        "sj0404-collab/yomihon-custom"
     } else {
-        "yomihon/yomihon"
+        "sj0404-collab/yomihon-custom"
     }
 }
 

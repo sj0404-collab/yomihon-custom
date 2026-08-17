@@ -929,17 +929,99 @@ class YomihonWebBridge(
 
     // endregion
 
+    // region MangaLib bridge: OCR/перевод произвольного изображения + нативная читалка
+
+    /**
+     * OCR произвольного изображения (data-URI/base64) тем же нативным конвейером,
+     * что и сканер читалки: выбранная модель (Zen Free/GLens/локальные ONNX и т.д.),
+     * детекция панелей, фолбэки. Для MangaLib PWA — без tesseract.js.
+     */
+    @JavascriptInterface
+    fun ocrImageBase64(dataUri: String): String {
+        return runCatching {
+            runBlocking {
+                val b64 = dataUri.substringAfter("base64,", dataUri)
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?: return@runBlocking """{"error":"не удалось декодировать изображение"}"""
+                try {
+                    val pixels = IntArray(bitmap.width * bitmap.height)
+                    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                    val result = scanPageOcr.await(
+                        -1L,
+                        0,
+                        OcrImage(bitmap.width, bitmap.height, pixels),
+                    )
+                    JSONObject().apply {
+                        put("text", result.regions.joinToString("\n") { it.text }.trim())
+                        put(
+                            "regions",
+                            JSONArray().apply {
+                                result.regions.forEach { r ->
+                                    put(JSONObject().apply { put("text", r.text) })
+                                }
+                            },
+                        )
+                    }.toString()
+                } finally {
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+            }
+        }.getOrElse { e -> """{"error":${JSONObject.quote(e.message ?: "ошибка OCR")}}""" }
+    }
+
+    /** Асинхронный вариант ocrImageBase64: сразу возвращает id задачи для pollTask. */
+    @JavascriptInterface
+    fun startOcrImage(dataUri: String): Int {
+        val taskId = taskCounter.incrementAndGet()
+        ioScope.launch {
+            taskResults[taskId] = runCatching { ocrImageBase64(dataUri) }
+                .getOrElse { e -> """{"error":${JSONObject.quote(e.message ?: "ошибка OCR")}}""" }
+        }
+        return taskId
+    }
+
+    /** Перевод текста тем же сервисом, что и нативная карточка перевода. */
+    @JavascriptInterface
+    fun translateText(text: String, targetLang: String): Int {
+        val taskId = taskCounter.incrementAndGet()
+        ioScope.launch {
+            taskResults[taskId] = runCatching {
+                mihon.data.ocr.MangaTranslatorService.translate(
+                    text,
+                    targetLang.ifBlank { "ru" },
+                )
+            }.getOrDefault("")
+        }
+        return taskId
+    }
+
+    // endregion
+
     // region Text-to-speech
 
     @JavascriptInterface
     fun getSystemVoices(): String {
         val array = JSONArray()
         runCatching {
+            // Полный список: все голоса всех установленных движков, с меткой
+            // сеть/локальный и качеством — раньше часть голосов не показывалась.
             val voices = ttsEngine?.voices.orEmpty()
+                .sortedWith(
+                    compareBy(
+                        { !it.locale.language.equals("ru", ignoreCase = true) },
+                        { it.isNetworkConnectionRequired },
+                        { it.name },
+                    ),
+                )
             for (voice in voices) {
+                val net = if (voice.isNetworkConnectionRequired) "сеть" else "локальный"
                 val obj = JSONObject().apply {
                     put("name", voice.name)
-                    put("label", "${voice.locale.displayName} (${voice.name})")
+                    put("label", "${voice.locale.displayName} • $net (${voice.name})")
+                    put("network", voice.isNetworkConnectionRequired)
+                    put("quality", voice.quality)
+                    put("lang", voice.locale.toLanguageTag())
                 }
                 array.put(obj)
             }
