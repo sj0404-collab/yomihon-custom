@@ -28,6 +28,9 @@ import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.ui.reader.html.YomihonWebBridge
 import eu.kanade.tachiyomi.util.system.toast
+import tachiyomi.domain.storage.service.StoragePreferences
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * MangaLib PWA как отдельная нативная вкладка рядом с Библиотекой.
@@ -76,7 +79,7 @@ data object MangaLibTab : Tab {
         // Полные мосты (как в бывшем PWA-экране): SAF-папка хранилища и CBZ в читалку.
         val context = androidx.compose.ui.platform.LocalContext.current
         val storagePreferences = remember {
-            uy.kohesive.injekt.Injekt.get<tachiyomi.domain.storage.service.StoragePreferences>()
+            Injekt.get<StoragePreferences>()
         }
         val pickFolderLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocumentTree(),
