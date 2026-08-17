@@ -22,6 +22,8 @@ class StorageManager(
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    private val preferences = storagePreferences
+
     private var baseDir: UniFile? = getBaseDir(storagePreferences.baseStorageDirectory.get())
 
     private val _changes: Channel<Unit> = Channel(Channel.UNLIMITED)
@@ -44,6 +46,12 @@ class StorageManager(
                 _changes.send(Unit)
             }
             .launchIn(scope)
+
+        storagePreferences.externalLibraryRoots.changes()
+            .drop(1)
+            .distinctUntilChanged()
+            .onEach { _changes.send(Unit) }
+            .launchIn(scope)
     }
 
     private fun getBaseDir(uri: String): UniFile? {
@@ -65,6 +73,15 @@ class StorageManager(
 
     /** Корень выбранного хранилища — для сканирования манги прямо в нём (как CDisplayEx). */
     fun getBaseDirectory(): UniFile? = baseDir
+
+    /**
+     * Сторонние папки-библиотеки (любое количество, из любых мест, включая
+     * Android/data через SAF). Каждая папка — отдельный корень со своей мангой.
+     */
+    fun getExternalLibraryRoots(): List<UniFile> {
+        return preferences.externalLibraryRoots.get()
+            .mapNotNull { uri -> UniFile.fromUri(context, uri.toUri()).takeIf { it?.exists() == true } }
+    }
 }
 
 private const val AUTOMATIC_BACKUPS_PATH = "autobackup"

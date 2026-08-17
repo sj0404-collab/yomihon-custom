@@ -63,9 +63,12 @@ fun BrowseSourceContent(
         if (uri != null) {
             val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, flags)
-            storagePreferences.baseStorageDirectory.set(uri.toString())
-            // Перезапуск не нужен: StorageManager подхватывает новую папку на лету
-            // (асинхронно), поэтому пересканируем список с небольшой задержкой.
+            // Папка добавляется в СТОРОННЮЮ библиотеку (можно сколько угодно
+            // папок из любых мест, включая Android/data). Основное хранилище
+            // приложения (загрузки из сети) не трогаем — никаких дублей.
+            storagePreferences.externalLibraryRoots.set(
+                storagePreferences.externalLibraryRoots.get() + uri.toString(),
+            )
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
                 { mangaList.refresh() },
                 600,

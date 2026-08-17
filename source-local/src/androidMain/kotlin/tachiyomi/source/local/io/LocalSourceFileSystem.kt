@@ -12,15 +12,17 @@ actual class LocalSourceFileSystem(
     }
 
     /**
-     * Сканируем и подпапку local/, и корень выбранного хранилища (как CDisplayEx):
-     * пользователю не нужно перекладывать мангу в local/ — папки и одиночные
-     * CBZ/CBR видны сразу. Служебные папки приложения исключаются.
+     * Сторонняя библиотека НЕ смешивается с хранилищем приложения:
+     * сканируются подпапка local/ (манга самого приложения) и все внешние
+     * папки-корни, добавленные пользователем (сколько угодно, из любых мест,
+     * включая Android/data через SAF). Корень основного хранилища (папка
+     * загрузок из сети) больше не сканируется — никаких дублей.
      */
     actual fun getFilesInBaseDirectory(): List<UniFile> {
         val local = getBaseDirectory()?.listFiles().orEmpty().toList()
-        val root = storageManager.getBaseDirectory()?.listFiles().orEmpty()
-            .filterNot { it.name.orEmpty().lowercase() in RESERVED_NAMES }
-        return local + root
+        val external = storageManager.getExternalLibraryRoots()
+            .flatMap { root -> root.listFiles().orEmpty().toList() }
+        return local + external
     }
 
     actual fun getMangaDirectory(name: String): UniFile? {
@@ -32,14 +34,12 @@ actual class LocalSourceFileSystem(
         return getMangaDirectory(name)?.listFiles().orEmpty().toList()
     }
 
-    /** Ищет запись (папку или файл) сначала в local/, затем в корне хранилища. */
+    /** Ищет запись (папку или файл) в local/, затем во всех внешних корнях. */
     fun findEntry(name: String): UniFile? {
-        return getBaseDirectory()?.findFile(name)
-            ?: storageManager.getBaseDirectory()?.findFile(name)
-                ?.takeIf { it.name.orEmpty().lowercase() !in RESERVED_NAMES }
-    }
-
-    private companion object {
-        val RESERVED_NAMES = setOf("autobackup", "downloads", "local", ".covers", ".nomedia")
+        getBaseDirectory()?.findFile(name)?.let { return it }
+        for (root in storageManager.getExternalLibraryRoots()) {
+            root.findFile(name)?.let { return it }
+        }
+        return null
     }
 }

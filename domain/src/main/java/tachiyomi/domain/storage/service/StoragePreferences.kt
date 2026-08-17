@@ -13,4 +13,14 @@ class StoragePreferences(
         Preference.appStateKey("storage_dir"),
         folderProvider.path(),
     )
+
+    /**
+     * Сторонняя библиотека: неограниченный набор внешних папок (SAF tree URI),
+     * добавленных пользователем из любых мест, включая Android/data.
+     * Не смешивается с основным хранилищем приложения.
+     */
+    val externalLibraryRoots: Preference<Set<String>> = preferenceStore.getStringSet(
+        Preference.appStateKey("external_library_roots"),
+        emptySet(),
+    )
 }
