@@ -39,6 +39,9 @@ import androidx.core.app.NotificationCompat
 import eu.kanade.tachiyomi.util.system.toast
 import mihon.data.ocr.CyrillicTranslitFixer
 import mihon.data.ocr.MangaTranslatorService
+import mihon.domain.ocr.service.OcrPreferences
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.util.Locale
 
 @Composable
@@ -66,10 +69,10 @@ fun TranslationCard(
                     // Применяем голос и скорость из настроек приложения —
                     // раньше выбор голоса игнорировался.
                     runCatching {
-                        val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
-                        val savedVoice = prefs.voiceName().get()
+                        val prefs = Injekt.get<OcrPreferences>()
+                        val savedVoice: String = prefs.voiceName().get()
                         engine.setSpeechRate(prefs.speechRate().get().coerceIn(0.5f, 2.0f))
-                        engine.voices?.find { it.name == savedVoice }?.let { engine.voice = it }
+                        engine.voices?.find { v -> v.name == savedVoice }?.let { v -> engine.voice = v }
                     }
                     // Сбрасываем "isSpeaking", когда озвучка закончилась сама —
                     // иначе кнопка застревала в состоянии "Стоп".
