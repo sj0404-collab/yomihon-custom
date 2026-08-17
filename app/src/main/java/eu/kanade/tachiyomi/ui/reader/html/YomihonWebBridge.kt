@@ -11,6 +11,8 @@ import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
+import eu.kanade.tachiyomi.extension.ExtensionManager
+import eu.kanade.tachiyomi.extension.model.InstallStep
 import eu.kanade.tachiyomi.data.ocr.OcrPageSourceResolver
 import eu.kanade.tachiyomi.data.ocr.ResolvedOcrPages
 import eu.kanade.tachiyomi.ui.home.HomeScreen
@@ -103,6 +105,11 @@ class YomihonWebBridge(
     private val createCategoryWithName: CreateCategoryWithName by lazy { Injekt.get() }
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val taskResults = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    private val taskCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    private val extensionSteps = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private var ttsEngine: TextToSpeech? = null
 
