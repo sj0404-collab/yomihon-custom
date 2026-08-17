@@ -15,8 +15,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -27,7 +30,11 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -51,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +72,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
+import eu.kanade.tachiyomi.data.tts.AutoReadEngine
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -85,6 +95,29 @@ data object BrowserTab : Tab {
     private var progressState = mutableFloatStateOf(1f)
     private var autoscrollActive = mutableStateOf(false)
     private var autoscrollSpeed = mutableFloatStateOf(2f)
+
+    /** Режим авточтения: скан кадра → озвучка → скролл на кадр → повтор. */
+    private var autoReadActive = mutableStateOf(false)
+    private var autoReadEngine: AutoReadEngine? = null
+
+    /** Захват ТОЛЬКО содержимого WebView — плавающие кнопки и оверлеи
+     *  приложения в кадр физически не попадают. */
+    private fun captureWebView(): android.graphics.Bitmap? {
+        val wv = sharedWebView ?: return null
+        if (wv.width <= 0 || wv.height <= 0) return null
+        return runCatching {
+            val bmp = android.graphics.Bitmap.createBitmap(
+                wv.width,
+                wv.height,
+                android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            val canvas = android.graphics.Canvas(bmp)
+            // Рисуем с учётом текущего скролла: видимый кадр
+            canvas.translate(-wv.scrollX.toFloat(), -wv.scrollY.toFloat())
+            wv.draw(canvas)
+            bmp
+        }.getOrNull()
+    }
 
     override val options: TabOptions
         @Composable
@@ -156,6 +189,48 @@ data object BrowserTab : Tab {
                 delay(16)
             }
         }
+
+        var isAutoRead by autoReadActive
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val readEngine = remember { autoReadEngine ?: AutoReadEngine(ctx.applicationContext).also { autoReadEngine = it } }
+        val currentRegion by readEngine.currentRegion.collectAsState()
+
+        // Цикл авточтения: читаем кадр; по завершении, если включено
+        // автолистание — скроллим ровно на высоту кадра и читаем дальше.
+        // Скролл НЕ происходит, пока движок читает (страница «стоит»).
+        LaunchedEffect(isAutoRead) {
+            if (!isAutoRead) { readEngine.stop(); return@LaunchedEffect }
+            readEngine.clearHistory()
+            var lastScrollY = -1
+            while (isAutoRead) {
+                val wv = sharedWebView
+                val bmp = captureWebView()
+                if (wv == null || bmp == null) { delay(500); continue }
+
+                var finished = false
+                readEngine.readFrame(bmp, chapterId = -1L, pageIndex = wv.scrollY) { finished = true }
+                while (!finished && isAutoRead) delay(150)
+                if (!isAutoRead) break
+
+                val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                if (!prefs.autoReadAutoAdvance().get()) { isAutoRead = false; break }
+
+                // скролл на ~90% высоты кадра (плавно), после полного прочтения
+                val step = (wv.height * 0.9f).roundToInt()
+                val target = wv.scrollY + step
+                var scrolled = 0
+                while (scrolled < step && isAutoRead) {
+                    val d = minOf(24, step - scrolled)
+                    wv.scrollBy(0, d)
+                    scrolled += d
+                    delay(8)
+                }
+                delay(400) // дать странице дорисоваться
+                // если упёрлись в конец страницы — стоп
+                if (wv.scrollY == lastScrollY) { isAutoRead = false; break }
+                lastScrollY = wv.scrollY
+            }
+        }
         DisposableEffect(Unit) {
             onDispose { /* WebView живёт дальше, скролл остановится сам по isAuto */ }
         }
@@ -225,6 +300,11 @@ data object BrowserTab : Tab {
             )
         }
 
+        // Линейка чтения (как в AlReader): подсветка текущей реплики
+        currentRegion?.let { region ->
+            eu.kanade.presentation.reader.components.AutoReadHighlight(region = region)
+        }
+
         // Плавающее SAO-меню браузера: автоскролл, наверх, закрыть
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -275,6 +355,63 @@ data object BrowserTab : Tab {
                                         modifier = Modifier.width(140.dp),
                                     )
                                     Text("×${speed.roundToInt()}")
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (isAutoRead) "Стоп авточтения  " else "Авточтение страницы  ",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                SmallFloatingActionButton(onClick = {
+                                    if (isAutoRead) {
+                                        isAutoRead = false
+                                        readEngine.stop()
+                                    } else {
+                                        isAuto = false // выключаем простой автоскролл
+                                        isAutoRead = true
+                                        menuOpen = false
+                                    }
+                                }) {
+                                    Icon(
+                                        if (isAutoRead) Icons.Outlined.Stop else Icons.Outlined.RecordVoiceOver,
+                                        contentDescription = "Авточтение",
+                                        tint = if (isAutoRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            run {
+                                val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                                var lang by remember { mutableStateOf(prefs.autoReadLanguage().get()) }
+                                var translate by remember { mutableStateOf(prefs.autoReadTranslate().get()) }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val langLabel = when (lang) {
+                                        "ru" -> "🇷🇺 Русский"; "en" -> "🇬🇧 English"; "ja" -> "🇯🇵 日本語"
+                                        "ko" -> "🇰🇷 한국어"; "zh" -> "🇨🇳 中文"; else -> "🌐 Любой"
+                                    }
+                                    Text("Читать: $langLabel  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        val next = when (lang) {
+                                            "ru" -> "en"; "en" -> "ja"; "ja" -> "ko"; "ko" -> "zh"; "zh" -> "any"; else -> "ru"
+                                        }
+                                        lang = next
+                                        prefs.autoReadLanguage().set(next)
+                                    }) { Icon(Icons.Outlined.Language, contentDescription = "Язык чтения") }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (translate) "Перевод: вкл  " else "Перевод: выкл  ",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                    SmallFloatingActionButton(onClick = {
+                                        translate = !translate
+                                        prefs.autoReadTranslate().set(translate)
+                                    }) {
+                                        Icon(
+                                            Icons.Outlined.Translate,
+                                            contentDescription = "Переводить",
+                                            tint = if (translate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {

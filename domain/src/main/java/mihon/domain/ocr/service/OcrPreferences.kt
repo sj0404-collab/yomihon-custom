@@ -65,6 +65,17 @@ class OcrPreferences(
     // rtl (манга), ltr (комиксы), vertical (вебтуны)
     fun scanReadingOrder() = preferenceStore.getString("pref_scan_reading_order", "rtl")
 
+    // ---- Авточтение (браузер и читалка) ----
+    // Язык, который читаем; всё остальное на кадре игнорируется:
+    // ru / en / ja / ko / zh / any
+    fun autoReadLanguage() = preferenceStore.getString("pref_autoread_language", "ru")
+
+    // Переводить ли реплики на русский перед озвучкой (для en/ja/…)
+    fun autoReadTranslate() = preferenceStore.getBoolean("pref_autoread_translate", true)
+
+    // Автолистание после дочитывания кадра (в браузере — автоскролл на кадр)
+    fun autoReadAutoAdvance() = preferenceStore.getBoolean("pref_autoread_advance", true)
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)

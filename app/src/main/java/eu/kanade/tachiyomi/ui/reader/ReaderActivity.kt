@@ -180,6 +180,10 @@ class ReaderActivity : BaseActivity() {
 
     private var autoscrollJob: kotlinx.coroutines.Job? = null
 
+    /** Движок авточтения с историей и подсветкой. */
+    private val autoReadEngine by lazy { eu.kanade.tachiyomi.data.tts.AutoReadEngine(applicationContext) }
+    private var autoReadLoop: kotlinx.coroutines.Job? = null
+
     /**
      * Реальная автопрокрутка вместо прежней тост-заглушки: вебтун плавно
      * скроллится, пейджер листает страницы с интервалом, зависящим от скорости.
@@ -808,6 +812,14 @@ class ReaderActivity : BaseActivity() {
                             .scanReadingOrder().get(),
                     )
                 }
+                // Линейка авточтения: подсветка текущей читаемой реплики
+                run {
+                    val autoRegion by autoReadEngine.currentRegion.collectAsState()
+                    autoRegion?.let { region ->
+                        eu.kanade.presentation.reader.components.AutoReadHighlight(region = region)
+                    }
+                }
+
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
                     visible = state.menuVisible,
                     onTriggerOcr = ::enterOcrMode,
@@ -820,10 +832,10 @@ class ReaderActivity : BaseActivity() {
                         toast("Область сканирования изменена")
                     },
                     onAutoscrollToggle = ::toggleAutoscroll,
-                    onAutoSpeakPage = ::autoSpeakVisiblePage,
+                    onAutoSpeakPage = ::startAutoReadLoop,
                     onStopSpeak = {
+                        stopAutoReadLoop()
                         viewModel.stopAutoSpeak()
-                        eu.kanade.tachiyomi.data.tts.TtsReadingNotifier.dismiss(this@ReaderActivity)
                     },
                     onReadingOrderChange = { order ->
                         uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
@@ -1309,27 +1321,61 @@ class ReaderActivity : BaseActivity() {
      * с кнопкой «Остановить».
      */
     fun autoSpeakVisiblePage() {
-        lifecycleScope.launchIO {
+        readCurrentPage(thenAdvance = false)
+    }
+
+    /**
+     * Полное авточтение: читать страницу → (страница стоит, пока не дочитана)
+     * → перелистнуть → читать следующую. RTL/LTR листает страницы читалки,
+     * вертикальный режим прокручивает на экран.
+     */
+    fun startAutoReadLoop() {
+        stopAutoReadLoop()
+        autoReadEngine.clearHistory()
+        toast("▶ Авточтение включено")
+        readCurrentPage(thenAdvance = true)
+    }
+
+    fun stopAutoReadLoop() {
+        autoReadLoop?.cancel()
+        autoReadLoop = null
+        autoReadEngine.stop()
+        eu.kanade.tachiyomi.data.tts.TtsReadingNotifier.dismiss(this)
+    }
+
+    private fun readCurrentPage(thenAdvance: Boolean) {
+        autoReadLoop?.cancel()
+        autoReadLoop = lifecycleScope.launchIO {
             try {
                 val root = binding.root
-                val fullRect = android.graphics.RectF(
-                    0f,
-                    0f,
-                    root.width.toFloat(),
-                    root.height.toFloat(),
-                )
-                val bitmap = cropCurrentSelectionBitmap(fullRect)
-                if (bitmap == null) {
+                val fullRect = android.graphics.RectF(0f, 0f, root.width.toFloat(), root.height.toFloat())
+                val bitmap = cropCurrentSelectionBitmap(fullRect) ?: run {
                     withUIContext { toast("Не удалось захватить страницу") }
                     return@launchIO
                 }
                 val chapterId = viewModel.getCurrentChapter()?.chapter?.id ?: -1L
                 val pageIndex = (viewModel.state.value.currentPage - 1).coerceAtLeast(0)
-                withUIContext { toast("🔍 Сканирую страницу…") }
-                viewModel.autoScanAndSpeak(this@ReaderActivity, bitmap, chapterId, pageIndex)
+
+                autoReadEngine.readFrame(bitmap, chapterId, pageIndex) {
+                    if (!thenAdvance) return@readFrame
+                    // Страница дочитана целиком — ТОЛЬКО теперь листаем
+                    lifecycleScope.launchIO {
+                        kotlinx.coroutines.delay(350)
+                        withUIContext {
+                            when (val viewer = viewModel.state.value.viewer) {
+                                is eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer ->
+                                    viewer.scrollDown() // вебтун: скролл на почти-экран
+                                is eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer ->
+                                    viewer.moveToNext() // постранично, с учётом RTL/LTR
+                                else -> {}
+                            }
+                        }
+                        kotlinx.coroutines.delay(900) // дать странице отрисоваться
+                        readCurrentPage(thenAdvance = true)
+                    }
+                }
             } catch (e: Exception) {
-                logcat(LogPriority.ERROR, e) { "autoSpeakVisiblePage failed" }
-                withUIContext { toast("Ошибка сканирования страницы") }
+                logcat(LogPriority.ERROR, e) { "readCurrentPage failed" }
             }
         }
     }

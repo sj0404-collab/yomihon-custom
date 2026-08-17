@@ -389,7 +389,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     /**
      * Scrolls down by [scrollDistance].
      */
-    private fun scrollDown() {
+    fun scrollDown() {
         if (config.usePageTransitions) {
             recycler.smoothScrollBy(0, scrollDistance)
         } else {
