@@ -94,6 +94,19 @@ class AutoReadEngine(
                 val pixels = IntArray(bitmap.width * bitmap.height)
                 bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 val image = OcrImage(bitmap.width, bitmap.height, pixels)
+                // Кадр в JPEG для AI-определения пола говорящих (если включено)
+                val genderJpeg: ByteArray? = if (prefs.aiGenderVoices().get()) {
+                    runCatching {
+                        val out = java.io.ByteArrayOutputStream()
+                        val scaled = if (bitmap.width > 1024) {
+                            val h = bitmap.height * 1024 / bitmap.width
+                            Bitmap.createScaledBitmap(bitmap, 1024, h, true)
+                        } else bitmap
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 70, out)
+                        if (scaled !== bitmap && !scaled.isRecycled) scaled.recycle()
+                        out.toByteArray()
+                    }.getOrNull()
+                } else null
                 if (!bitmap.isRecycled) bitmap.recycle()
 
                 val result = scanPageOcr.await(chapterId, pageIndex, image)
@@ -118,6 +131,14 @@ class AutoReadEngine(
                     else -> fresh.sortedWith(compareBy({ rowOf(it.boundingBox.top) }, { -it.boundingBox.right }))
                 }
 
+                // 3.5) AI-определение пола говорящих (Gemini Vision по лицам
+                // и хвостикам баллонов); при выключенной опции/без ключа — null
+                val genders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty()) {
+                    SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                } else {
+                    List(ordered.size) { null }
+                }
+
                 // 4) реплика за репликой: подсветка -> (перевод) -> озвучка -> ждём конца
                 for ((i, region) in ordered.withIndex()) {
                     if (job?.isActive != true) break
@@ -137,7 +158,7 @@ class AutoReadEngine(
                         total = ordered.size,
                     )
 
-                    speakAndAwait(speakTextRaw)
+                    speakAndAwait(speakTextRaw, genders.getOrNull(i))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -162,10 +183,10 @@ class AutoReadEngine(
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
-    private suspend fun speakAndAwait(text: String) {
+    private suspend fun speakAndAwait(text: String, gender: String? = null) {
         val done = MutableStateFlow(false)
         var started = false
-        TtsSpeaker.speak(context, text) { speaking ->
+        TtsSpeaker.speakAs(context, text, gender) { speaking ->
             if (speaking) started = true
             if (!speaking && started) done.value = true
         }

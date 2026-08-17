@@ -76,6 +76,11 @@ class OcrPreferences(
     // Автолистание после дочитывания кадра (в браузере — автоскролл на кадр)
     fun autoReadAutoAdvance() = preferenceStore.getBoolean("pref_autoread_advance", true)
 
+    // AI-определение пола говорящего (Gemini Vision по лицам и баллонам):
+    // женские реплики читает женский голос-пресет, мужские — мужской.
+    // Требует Google AI ключ; выключено по умолчанию (онлайн, медленнее).
+    fun aiGenderVoices() = preferenceStore.getBoolean("pref_ai_gender_voices", false)
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)

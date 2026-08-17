@@ -60,6 +60,7 @@ fun TtsSettingsDialog(
 
     var voiceFemale by remember { mutableStateOf(prefs.voiceFemale().get()) }
     var voiceMale by remember { mutableStateOf(prefs.voiceMale().get()) }
+    var aiGender by remember { mutableStateOf(prefs.aiGenderVoices().get()) }
     var assignMode by remember { mutableStateOf(0) } // 0=основной, 1=женский, 2=мужской
 
     var voices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
@@ -118,6 +119,27 @@ fun TtsSettingsDialog(
                         onClick = { engine = TtsSpeaker.ENGINE_ELEVENLABS },
                         label = { Text("ElevenLabs") },
                     )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .clickable { aiGender = !aiGender },
+                ) {
+                    androidx.compose.material3.Checkbox(
+                        checked = aiGender,
+                        onCheckedChange = { aiGender = it },
+                    )
+                    Column {
+                        Text("AI-голоса по полу говорящего", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Gemini смотрит на лица и баллоны: женские реплики — голос ♀, мужские — ♂. Нужен Google AI ключ.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 Text(
@@ -260,6 +282,7 @@ fun TtsSettingsDialog(
                     prefs.voiceName().set(selectedVoice)
                     prefs.voiceFemale().set(voiceFemale)
                     prefs.voiceMale().set(voiceMale)
+                    prefs.aiGenderVoices().set(aiGender)
                     prefs.speechRate().set(rate.coerceIn(0.5f, 2f))
                     prefs.ttsWebLanguage().set(webLang.trim().ifBlank { "ru" })
                     prefs.elevenApiKey().set(elevenKey.trim())
