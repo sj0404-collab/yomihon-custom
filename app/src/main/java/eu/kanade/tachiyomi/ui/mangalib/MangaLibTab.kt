@@ -27,6 +27,7 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.ui.reader.html.YomihonWebBridge
+import eu.kanade.tachiyomi.util.system.toast
 
 /**
  * MangaLib PWA как отдельная нативная вкладка рядом с Библиотекой.
@@ -70,6 +71,38 @@ data object MangaLibTab : Tab {
         ) { uris ->
             filePathCallback?.onReceiveValue(uris.toTypedArray())
             filePathCallback = null
+        }
+
+        // Полные мосты (как в бывшем PWA-экране): SAF-папка хранилища и CBZ в читалку.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val storagePreferences = remember {
+            uy.kohesive.injekt.Injekt.get<tachiyomi.domain.storage.service.StoragePreferences>()
+        }
+        val pickFolderLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree(),
+        ) { uri ->
+            if (uri != null) {
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                storagePreferences.baseStorageDirectory.set(uri.toString())
+                context.toast("Папка хранилища изменена")
+            }
+        }
+        val pickCbzLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) {
+                val intent = android.content.Intent(
+                    context,
+                    eu.kanade.tachiyomi.ui.reader.ReaderActivity::class.java,
+                ).apply {
+                    data = uri
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+            }
         }
 
         BackHandler(enabled = canGoBack) {
@@ -124,8 +157,20 @@ data object MangaLibTab : Tab {
                     val bridge = YomihonWebBridge(
                         context = ctx,
                         onTriggerScan = {},
-                        onOpenSafFolder = {},
-                        onOpenCbzFile = {},
+                        onOpenSafFolder = { pickFolderLauncher.launch(null) },
+                        onOpenCbzFile = {
+                            pickCbzLauncher.launch(
+                                arrayOf(
+                                    "application/x-cbz",
+                                    "application/zip",
+                                    "application/x-zip-compressed",
+                                    "application/x-cbr",
+                                    "application/x-rar-compressed",
+                                    "application/epub+zip",
+                                    "*/*",
+                                ),
+                            )
+                        },
                     )
                     addJavascriptInterface(bridge, "YomihonBridge")
 

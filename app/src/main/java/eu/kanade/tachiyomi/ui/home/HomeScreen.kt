@@ -87,21 +87,8 @@ object HomeScreen : Screen() {
 
     @Composable
     override fun Content() {
-        val uiPreferences = remember { Injekt.get<eu.kanade.domain.ui.UiPreferences>() }
-        val usePwaMode by uiPreferences.usePwaMode.collectAsState()
-        val pwaHidden by pwaTemporarilyHidden.collectAsState()
-
-        if (usePwaMode && !pwaHidden) {
-            eu.kanade.presentation.pwa.PwaScreen.Content()
-            return
-        }
-
-        // Внутри нативного режима, открытого из PWA: системная кнопка "Назад"
-        // (когда мы уже на вкладке Библиотека) возвращает обратно в PWA.
-        BackHandler(enabled = usePwaMode && pwaHidden) {
-            returnToPwa()
-        }
-
+        // PWA-оболочка Yomihon удалена: приложение всегда работает в нативном
+        // интерфейсе, MangaLib PWA живёт как нативная вкладка с мостами.
         val navigator = LocalNavigator.currentOrThrow
         TabNavigator(
             tab = LibraryTab,

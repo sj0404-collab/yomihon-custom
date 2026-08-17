@@ -34,7 +34,8 @@ fun OnboardingScreen(
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
     val steps = remember {
         listOf<OnboardingStep>(
-            AppModeStep(),
+            // AppModeStep удалён: PWA-оболочка Yomihon больше не используется,
+            // приложение всегда в нативном режиме (MangaLib — нативная вкладка).
             ThemeStep(),
             StorageStep(),
             PermissionStep(),
