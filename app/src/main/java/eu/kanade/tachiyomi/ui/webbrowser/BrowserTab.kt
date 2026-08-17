@@ -15,28 +15,57 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.viewinterop.AndroidView
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /**
  * Браузер с ПЕРСИСТЕНТНЫМ WebView: единственный экземпляр живёт, пока живо
@@ -54,6 +83,8 @@ data object BrowserTab : Tab {
     private var urlState = mutableStateOf(HOME_URL)
     private var canGoBackState = mutableStateOf(false)
     private var progressState = mutableFloatStateOf(1f)
+    private var autoscrollActive = mutableStateOf(false)
+    private var autoscrollSpeed = mutableFloatStateOf(2f)
 
     override val options: TabOptions
         @Composable
@@ -112,6 +143,24 @@ data object BrowserTab : Tab {
             sharedWebView?.goBack()
         }
 
+        var menuOpen by remember { mutableStateOf(false) }
+        var isAuto by autoscrollActive
+        var speed by autoscrollSpeed
+        var fabX by remember { mutableFloatStateOf(0f) }
+        var fabY by remember { mutableFloatStateOf(0f) }
+
+        // Автоскролл страницы: плавно, скорость 1..10
+        LaunchedEffect(isAuto, speed) {
+            while (isAuto) {
+                sharedWebView?.scrollBy(0, (speed * 3).roundToInt())
+                delay(16)
+            }
+        }
+        DisposableEffect(Unit) {
+            onDispose { /* WebView живёт дальше, скролл остановится сам по isAuto */ }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -174,6 +223,90 @@ data object BrowserTab : Tab {
                     (webView.parent as? ViewGroup)?.removeView(webView)
                 },
             )
+        }
+
+        // Плавающее SAO-меню браузера: автоскролл, наверх, закрыть
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            Column(
+                modifier = Modifier
+                    .offset { IntOffset(fabX.roundToInt(), fabY.roundToInt()) }
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AnimatedVisibility(
+                    visible = menuOpen,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.End,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (isAuto) "Стоп прокрутки  " else "Автопрокрутка  ",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                SmallFloatingActionButton(onClick = { isAuto = !isAuto }) {
+                                    Icon(
+                                        if (isAuto) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                        contentDescription = "Автопрокрутка",
+                                        tint = if (isAuto) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            if (isAuto) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Speed, contentDescription = null)
+                                    Slider(
+                                        value = speed,
+                                        onValueChange = { speed = it },
+                                        valueRange = 1f..10f,
+                                        modifier = Modifier.width(140.dp),
+                                    )
+                                    Text("×${speed.roundToInt()}")
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Наверх  ", style = MaterialTheme.typography.labelMedium)
+                                SmallFloatingActionButton(onClick = {
+                                    sharedWebView?.scrollTo(0, 0)
+                                    menuOpen = false
+                                }) {
+                                    Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = "Наверх")
+                                }
+                            }
+                        }
+                    }
+                }
+                FloatingActionButton(
+                    onClick = { menuOpen = !menuOpen },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            fabX = (fabX + dragAmount.x).coerceAtMost(0f)
+                            fabY = (fabY + dragAmount.y).coerceAtMost(0f)
+                        }
+                    },
+                ) {
+                    Icon(
+                        if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
+                        contentDescription = "Меню браузера",
+                    )
+                }
+            }
+        }
         }
     }
 }

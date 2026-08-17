@@ -90,7 +90,12 @@ fun TranslationCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            restoredCyrillic?.let { cyrillic ->
+            // Блок кириллицы показываем ТОЛЬКО если он отличается от перевода —
+            // раньше при русской манге текст дублировался дважды.
+            restoredCyrillic?.takeIf { fixed ->
+                val tr = translationText
+                tr == null || !fixed.trim().equals(tr.trim(), ignoreCase = true)
+            }?.let { cyrillic ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

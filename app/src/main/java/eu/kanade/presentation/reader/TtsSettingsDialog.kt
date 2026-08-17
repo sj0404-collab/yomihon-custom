@@ -58,6 +58,10 @@ fun TtsSettingsDialog(
     var elevenKey by remember { mutableStateOf(prefs.elevenApiKey().get()) }
     var elevenVoice by remember { mutableStateOf(prefs.elevenVoiceId().get()) }
 
+    var voiceFemale by remember { mutableStateOf(prefs.voiceFemale().get()) }
+    var voiceMale by remember { mutableStateOf(prefs.voiceMale().get()) }
+    var assignMode by remember { mutableStateOf(0) } // 0=основной, 1=женский, 2=мужской
+
     var voices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var sysReady by remember { mutableStateOf(false) }
 
@@ -129,6 +133,34 @@ fun TtsSettingsDialog(
 
                 when (engine) {
                     TtsSpeaker.ENGINE_SYSTEM -> {
+                        Row(modifier = Modifier.padding(bottom = 4.dp)) {
+                            FilterChip(
+                                selected = assignMode == 0,
+                                onClick = { assignMode = 0 },
+                                label = { Text("Основной") },
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                            FilterChip(
+                                selected = assignMode == 1,
+                                onClick = { assignMode = 1 },
+                                label = { Text("♀ Женский") },
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                            FilterChip(
+                                selected = assignMode == 2,
+                                onClick = { assignMode = 2 },
+                                label = { Text("♂ Мужской") },
+                            )
+                        }
+                        Text(
+                            when (assignMode) {
+                                1 -> "Голос для женских реплик: " + (voiceFemale.ifBlank { "не задан" })
+                                2 -> "Голос для мужских реплик: " + (voiceMale.ifBlank { "не задан" })
+                                else -> "Основной голос озвучки"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         when {
                             !sysReady -> Text("Инициализация системного TTS…")
                             voices.isEmpty() -> Text(
@@ -141,11 +173,27 @@ fun TtsSettingsDialog(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { selectedVoice = name },
+                                            .clickable {
+                                                when (assignMode) {
+                                                    1 -> voiceFemale = name
+                                                    2 -> voiceMale = name
+                                                    else -> selectedVoice = name
+                                                }
+                                            },
                                     ) {
                                         RadioButton(
-                                            selected = selectedVoice == name,
-                                            onClick = { selectedVoice = name },
+                                            selected = when (assignMode) {
+                                                1 -> voiceFemale == name
+                                                2 -> voiceMale == name
+                                                else -> selectedVoice == name
+                                            },
+                                            onClick = {
+                                                when (assignMode) {
+                                                    1 -> voiceFemale = name
+                                                    2 -> voiceMale = name
+                                                    else -> selectedVoice = name
+                                                }
+                                            },
                                         )
                                         Column {
                                             Text(label, style = MaterialTheme.typography.bodyMedium)
@@ -210,6 +258,8 @@ fun TtsSettingsDialog(
                 onClick = {
                     prefs.voiceEngine().set(engine)
                     prefs.voiceName().set(selectedVoice)
+                    prefs.voiceFemale().set(voiceFemale)
+                    prefs.voiceMale().set(voiceMale)
                     prefs.speechRate().set(rate.coerceIn(0.5f, 2f))
                     prefs.ttsWebLanguage().set(webLang.trim().ifBlank { "ru" })
                     prefs.elevenApiKey().set(elevenKey.trim())

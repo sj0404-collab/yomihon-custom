@@ -40,7 +40,6 @@ import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
-import eu.kanade.tachiyomi.ui.dictionary.DictionaryTab
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.history.HistoryTab
 import eu.kanade.tachiyomi.ui.library.LibraryTab
@@ -82,7 +81,8 @@ object HomeScreen : Screen() {
         HistoryTab,
         BrowseTab,
         eu.kanade.tachiyomi.ui.webbrowser.BrowserTab,
-        DictionaryTab,
+        // DictionaryTab скрыт из нижней навигации («в дальний ящик»):
+        // словарь доступен из Ещё → Настройки → Словарь
         MoreTab,
     )
 
@@ -171,7 +171,7 @@ object HomeScreen : Screen() {
                                 }
                                 BrowseTab
                             }
-                            Tab.Dictionary -> DictionaryTab
+                            Tab.Dictionary -> MoreTab // словарь скрыт из таб-бара
                             is Tab.More -> MoreTab
                         }
 

@@ -802,6 +802,12 @@ class ReaderActivity : BaseActivity() {
                     onClickOcr = ::enterOcrMode,
                 )
 
+                var readingOrderState by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(
+                        uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                            .scanReadingOrder().get(),
+                    )
+                }
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
                     visible = state.menuVisible,
                     onTriggerOcr = ::enterOcrMode,
@@ -814,6 +820,24 @@ class ReaderActivity : BaseActivity() {
                         toast("Область сканирования изменена")
                     },
                     onAutoscrollToggle = ::toggleAutoscroll,
+                    onAutoSpeakPage = ::autoSpeakVisiblePage,
+                    onStopSpeak = {
+                        viewModel.stopAutoSpeak()
+                        eu.kanade.tachiyomi.data.tts.TtsReadingNotifier.dismiss(this@ReaderActivity)
+                    },
+                    onReadingOrderChange = { order ->
+                        uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                            .scanReadingOrder().set(order)
+                        readingOrderState = order
+                        toast(
+                            when (order) {
+                                "ltr" -> "Порядок чтения: слева направо (комиксы)"
+                                "vertical" -> "Порядок чтения: сверху вниз (вебтуны)"
+                                else -> "Порядок чтения: справа налево (манга)"
+                            },
+                        )
+                    },
+                    readingOrder = readingOrderState,
                 )
 
                 // OCR selection overlay
@@ -1274,6 +1298,38 @@ class ReaderActivity : BaseActivity() {
                     exitOcrMode()
                     toast(MR.strings.error_anki_image_fail)
                 }
+            }
+        }
+    }
+
+    /**
+     * «Прочитать страницу»: захватывает ВСЮ видимую область читалки,
+     * прогоняет OCR по выбранному движку и сразу озвучивает результат в
+     * порядке чтения (RTL/LTR/вертикально). Текст остаётся в уведомлении
+     * с кнопкой «Остановить».
+     */
+    fun autoSpeakVisiblePage() {
+        lifecycleScope.launchIO {
+            try {
+                val root = binding.root
+                val fullRect = android.graphics.RectF(
+                    0f,
+                    0f,
+                    root.width.toFloat(),
+                    root.height.toFloat(),
+                )
+                val bitmap = cropCurrentSelectionBitmap(fullRect)
+                if (bitmap == null) {
+                    withUIContext { toast("Не удалось захватить страницу") }
+                    return@launchIO
+                }
+                val chapterId = viewModel.getCurrentChapter()?.chapter?.id ?: -1L
+                val pageIndex = (viewModel.state.value.currentPage - 1).coerceAtLeast(0)
+                withUIContext { toast("🔍 Сканирую страницу…") }
+                viewModel.autoScanAndSpeak(this@ReaderActivity, bitmap, chapterId, pageIndex)
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "autoSpeakVisiblePage failed" }
+                withUIContext { toast("Ошибка сканирования страницы") }
             }
         }
     }

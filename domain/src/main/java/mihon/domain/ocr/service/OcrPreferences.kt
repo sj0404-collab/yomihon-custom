@@ -53,6 +53,18 @@ class OcrPreferences(
     fun elevenApiKey() = preferenceStore.getString("pref_eleven_api_key", "")
     fun elevenVoiceId() = preferenceStore.getString("pref_eleven_voice_id", "")
 
+    // Пресеты голосов: отдельно женский и мужской системные голоса.
+    // При автоозвучке реплики могут чередоваться по полу говорящего.
+    fun voiceFemale() = preferenceStore.getString("pref_voice_female", "")
+    fun voiceMale() = preferenceStore.getString("pref_voice_male", "")
+
+    // Авто-OCR видимой страницы + мгновенная озвучка результата
+    fun autoScanAndSpeak() = preferenceStore.getBoolean("pref_auto_scan_speak", false)
+
+    // Пресет направления сканирования/чтения страницы:
+    // rtl (манга), ltr (комиксы), vertical (вебтуны)
+    fun scanReadingOrder() = preferenceStore.getString("pref_scan_reading_order", "rtl")
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)

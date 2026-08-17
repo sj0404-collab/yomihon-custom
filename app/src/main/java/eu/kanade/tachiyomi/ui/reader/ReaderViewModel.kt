@@ -91,6 +91,7 @@ import java.util.Date
  * Presenter used by the activity to perform background operations.
  */
 class ReaderViewModel @JvmOverloads constructor(
+    private val scanPageOcr: mihon.domain.ocr.interactor.ScanPageOcr = Injekt.get(),
     private val savedState: SavedStateHandle,
     private val sourceManager: SourceManager = Injekt.get(),
     private val downloadManager: DownloadManager = Injekt.get(),
@@ -639,7 +640,7 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * Returns the currently active chapter.
      */
-    private fun getCurrentChapter(): ReaderChapter? {
+    fun getCurrentChapter(): ReaderChapter? {
         return state.value.currentChapter
     }
 
@@ -896,6 +897,62 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
             }
         }
+    }
+
+    /**
+     * АВТО-РЕЖИМ: сканирует всю видимую страницу целиком и сразу озвучивает
+     * распознанный текст (регионы читаются в выбранном порядке чтения:
+     * справа-налево / слева-направо / сверху-вниз). Текст дублируется в
+     * уведомление. Управляется преференсом autoScanAndSpeak.
+     */
+    private var autoScanJob: kotlinx.coroutines.Job? = null
+
+    fun autoScanAndSpeak(context: android.content.Context, bitmap: Bitmap, chapterId: Long, pageIndex: Int) {
+        autoScanJob?.cancel()
+        autoScanJob = viewModelScope.launchIO {
+            try {
+                val result = scanPageOcr.await(
+                    chapterId = chapterId,
+                    pageIndex = pageIndex,
+                    image = bitmap.toOcrImage(),
+                )
+                val order = mihon.domain.ocr.service.OcrPreferences(
+                    tachiyomi.core.common.preference.AndroidPreferenceStore(context),
+                ).scanReadingOrder().get()
+                val sorted = when (order) {
+                    "ltr" -> result.regions.sortedWith(
+                        compareBy({ it.boundingBox.top }, { it.boundingBox.left }),
+                    )
+                    "vertical" -> result.regions.sortedBy { it.boundingBox.top }
+                    else -> result.regions.sortedWith( // rtl — манга
+                        compareBy({ it.boundingBox.top }, { -it.boundingBox.right }),
+                    )
+                }
+                val text = sorted.joinToString(". ") {
+                    mihon.domain.ocr.model.normalizeOcrTextForDisplay(it.text)
+                }.trim()
+                if (text.isBlank()) {
+                    withUIContext { eventChannel.send(Event.OcrNoTextFound) }
+                    return@launchIO
+                }
+                withUIContext {
+                    eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(context, text)
+                    eu.kanade.tachiyomi.data.tts.TtsReadingNotifier.show(context, text)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Auto scan & speak failed" }
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+    }
+
+    fun stopAutoSpeak() {
+        autoScanJob?.cancel()
+        autoScanJob = null
+        eu.kanade.tachiyomi.data.tts.TtsSpeaker.stop()
     }
 
     fun showOcrResult(

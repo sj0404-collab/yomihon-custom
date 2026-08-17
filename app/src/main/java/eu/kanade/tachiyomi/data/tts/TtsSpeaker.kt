@@ -76,13 +76,23 @@ object TtsSpeaker {
      * [onState] — колбэк true=началось / false=закончилось|ошибка.
      */
     fun speak(context: Context, text: String, onState: (Boolean) -> Unit = {}) {
+        speakAs(context, text, gender = null, onState = onState)
+    }
+
+    /**
+     * Озвучка с учётом пола говорящего: gender = "female" | "male" | null.
+     * Для системного движка используется соответствующий голос из пресетов
+     * (Настройки озвучки → Женский голос / Мужской голос). Для веб-движка
+     * пол недоступен (у Google Translate один голос на язык).
+     */
+    fun speakAs(context: Context, text: String, gender: String?, onState: (Boolean) -> Unit = {}) {
         stop()
         onStateChange = onState
         val engine = prefs().voiceEngine().get()
         when (engine) {
             ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, text)
             ENGINE_ELEVENLABS -> speakElevenLabs(context, text)
-            else -> speakSystem(context, text)
+            else -> speakSystem(context, text, gender)
         }
     }
 
@@ -105,7 +115,7 @@ object TtsSpeaker {
 
     // region SYSTEM
 
-    private fun speakSystem(context: Context, text: String) {
+    private fun speakSystem(context: Context, text: String, gender: String? = null) {
         ensureSystem(context) { engine ->
             if (engine == null) {
                 setSpeaking(false)
@@ -114,9 +124,25 @@ object TtsSpeaker {
             val p = prefs()
             engine.setSpeechRate(p.speechRate().get().coerceIn(0.5f, 2f))
             engine.setPitch(p.speechPitch().get().coerceIn(0.5f, 2f))
-            val savedVoice = p.voiceName().get()
+            // Пол говорящего: приоритет — пресет для пола, затем общий голос
+            val presetVoice = when (gender) {
+                "female" -> p.voiceFemale().get()
+                "male" -> p.voiceMale().get()
+                else -> ""
+            }
+            val savedVoice = presetVoice.ifBlank { p.voiceName().get() }
             val v = engine.voices?.find { it.name == savedVoice }
-            if (v != null) engine.voice = v else engine.language = Locale("ru", "RU")
+            if (v != null) {
+                val res = engine.setVoice(v)
+                if (res != TextToSpeech.SUCCESS) {
+                    // Локальный голос не установлен в системе (нет данных) —
+                    // откатываемся на язык, чтобы звук был всегда
+                    logcat(LogPriority.WARN) { "Voice ${'$'}savedVoice rejected (missing data?), falling back to ru-RU" }
+                    engine.language = Locale("ru", "RU")
+                }
+            } else {
+                engine.language = Locale("ru", "RU")
+            }
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = setSpeaking(true)
                 override fun onDone(utteranceId: String?) = setSpeaking(false)

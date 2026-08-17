@@ -60,6 +60,10 @@ fun ReaderFloatingControls(
     onOpenOcrSettings: () -> Unit,
     onScanRegionChange: (ScanRegion) -> Unit,
     onAutoscrollToggle: (Boolean, Float) -> Unit,
+    onAutoSpeakPage: () -> Unit = {},
+    onStopSpeak: () -> Unit = {},
+    onReadingOrderChange: (String) -> Unit = {},
+    readingOrder: String = "rtl",
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -176,6 +180,44 @@ fun ReaderFloatingControls(
                                             modifier = Modifier.width(140.dp),
                                         )
                                         Text("×${autoscrollSpeed.roundToInt()}")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Прочитать страницу  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        menuOpen = false
+                                        onAutoSpeakPage()
+                                    }) {
+                                        Icon(Icons.Outlined.PlayArrow, contentDescription = "Прочитать страницу")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Стоп чтения  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        onStopSpeak()
+                                    }) {
+                                        Icon(Icons.Outlined.Pause, contentDescription = "Стоп чтения")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val orderLabel = when (readingOrder) {
+                                        "ltr" -> "→ Слева направо"
+                                        "vertical" -> "↓ Сверху вниз"
+                                        else -> "← Справа налево"
+                                    }
+                                    Text("$orderLabel  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        val next = when (readingOrder) {
+                                            "rtl" -> "ltr"
+                                            "ltr" -> "vertical"
+                                            else -> "rtl"
+                                        }
+                                        onReadingOrderChange(next)
+                                    }) {
+                                        Icon(Icons.Outlined.DocumentScanner, contentDescription = "Порядок чтения")
                                     }
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
