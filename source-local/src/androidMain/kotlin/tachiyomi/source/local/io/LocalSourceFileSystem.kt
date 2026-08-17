@@ -22,7 +22,8 @@ actual class LocalSourceFileSystem(
         val local = getBaseDirectory()?.listFiles().orEmpty().toList()
         val external = storageManager.getExternalLibraryRoots()
             .flatMap { root -> root.listFiles().orEmpty().toList() }
-        return local + external
+        // Служебные папки приложения не должны показываться как «манга»
+        return (local + external).filterNot { it.name.orEmpty().lowercase() in RESERVED_DIR_NAMES }
     }
 
     actual fun getMangaDirectory(name: String): UniFile? {
@@ -43,3 +44,7 @@ actual class LocalSourceFileSystem(
         return null
     }
 }
+
+private val RESERVED_DIR_NAMES = hashSetOf(
+    "local", "downloads", "backup", "autobackup", "automatic_backups", "covers", ".thumbnails",
+)

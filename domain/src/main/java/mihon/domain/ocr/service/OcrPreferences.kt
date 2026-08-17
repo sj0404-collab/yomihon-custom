@@ -43,10 +43,15 @@ class OcrPreferences(
     }
 
     // Voice & Text-to-Speech Settings
+    // Движки: system_tts (системные/локальные голоса), google_web (веб без
+    // API-ключа, с сайта Google Translate), eleven_api (ElevenLabs по ключу)
     fun voiceEngine() = preferenceStore.getString("pref_voice_engine", "system_tts")
     fun voiceName() = preferenceStore.getString("pref_voice_name", "ru-ru-x-dfa-network")
     fun speechRate() = preferenceStore.getFloat("pref_speech_rate", 1.0f)
     fun speechPitch() = preferenceStore.getFloat("pref_speech_pitch", 1.0f)
+    fun ttsWebLanguage() = preferenceStore.getString("pref_tts_web_lang", "ru")
+    fun elevenApiKey() = preferenceStore.getString("pref_eleven_api_key", "")
+    fun elevenVoiceId() = preferenceStore.getString("pref_eleven_voice_id", "")
 
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)

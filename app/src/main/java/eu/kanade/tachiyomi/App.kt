@@ -116,7 +116,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         Injekt.importModule(DomainModule())
 
         setupNotificationChannels()
-        Injekt.get<OcrScanManager>().startIfPending()
+        Thread { runCatching { Injekt.get<OcrScanManager>().startIfPending() } }
+            .apply { name = "ocr-pending-init"; priority = Thread.MIN_PRIORITY }
+            .start()
 
         // Первый запуск без онбординга: сразу создаём основную папку
         // "Yomikai" на телефоне (как у CDisplayEx) и помечаем онбординг

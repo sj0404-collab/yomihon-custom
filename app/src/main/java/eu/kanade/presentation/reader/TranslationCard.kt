@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.util.system.toast
 import mihon.data.ocr.CyrillicTranslitFixer
 import mihon.data.ocr.MangaTranslatorService
@@ -58,41 +59,8 @@ fun TranslationCard(
     var isSpeaking by remember(originalText) { mutableStateOf(false) }
     val context = LocalContext.current
 
-    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
-
     DisposableEffect(Unit) {
-        var tts: TextToSpeech? = null
-        tts = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.let { engine ->
-                    engine.language = Locale("ru", "RU")
-                    // Применяем голос и скорость из настроек приложения —
-                    // раньше выбор голоса игнорировался.
-                    runCatching {
-                        val prefs = Injekt.get<OcrPreferences>()
-                        val savedVoice: String = prefs.voiceName().get()
-                        engine.setSpeechRate(prefs.speechRate().get().coerceIn(0.5f, 2.0f))
-                        engine.voices?.find { v -> v.name == savedVoice }?.let { v -> engine.voice = v }
-                    }
-                    // Сбрасываем "isSpeaking", когда озвучка закончилась сама —
-                    // иначе кнопка застревала в состоянии "Стоп".
-                    engine.setOnUtteranceProgressListener(
-                        object : android.speech.tts.UtteranceProgressListener() {
-                            override fun onStart(utteranceId: String?) {}
-                            override fun onDone(utteranceId: String?) { isSpeaking = false }
-                            @Deprecated("Deprecated in Java")
-                            override fun onError(utteranceId: String?) { isSpeaking = false }
-                            override fun onError(utteranceId: String?, errorCode: Int) { isSpeaking = false }
-                        },
-                    )
-                    ttsEngine = engine
-                }
-            }
-        }
-        onDispose {
-            tts?.stop()
-            tts?.shutdown()
-        }
+        onDispose { TtsSpeaker.stop() }
     }
 
     LaunchedEffect(originalText, targetLanguage) {
@@ -180,20 +148,11 @@ fun TranslationCard(
                         onClick = {
                             val textToSpeak = translationText ?: restoredCyrillic ?: originalText
                             if (isSpeaking) {
-                                ttsEngine?.stop()
+                                TtsSpeaker.stop()
                                 isSpeaking = false
                             } else {
-                                val engine = ttsEngine
-                                if (engine == null) {
-                                    // Движок ещё не инициализировался или TTS в системе нет
-                                    context.toast("Озвучка недоступна: TTS-движок не готов")
-                                } else {
-                                    val result = engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "yomihon_tts")
-                                    if (result == TextToSpeech.SUCCESS) {
-                                        isSpeaking = true
-                                    } else {
-                                        context.toast("Ошибка озвучки: проверьте системный TTS")
-                                    }
+                                TtsSpeaker.speak(context, textToSpeak) { speaking ->
+                                    isSpeaking = speaking
                                 }
                             }
                         },

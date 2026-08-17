@@ -86,7 +86,11 @@
     </style>
 
     <!--== Default Theme ==-->
-    <style name="Theme.Tachiyomi" parent="Base.Theme.Tachiyomi" />
+    <style name="Theme.Tachiyomi" parent="Base.Theme.Tachiyomi">
+        <!-- Пока Compose рисует первый кадр, вместо серого экрана показываем
+             фирменный фон с маскотом — «пустого» старта больше нет -->
+        <item name="android:windowBackground">@drawable/bg_launch</item>
+    </style>
 
     <!-- Monet theme only support S+ -->
     <style name="Theme.Tachiyomi.Monet" />

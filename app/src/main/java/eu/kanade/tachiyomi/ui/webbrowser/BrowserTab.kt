@@ -1,7 +1,9 @@
 package eu.kanade.tachiyomi.ui.webbrowser
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -26,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -38,15 +39,21 @@ import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
 
 /**
- * Браузер — как веб-вкладка из старого PWA, но нативной страницей:
- * адресная строка, прогресс загрузки, история Назад/Вперёд, в пределах
- * экрана приложения (не под шторкой).
+ * Браузер с ПЕРСИСТЕНТНЫМ WebView: единственный экземпляр живёт, пока живо
+ * приложение, и переиспользуется при каждом входе на вкладку. Переключение
+ * на другие вкладки больше НЕ перезапускает страницу и не сбрасывает
+ * позицию — раньше onRelease вызывал destroy() и всё начиналось заново.
  */
 data object BrowserTab : Tab {
 
     private const val HOME_URL = "https://mangabuff.ru"
 
-    private var activeWebView: WebView? = null
+    @SuppressLint("StaticFieldLeak") // applicationContext — утечки нет
+    private var sharedWebView: WebView? = null
+
+    private var urlState = mutableStateOf(HOME_URL)
+    private var canGoBackState = mutableStateOf(false)
+    private var progressState = mutableFloatStateOf(1f)
 
     override val options: TabOptions
         @Composable
@@ -62,14 +69,47 @@ data object BrowserTab : Tab {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
+    private fun obtainWebView(context: Context): WebView {
+        sharedWebView?.let { return it }
+
+        val webView = WebView(context.applicationContext).apply {
+            setBackgroundColor(Color.parseColor("#13141F"))
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            settings.loadWithOverviewMode = true
+            settings.useWideViewPort = true
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+            webChromeClient = object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView, newProgress: Int) {
+                    progressState.floatValue = newProgress / 100f
+                }
+            }
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String?) {
+                    canGoBackState.value = view.canGoBack()
+                    url?.let { urlState.value = it }
+                }
+            }
+            loadUrl(HOME_URL)
+        }
+        sharedWebView = webView
+        return webView
+    }
+
     @Composable
     override fun Content() {
-        var urlBar by remember { mutableStateOf(HOME_URL) }
-        var canGoBack by remember { mutableStateOf(false) }
-        var progress by remember { mutableFloatStateOf(1f) }
+        var urlBar by urlState
+        val canGoBack by canGoBackState
+        val progress by progressState
 
         BackHandler(enabled = canGoBack) {
-            activeWebView?.goBack()
+            sharedWebView?.goBack()
         }
 
         Column(
@@ -96,9 +136,10 @@ data object BrowserTab : Tab {
                                 val target = when {
                                     input.startsWith("http://") || input.startsWith("https://") -> input
                                     input.contains('.') && !input.contains(' ') -> "https://$input"
-                                    else -> "https://www.google.com/search?q=" + java.net.URLEncoder.encode(input, "UTF-8")
+                                    else -> "https://www.google.com/search?q=" +
+                                        java.net.URLEncoder.encode(input, "UTF-8")
                                 }
-                                activeWebView?.loadUrl(target)
+                                sharedWebView?.loadUrl(target)
                             },
                         ) {
                             Icon(Icons.Outlined.Refresh, contentDescription = "Перейти/обновить")
@@ -117,39 +158,20 @@ data object BrowserTab : Tab {
                     .fillMaxSize()
                     .weight(1f),
                 factory = { ctx ->
-                    WebView(ctx).apply {
-                        setBackgroundColor(Color.parseColor("#13141F"))
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        settings.loadWithOverviewMode = true
-                        settings.useWideViewPort = true
-                        settings.setSupportZoom(true)
-                        settings.builtInZoomControls = true
-                        settings.displayZoomControls = false
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView, newProgress: Int) {
-                                progress = newProgress / 100f
-                            }
-                        }
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView, url: String?) {
-                                canGoBack = view.canGoBack()
-                                url?.let { urlBar = it }
-                            }
-                        }
-                        loadUrl(HOME_URL)
-                        activeWebView = this
-                    }
+                    val webView = obtainWebView(ctx)
+                    // Отцепляем от прошлого родителя, если вкладку пересоздали
+                    (webView.parent as? ViewGroup)?.removeView(webView)
+                    webView.onResume()
+                    webView
                 },
                 update = { webView ->
-                    activeWebView = webView
-                    canGoBack = webView.canGoBack()
+                    canGoBackState.value = webView.canGoBack()
                 },
                 onRelease = { webView ->
-                    if (activeWebView === webView) activeWebView = null
-                    webView.destroy()
+                    // НЕ destroy(): просто ставим на паузу и отцепляем от иерархии,
+                    // страница и позиция скролла сохраняются до возврата на вкладку
+                    webView.onPause()
+                    (webView.parent as? ViewGroup)?.removeView(webView)
                 },
             )
         }

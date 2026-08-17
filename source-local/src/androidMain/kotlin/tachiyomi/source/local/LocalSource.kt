@@ -35,6 +35,7 @@ import tachiyomi.core.metadata.tachiyomi.MangaDetails
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
+import tachiyomi.source.local.filter.GenreFilter
 import tachiyomi.source.local.filter.OrderBy
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.io.Archive
@@ -55,6 +56,37 @@ actual class LocalSource(
 
     private val json: Json by injectLazy()
     private val xml: XML by injectLazy()
+
+    /** Кэш «имя манги -> жанры из ComicInfo.xml» + общий отсортированный список. */
+    private val genreCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+    private fun genresOf(mangaDir: UniFile): List<String> {
+        val key = mangaDir.name.orEmpty()
+        genreCache[key]?.let { return it }
+        val genres = runCatching {
+            if (!mangaDir.isDirectory) return@runCatching emptyList()
+            val comicInfo = mangaDir.listFiles().orEmpty()
+                .firstOrNull { it.name == COMIC_INFO_FILE } ?: return@runCatching emptyList()
+            val text = comicInfo.openInputStream().bufferedReader().use { it.readText() }
+            Regex("<Genre>(.*?)</Genre>", RegexOption.DOT_MATCHES_ALL)
+                .find(text)
+                ?.groupValues?.get(1)
+                ?.split(',', ';')
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+        genreCache[key] = genres
+        return genres
+    }
+
+    private fun allKnownGenres(): List<String> {
+        // Прогреваем кэш по всем мангам (быстро: только ComicInfo.xml корня)
+        fileSystem.getFilesInBaseDirectory()
+            .filter { it.isDirectory }
+            .forEach { genresOf(it) }
+        return genreCache.values.flatten().distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
 
     @Suppress("PrivatePropertyName")
     private val PopularFilters = FilterList(OrderBy.Popular(context))
@@ -100,6 +132,14 @@ actual class LocalSource(
 
         filters.forEach { filter ->
             when (filter) {
+                is GenreFilter -> {
+                    val genre = filter.selectedGenre
+                    if (genre != null) {
+                        mangaDirs = mangaDirs.filter { dir ->
+                            genresOf(dir).any { it.equals(genre, ignoreCase = true) }
+                        }
+                    }
+                }
                 is OrderBy.Popular -> {
                     mangaDirs = if (filter.state!!.ascending) {
                         mangaDirs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name.orEmpty() })
@@ -294,7 +334,18 @@ actual class LocalSource(
         val chapters = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
-            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) }
+            .filterNot { it.name.orEmpty().lowercase() in setOf("local", "downloads", "backup", "autobackup", "covers") }
+            // Папка-глава засчитывается только если в ней есть изображения —
+            // случайные служебные подпапки больше не выглядят «главами»
+            .filter { entry ->
+                when {
+                    Archive.isSupported(entry) || entry.extension.equals("epub", true) -> true
+                    entry.isDirectory -> entry.listFiles().orEmpty().any { page ->
+                        ImageUtil.isImage(page.name) { page.openInputStream() }
+                    }
+                    else -> false
+                }
+            }
             .map { chapterFile ->
                 SChapter.create().apply {
                     url = "${manga.url}/${chapterFile.name}"
@@ -335,7 +386,10 @@ actual class LocalSource(
     }
 
     // Filters
-    override fun getFilterList() = FilterList(OrderBy.Popular(context))
+    override fun getFilterList() = FilterList(
+        OrderBy.Popular(context),
+        GenreFilter(runCatching { allKnownGenres() }.getOrDefault(emptyList())),
+    )
 
     // Unused stuff
     override suspend fun getPageList(chapter: SChapter): List<Page> = throw UnsupportedOperationException("Unused")
