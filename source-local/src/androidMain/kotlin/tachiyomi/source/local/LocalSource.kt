@@ -85,8 +85,8 @@ actual class LocalSource(
         }
 
         var mangaDirs = fileSystem.getFilesInBaseDirectory()
-            // Filter out files that are hidden and is not a folder
-            .filter { it.isDirectory && !it.name.orEmpty().startsWith('.') }
+            // Папки-манги И одиночные архивы CBZ/CBR/ZIP (как в CDisplayEx)
+            .filter { (it.isDirectory || Archive.isSupported(it)) && !it.name.orEmpty().startsWith('.') }
             .distinctBy { it.name }
             .filter {
                 if (lastModifiedLimit == 0L && query.isBlank()) {
@@ -124,7 +124,11 @@ actual class LocalSource(
             .map { mangaDir ->
                 async {
                     SManga.create().apply {
-                        title = mangaDir.name.orEmpty()
+                        title = if (mangaDir.isDirectory) {
+                            mangaDir.name.orEmpty()
+                        } else {
+                            mangaDir.nameWithoutExtension.orEmpty()
+                        }
                         url = mangaDir.name.orEmpty()
 
                         // Try to find the cover
@@ -266,6 +270,25 @@ actual class LocalSource(
 
     // Chapters
     private suspend fun getChapterList(manga: SManga): List<SChapter> = withIOContext {
+        // Одиночный архив (CBZ/CBR в корне хранилища): манга = единственная глава
+        val singleArchive = fileSystem.getMangaDirectory(manga.url) == null
+        if (singleArchive) {
+            val file = fileSystem.findEntry(manga.url)
+            if (file != null && Archive.isSupported(file)) {
+                val chapter = SChapter.create().apply {
+                    url = manga.url
+                    name = file.nameWithoutExtension.orEmpty()
+                    date_upload = file.lastModified()
+                    chapter_number = 1f
+                }
+                if (manga.thumbnail_url.isNullOrBlank()) {
+                    updateCover(chapter, manga)
+                }
+                return@withIOContext listOf(chapter)
+            }
+            return@withIOContext emptyList()
+        }
+
         val chapters = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
@@ -317,10 +340,14 @@ actual class LocalSource(
 
     fun getFormat(chapter: SChapter): Format {
         try {
-            val (mangaDirName, chapterName) = chapter.url.split('/', limit = 2)
-            return fileSystem.getBaseDirectory()
-                ?.findFile(mangaDirName)
-                ?.findFile(chapterName)
+            val parts = chapter.url.split('/', limit = 2)
+            val entry = if (parts.size == 2) {
+                fileSystem.findEntry(parts[0])?.findFile(parts[1])
+            } else {
+                // Одиночный архив: манга = глава, url без '/'
+                fileSystem.findEntry(parts[0])
+            }
+            return entry
                 ?.let(Format.Companion::valueOf)
                 ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
         } catch (e: Format.UnknownFormatException) {

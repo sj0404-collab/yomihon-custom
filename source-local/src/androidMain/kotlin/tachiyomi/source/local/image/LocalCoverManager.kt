@@ -17,11 +17,17 @@ actual class LocalCoverManager(
 ) {
 
     actual fun find(mangaUrl: String): UniFile? {
-        return fileSystem.getFilesInMangaDirectory(mangaUrl)
+        val inDir = fileSystem.getFilesInMangaDirectory(mangaUrl)
             // Get all file whose names start with "cover"
             .filter { it.isFile && it.nameWithoutExtension.equals("cover", ignoreCase = true) }
             // Get the first actual image
             .firstOrNull { ImageUtil.isImage(it.name) { it.openInputStream() } }
+        if (inDir != null) return inDir
+
+        // Одиночный архив: обложка хранится в скрытой папке .covers
+        return coversDirectory()
+            ?.findFile("$mangaUrl.jpg")
+            ?.takeIf { it.isFile }
     }
 
     actual fun update(
@@ -29,12 +35,17 @@ actual class LocalCoverManager(
         inputStream: InputStream,
     ): UniFile? {
         val directory = fileSystem.getMangaDirectory(manga.url)
-        if (directory == null) {
-            inputStream.close()
-            return null
+        val targetFile = if (directory != null) {
+            find(manga.url) ?: directory.createFile(DEFAULT_COVER_NAME)!!
+        } else {
+            // Манга = одиночный CBZ/CBR: первую картинку архива кладём в .covers
+            val coversDir = coversDirectory()
+            if (coversDir == null) {
+                inputStream.close()
+                return null
+            }
+            coversDir.findFile("${manga.url}.jpg") ?: coversDir.createFile("${manga.url}.jpg")!!
         }
-
-        val targetFile = find(manga.url) ?: directory.createFile(DEFAULT_COVER_NAME)!!
 
         inputStream.use { input ->
             targetFile.openOutputStream().use { output ->
@@ -42,9 +53,13 @@ actual class LocalCoverManager(
             }
         }
 
-        DiskUtil.createNoMediaFile(directory, context)
+        (directory ?: coversDirectory())?.let { DiskUtil.createNoMediaFile(it, context) }
 
         manga.thumbnail_url = targetFile.uri.toString()
         return targetFile
+    }
+
+    private fun coversDirectory(): UniFile? {
+        return fileSystem.getBaseDirectory()?.createDirectory(".covers")
     }
 }

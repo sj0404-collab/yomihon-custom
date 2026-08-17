@@ -64,8 +64,12 @@ fun BrowseSourceContent(
             val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, flags)
             storagePreferences.baseStorageDirectory.set(uri.toString())
-            context.toast(MR.strings.requires_app_restart)
-            mangaList.refresh()
+            // Перезапуск не нужен: StorageManager подхватывает новую папку на лету
+            // (асинхронно), поэтому пересканируем список с небольшой задержкой.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                { mangaList.refresh() },
+                600,
+            )
         }
     }
 

@@ -62,6 +62,9 @@ class StorageManager(
     fun getLocalSourceDirectory(): UniFile? {
         return baseDir?.createDirectory(LOCAL_SOURCE_PATH)
     }
+
+    /** Корень выбранного хранилища — для сканирования манги прямо в нём (как CDisplayEx). */
+    fun getBaseDirectory(): UniFile? = baseDir
 }
 
 private const val AUTOMATIC_BACKUPS_PATH = "autobackup"
