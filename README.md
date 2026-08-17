@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="./.github/assets/logo.png" alt="Yomihon logo" width="128" height="128" />
+<img src="./.github/assets/logo.png" alt="Yomikai logo" width="128" height="128" />
 
-# Yomihon
+# Yomikai
 ### Full-Featured Reader for Android
 Discover and read manga, webtoons, comics, and more – easier than ever on your Android device.
 

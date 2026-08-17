@@ -313,8 +313,10 @@ class MainActivity : BaseActivity() {
         val context = LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
 
-        // App updates
+        // App updates — отложены, чтобы не конкурировать с отрисовкой первого
+        // экрана за сеть и CPU (главная причина долгого старта при интернете)
         LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(UPDATE_CHECKS_DELAY)
             if (updaterEnabled) {
                 try {
                     val result = AppUpdateChecker().checkForUpdate(context)
@@ -333,8 +335,9 @@ class MainActivity : BaseActivity() {
             }
         }
 
-        // Extensions updates
+        // Extensions updates — тоже после полной отрисовки UI
         LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(UPDATE_CHECKS_DELAY)
             try {
                 ExtensionApi().checkForUpdates(context)
             } catch (e: Exception) {
@@ -619,6 +622,7 @@ class MainActivity : BaseActivity() {
 }
 
 // Splash screen
-private const val SPLASH_MIN_DURATION = 500 // ms
+private const val UPDATE_CHECKS_DELAY = 5000L // ms; сеть — только после отрисовки UI
+private const val SPLASH_MIN_DURATION = 0 // ms; не держим пользователя на сплэше искусственно
 private const val SPLASH_MAX_DURATION = 5000 // ms
 private const val SPLASH_EXIT_ANIM_DURATION = 400L // ms

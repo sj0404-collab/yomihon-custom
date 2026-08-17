@@ -47,6 +47,7 @@ jobs:
       - name: Build
         run: ./gradlew assembleRelease -Pinclude-telemetry -Penable-updater --stacktrace
         env:
+          RELEASE_TAG: ${{ needs.get_tag.outputs.tag }}
           storeFileBase64: ${{ secrets.SIGNING_KEY }}
           storePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyAlias: ${{ secrets.ALIAS }}
@@ -97,6 +98,7 @@ jobs:
       - name: Build
         run: ./gradlew assembleFoss -Penable-updater
         env:
+          RELEASE_TAG: ${{ needs.get_tag.outputs.tag }}
           storeFileBase64: ${{ secrets.SIGNING_KEY }}
           storePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyAlias: ${{ secrets.ALIAS }}

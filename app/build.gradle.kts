@@ -32,8 +32,19 @@ android {
     defaultConfig {
         applicationId = "app.yomihon"
 
-        versionCode = 38
-        versionName = "0.7.2"
+        // Версия подтягивается из релизного тега автоматически (CI передаёт
+        // RELEASE_TAG, напр. "v0.8.0-pwa" -> versionName 0.8.0, versionCode 800).
+        // Локальные сборки используют fallback ниже.
+        val tagVersion = System.getenv("RELEASE_TAG")
+            ?.removePrefix("v")
+            ?.substringBefore("-")
+            ?.takeIf { it.matches(Regex("""\d+\.\d+\.\d+""")) }
+        val fallbackVersion = "0.8.0"
+        val effectiveVersion = tagVersion ?: fallbackVersion
+        val (vMajor, vMinor, vPatch) = effectiveVersion.split(".").map(String::toInt)
+
+        versionCode = vMajor * 10000 + vMinor * 100 + vPatch
+        versionName = effectiveVersion
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")

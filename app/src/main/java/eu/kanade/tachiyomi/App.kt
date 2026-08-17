@@ -90,7 +90,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     override fun onCreate() {
         super<Application>.onCreate()
         patchInjekt()
-        TelemetryConfig.init(applicationContext)
+        // Firebase/Telemetry инициализируется в фоне: на главном потоке при
+        // доступном интернете он ходил в сеть и заметно тормозил холодный старт
+        // (без интернетаинициализация мгновенно падала в fallback — поэтому
+        // "без интернета запускается быстрее").
+        Thread { TelemetryConfig.init(applicationContext) }
+            .apply { name = "telemetry-init"; priority = Thread.MIN_PRIORITY }
+            .start()
 
         GlobalExceptionHandler.initialize(applicationContext, CrashActivity::class.java)
 
