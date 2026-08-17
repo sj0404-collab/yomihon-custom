@@ -77,10 +77,11 @@ object HomeScreen : Screen() {
 
     private val TABS = listOf(
         LibraryTab,
-        eu.kanade.tachiyomi.ui.mangalib.MangaLibTab,
+        eu.kanade.tachiyomi.ui.locallibrary.LocalLibraryTab,
         UpdatesTab,
         HistoryTab,
         BrowseTab,
+        eu.kanade.tachiyomi.ui.webbrowser.BrowserTab,
         DictionaryTab,
         MoreTab,
     )

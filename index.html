@@ -1368,9 +1368,8 @@ function MangaLibTab() {
 
 /* ---------- App ---------- */
 var TABS = [
-  ['library', '📚', 'Библиотека'], ['mangalib', '📕', 'MangaLib'], ['updates', '🔄', 'Обновления'],
-  ['history', '🕒', 'История'], ['browse', '🌐', 'Обзор'], ['ocr', '🧠', 'OCR'],
-  ['voices', '🗣', 'Голоса'], ['settings', '⚙️', 'Ещё']
+  ['library', '📚', 'Библиотека'], ['updates', '🔄', 'Обновления'], ['history', '🕒', 'История'],
+  ['browse', '🌐', 'Обзор'], ['ocr', '🧠', 'OCR'], ['voices', '🗣', 'Голоса'], ['settings', '⚙️', 'Ещё']
 ];
 function App() {
   var st = useState('library'), tab = st[0], setTab = st[1];
@@ -1429,7 +1428,7 @@ function App() {
       ${hasBridge ? '✅ Подключено к нативному ядру Yomihon • React UI' : '🌐 Веб-режим: откройте PWA внутри приложения Yomihon'}
     </div>
     ${body != null ? html`<div class="content">${body}</div>` : null}
-    ${mlLoaded ? html`<div class="mlwrap ${isML ? 'on' : ''}"><${MangaLibTab} /></div>` : null}
+    
     <div class="nav">
       ${TABS.map(function (t) {
         return html`<button key=${t[0]} class="nav-b ${tab === t[0] ? 'act' : ''}"
