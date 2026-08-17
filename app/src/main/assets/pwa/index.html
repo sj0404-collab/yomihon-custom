@@ -9,11 +9,11 @@
 <link rel="icon" href="./icon-192.png">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <style>
-:root{--bg:#0F172A;--bg2:#1E293B;--bg3:#283548;--accent:#6366F1;--accent2:#818CF8;--text:#E2E8F0;--muted:#94A3B8;--success:#10B981;--warn:#F59E0B;--radius:14px}
+:root{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--bg:#0F172A;--bg2:#1E293B;--bg3:#283548;--accent:#6366F1;--accent2:#818CF8;--text:#E2E8F0;--muted:#94A3B8;--success:#10B981;--warn:#F59E0B;--radius:14px}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;overscroll-behavior:none}
-.app{padding-bottom:76px}
-.hdr{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(15,23,42,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--bg3)}
+.app{padding-bottom:calc(76px + var(--sab))}
+.hdr{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;padding-top:calc(12px + var(--sat));background:rgba(15,23,42,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--bg3)}
 .hdr-t{font-weight:800;font-size:16px}.ver{color:var(--muted);font-size:12px;font-weight:600}
 .hdr-a{display:flex;gap:8px}
 .ibtn{background:var(--bg2);color:var(--text);border:1px solid var(--bg3);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer}
@@ -21,7 +21,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI'
 .banner{padding:8px 16px;font-size:12px;font-weight:600;background:rgba(16,185,129,.12);border-bottom:1px solid rgba(16,185,129,.4);color:var(--success)}
 .banner.off{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);color:var(--warn)}
 .content{padding:12px 14px}
-.nav{position:fixed;left:0;right:0;bottom:0;z-index:100;display:flex;background:rgba(15,23,42,.96);backdrop-filter:blur(10px);border-top:1px solid var(--bg3);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:100;display:flex;background:rgba(15,23,42,.96);backdrop-filter:blur(10px);border-top:1px solid var(--bg3);padding:6px 4px calc(6px + var(--sab))}
 .nav-b{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:transparent;color:var(--muted);border:none;padding:6px 2px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer}
 .nav-b.act{color:var(--accent2)}.nico{font-size:17px}
 .card{background:var(--bg2);border:1px solid var(--bg3);border-radius:var(--radius);padding:14px;margin-bottom:12px}
@@ -44,6 +44,12 @@ input[type=range]{width:100%}
 .badge{display:inline-block;background:var(--accent);color:#fff;border-radius:999px;font-size:11px;font-weight:800;padding:2px 8px}
 .badge.muted{background:var(--bg3);color:var(--muted)}
 .empty{text-align:center;color:var(--muted);padding:44px 20px;font-size:14px;line-height:1.6}
+.loadrow{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:13px;font-weight:600;padding:18px 12px}
+.mlwrap{position:fixed;top:0;left:0;right:0;bottom:calc(56px + var(--sab));display:none;z-index:50;background:var(--bg)}
+.mlwrap.on{display:block}
+.mlframe{width:100%;height:100%;border:none;display:block;background:var(--bg)}
+.spin{width:16px;height:16px;border:2px solid var(--bg3);border-top-color:var(--accent);border-radius:50%;flex-shrink:0;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .empty .big{font-size:40px;margin-bottom:10px}
 .swrow{display:flex;align-items:center;justify-content:space-between;padding:10px 0;gap:10px}
 .lbl{font-size:14px;font-weight:600}.sub{color:var(--muted);font-size:12px;margin-top:2px}
@@ -58,12 +64,12 @@ input[type=range]{width:100%}
 .sortsel{width:auto;background:var(--bg2)}
 .counter{color:var(--muted);font-size:12px;margin:0 2px 10px}
 .secH{font-size:12px;font-weight:800;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin:18px 4px 8px}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:1200;display:none;background:var(--bg2);border-top:2px solid var(--accent);border-radius:18px 18px 0 0;padding:16px;box-shadow:0 -4px 20px rgba(0,0,0,.6);max-height:60vh;overflow-y:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:1200;display:none;background:var(--bg2);border-top:2px solid var(--accent);border-radius:18px 18px 0 0;padding:16px;padding-bottom:calc(16px + var(--sab));box-shadow:0 -4px 20px rgba(0,0,0,.6);max-height:60vh;overflow-y:auto}
 .sheet.active{display:block}
 .sheet-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .sheet-t{font-weight:700;font-size:13px;color:var(--accent2)}
 .sheet-body{font-size:15px;line-height:1.6}
-.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--bg3);color:var(--text);padding:10px 18px;border-radius:999px;font-size:13px;font-weight:600;z-index:2000;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+.toast{position:fixed;left:50%;bottom:calc(84px + var(--sab));transform:translateX(-50%);background:var(--bg3);color:var(--text);padding:10px 18px;border-radius:999px;font-size:13px;font-weight:600;z-index:2000;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 .toast.show{opacity:1}
 
 
@@ -84,13 +90,13 @@ input[type=range]{width:100%}
 .chapbtn{background:transparent;border:none;font-size:16px;opacity:.28;padding:6px;cursor:pointer}
 .chapbtn.on{opacity:1}
 .reader{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;z-index:500}
-.rhead{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(15,23,42,.94);border-bottom:1px solid var(--bg3)}
+.rhead{display:flex;align-items:center;gap:10px;padding:10px 12px;padding-top:calc(10px + var(--sat));background:rgba(15,23,42,.94);border-bottom:1px solid var(--bg3)}
 .rtitle{flex:1;font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rpage{color:var(--muted);font-size:12px;font-weight:700}
 .rbody{flex:1;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;background:#000}
 .rimg{width:100%;height:auto;display:block}
 .rload{color:var(--muted);font-size:14px;text-align:center;padding:60px 20px;line-height:1.6}
-.rnav{display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:rgba(15,23,42,.94);border-top:1px solid var(--bg3)}
+.rnav{display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + var(--sab));background:rgba(15,23,42,.94);border-top:1px solid var(--bg3)}
 .rslider{flex:1}
 .ibtn.ocr{background:var(--accent);color:#fff;border:none}
 
@@ -601,12 +607,120 @@ function HistoryTab() {
   })}</div>`;
 }
 
+/* ---------- Расширения: полный менеджер внутри PWA (тот же ExtensionManager) ---------- */
+function stepLabel(step) {
+  if (step === 'Pending') return '⏳ В очереди…';
+  if (step === 'Downloading') return '⬇️ Скачивание…';
+  if (step === 'Installing') return '📦 Установка…';
+  if (step === 'Installed') return '✅ Установлено';
+  if (step === 'Error') return '⚠️ Ошибка';
+  return '';
+}
+function ExtensionsView(props) {
+  var st = useState({ installed: [], available: [], untrusted: [] }), data = st[0], setData = st[1];
+  var rf = useState(true), refreshing = rf[0], setRefreshing = rf[1];
+  var qq = useState(''), q = qq[0], setQ = qq[1];
+  var pollRef = useRef(null);
+
+  var reload = useCallback(function () {
+    setData(bridgeJson('getExtensionsList', { installed: [], available: [], untrusted: [] }));
+  }, []);
+
+  useEffect(function () {
+    reload();
+    if (!hasBridge || typeof B.refreshExtensions !== 'function') { setRefreshing(false); return; }
+    // Обновляем индекс репозиториев в фоне; честный индикатор через pollTask
+    var taskId = bridgeCall('refreshExtensions');
+    var poll = setInterval(function () {
+      var r = bridgeCall('pollTask', taskId);
+      if (!r) return;
+      clearInterval(poll);
+      setRefreshing(false);
+      reload();
+    }, 200);
+    // Пока идут установки — периодически перечитываем статусы
+    pollRef.current = setInterval(reload, 1200);
+    return function () { clearInterval(poll); clearInterval(pollRef.current); };
+  }, []);
+
+  var flt = function (list) {
+    if (!q) return list;
+    var s = q.toLowerCase();
+    return list.filter(function (x) { return (x.name || '').toLowerCase().indexOf(s) >= 0; });
+  };
+  var installed = flt(data.installed || []);
+  var available = flt(data.available || []);
+
+  var extRow = function (x, actions) {
+    return html`<div class="item" key=${x.pkgName} style=${{ cursor: 'default' }}>
+      <div class="thumb" style=${{ background: gradFor(x.name), height: '44px', width: '44px', fontSize: '16px', borderRadius: '10px' }}>${firstLetter(x.name)}</div>
+      <div class="body">
+        <div class="t">${x.name}${x.isNsfw ? html` <span class="badge" style=${{ background: '#EF4444' }}>18+</span>` : null}</div>
+        <div class="s">${(x.lang || '').toUpperCase()} • v${x.versionName}${x.step ? ' • ' + stepLabel(x.step) : ''}${x.isObsolete ? ' • устарело' : ''}</div>
+      </div>
+      ${actions}
+    </div>`;
+  };
+
+  return html`<div>
+    <div class="mhead" style=${{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <button class="ibtn" onClick=${props.onBack}>←</button>
+      <div style=${{ fontWeight: 800, flex: 1 }}>🧩 Расширения</div>
+      <button class="ibtn" onClick=${function () { reload(); toast('Обновлено'); }}>⟳</button>
+    </div>
+    <div class="toolbar">
+      <input class="search" placeholder="🔍 Поиск расширений…" value=${q}
+        onInput=${function (e) { setQ(e.target.value); }} />
+    </div>
+    ${refreshing ? html`<div class="loadrow"><span class="spin"></span>Обновление списка репозиториев…</div> ` : null}
+    ${(data.untrusted || []).length ? html`<div class="secH">Требуют доверия</div>
+      ${(data.untrusted || []).map(function (x) {
+        return html`<div class="item" key=${x.pkgName} style=${{ cursor: 'default' }}>
+          <div class="body"><div class="t">${x.name}</div><div class="s">Подтвердите доверие в нативном разделе</div></div>
+          <button class="ibtn" onClick=${function () { bridgeCall('openNativeScreen', 'extensions'); }}>Открыть</button>
+        </div>`;
+      })}` : null}
+    ${installed.length ? html`<div class="secH">Установленные (${installed.length})</div>
+      ${installed.map(function (x) {
+        return extRow(x, html`<div style=${{ display: 'flex', gap: '6px' }}>
+          ${x.hasUpdate ? html`<button class="ibtn" disabled=${!!x.step} onClick=${function () {
+            bridgeCall('updateExtension', x.pkgName); reload();
+          }}>⬆️</button>` : null}
+          <button class="ibtn" onClick=${function () {
+            bridgeCall('uninstallExtension', x.pkgName);
+            toast('Удаление ' + x.name + '…');
+            setTimeout(reload, 1500);
+          }}>🗑</button>
+        </div>`);
+      })}` : null}
+    <div class="secH">Доступные (${available.length})</div>
+    ${available.length ? available.map(function (x) {
+      return extRow(x, x.step && x.step !== 'Error'
+        ? html`<button class="ibtn" onClick=${function () { bridgeCall('cancelExtensionInstall', x.pkgName); reload(); }}>✕</button>`
+        : html`<button class="btn" style=${{ padding: '8px 12px', fontSize: '13px' }} onClick=${function () {
+            if (!hasBridge) return needApp();
+            if (typeof B.installExtension !== 'function') { bridgeCall('openNativeScreen', 'extensions'); return; }
+            bridgeCall('installExtension', x.pkgName);
+            toast('Установка ' + x.name + '…');
+            reload();
+          }}>Установить</button>`);
+    }) : (refreshing ? null : html`<${Empty} icon="🧩">Список пуст.<br/>Добавьте репозиторий расширений в нативных настройках<br/>(Ещё → Настройки → Обзор → Репозитории).<//>`)}
+    <${Card} title="⚙️ Нативный менеджер"
+      desc="Финальный шаг установки APK выполняет система. Если установка не началась — откройте нативный менеджер.">
+      <button class="btn sec block" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'extensions') : needApp(); }}>Открыть нативный менеджер</button>
+    <//>
+  </div>`;
+}
+
 /* ---------- Обзор: каталоги источников в HTML ---------- */
 function BrowseTab() {
-  var sv = useState(null), view = sv[0], setView = sv[1]; // null | {source}
+  var sv = useState(null), view = sv[0], setView = sv[1]; // null | {source} | 'extensions'
   var ss = useState([]), sources = ss[0], setSources = ss[1];
   useEffect(function () { setSources(bridgeJson('getSources', [])); }, []);
 
+  if (view === 'extensions') {
+    return html`<${ExtensionsView} onBack=${function () { setView(null); setSources(bridgeJson('getSources', [])); }} />`;
+  }
   if (view) {
     return html`<${SourceCatalog} source=${view} onBack=${function () { setView(null); }} />`;
   }
@@ -626,10 +740,10 @@ function BrowseTab() {
           <div class="s">${(src.lang || '').toUpperCase()}${src.supportsLatest ? ' • есть «Последнее»' : ''}</div></div>
         <span class="badge muted">›</span>
       </div>`;
-    }) : html`<${Empty} icon="🔌">Нет включённых источников.<br/>Установите расширения в нативном разделе (кнопка ниже) — после установки каталоги появятся здесь.<//>`}
+    }) : html`<${Empty} icon="🔌">Нет включённых источников.<br/>Установите расширения — после установки каталоги появятся здесь.<//>`}
     <${Card} title="🧩 Расширения"
-      desc="Установка и обновление расширений-источников выполняется в нативном менеджере (системная установка пакетов).">
-      <button class="btn sec block" onClick=${function () { hasBridge ? bridgeCall('openNativeScreen', 'extensions') : needApp(); }}>Открыть менеджер расширений</button>
+      desc="Просмотр, установка и обновление расширений-источников — прямо здесь, через нативный мост.">
+      <button class="btn block" onClick=${function () { hasBridge ? setView('extensions') : needApp(); }}>Открыть список расширений</button>
     <//>
   </div>`;
 }
@@ -645,26 +759,51 @@ function SourceCatalog(props) {
   var hn = useState(false), hasNext = hn[0], setHasNext = hn[1];
   var ld = useState(false), loading = ld[0], setLoading = ld[1];
   var er = useState(null), error = er[0], setError = er[1];
+  var loadSeq = useRef(0);
+  var pollRef = useRef(null);
 
   useEffect(function () {
     var t = setTimeout(function () { setDebQ(q); }, 450);
     return function () { clearTimeout(t); };
   }, [q]);
 
+  useEffect(function () {
+    return function () { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
   var effMode = debQ ? 'search' : mode;
 
   var load = useCallback(function (pageNum, append) {
     setLoading(true); setError(null);
-    setTimeout(function () {
-      var r = bridgeCall('browseSource', src.id, effMode, debQ, pageNum);
-      var d = null;
-      try { d = JSON.parse(r); } catch (e) {}
+    var seq = ++loadSeq.current;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    var finish = function (d) {
+      if (seq !== loadSeq.current) return; // устаревший ответ — игнорируем
       setLoading(false);
       if (!d || d.error) { setError((d && d.error) || 'Не удалось загрузить'); return; }
       setHasNext(!!d.hasNextPage);
       setPage(pageNum);
       setItems(function (prev) { return append ? prev.concat(d.items || []) : (d.items || []); });
-    }, 30);
+    };
+    // Точная индикация: задача выполняется в нативном фоне, JS-поток не блокируется,
+    // спиннер живёт ровно столько, сколько идёт реальная загрузка.
+    if (hasBridge && typeof B.startBrowseSource === 'function') {
+      var taskId = bridgeCall('startBrowseSource', src.id, effMode, debQ, pageNum);
+      pollRef.current = setInterval(function () {
+        var r = bridgeCall('pollTask', taskId);
+        if (!r) return;
+        clearInterval(pollRef.current); pollRef.current = null;
+        var d = null; try { d = JSON.parse(r); } catch (e) {}
+        finish(d);
+      }, 120);
+    } else {
+      // старое ядро без асинхронного API — прежний путь
+      setTimeout(function () {
+        var r = bridgeCall('browseSource', src.id, effMode, debQ, pageNum);
+        var d = null; try { d = JSON.parse(r); } catch (e) {}
+        finish(d);
+      }, 30);
+    }
   }, [src.id, effMode, debQ]);
 
   useEffect(function () { setItems([]); load(1, false); }, [effMode, debQ]);
@@ -696,7 +835,7 @@ function SourceCatalog(props) {
         </div>`;
       })}
     </div>
-    ${loading ? html`<div class="empty">⏳ Загрузка…</div>` : null}
+    ${loading ? html`<div class="loadrow"><span class="spin"></span>${debQ ? 'Поиск в источнике…' : 'Загрузка каталога…'}</div>` : null}
     ${!loading && hasNext ? html`<button class="btn sec block" style=${{ margin: '8px 0 20px' }}
       onClick=${function () { load(page + 1, true); }}>Показать ещё</button>` : null}
     ${!loading && !items.length && !error ? html`<${Empty} icon="🔍">Ничего не найдено<//>` : null}
@@ -1128,13 +1267,24 @@ function Reader(props) {
   </div>`;
 }
 
+/* ---------- MangaLib: встроенное PWA как отдельная вкладка ----------
+ * Полноценное приложение MangaLib (свои источники, библиотека, читалка)
+ * живёт в iframe из тех же assets. Данные (localStorage/IndexedDB) у него
+ * свои, интерфейс не смешивается с Yomihon — просто вторая вкладка. */
+function MangaLibTab() {
+  return html`<iframe class="mlframe" src="./mangalib/index.html"
+    allow="fullscreen" title="MangaLib"></iframe>`;
+}
+
 /* ---------- App ---------- */
 var TABS = [
-  ['library', '📚', 'Библиотека'], ['updates', '🔄', 'Обновления'], ['history', '🕒', 'История'],
-  ['browse', '🌐', 'Обзор'], ['ocr', '🧠', 'OCR'], ['voices', '🗣', 'Голоса'], ['settings', '⚙️', 'Ещё']
+  ['library', '📚', 'Библиотека'], ['mangalib', '📕', 'MangaLib'], ['updates', '🔄', 'Обновления'],
+  ['history', '🕒', 'История'], ['browse', '🌐', 'Обзор'], ['ocr', '🧠', 'OCR'],
+  ['voices', '🗣', 'Голоса'], ['settings', '⚙️', 'Ещё']
 ];
 function App() {
   var st = useState('library'), tab = st[0], setTab = st[1];
+  var ml = useState(false), mlLoaded = ml[0], setMlLoaded = ml[1];
   var rk = useState(0), refreshKey = rk[0], setRefreshKey = rk[1];
   var oc = useState(null), ocrText = oc[0], setOcrText = oc[1];
   var mg = useState(null), mangaId = mg[0], setMangaId = mg[1];
@@ -1170,10 +1320,12 @@ function App() {
   else if (tab === 'browse') body = h(BrowseTab, null);
   else if (tab === 'ocr') body = h(OcrTab, { key: 'ocr' + refreshKey });
   else if (tab === 'voices') body = h(VoicesTab, { key: 'v' + refreshKey });
+  else if (tab === 'mangalib') body = null;
   else body = h(SettingsTab, { info: info });
 
+  var isML = tab === 'mangalib';
   return html`<div class="app">
-    <div class="hdr">
+    <div class="hdr" style=${isML ? { display: 'none' } : null}>
       <div class="hdr-t">📚 Yomihon${info ? html` <span class="ver">v${info.versionName}</span>` : null}</div>
       <div class="hdr-a">
         <button class="ibtn" onClick=${function () {
@@ -1183,14 +1335,15 @@ function App() {
         <button class="ibtn" onClick=${function () { setRefreshKey(refreshKey + 1); toast('Обновлено'); }}>⟳</button>
       </div>
     </div>
-    <div class="banner ${hasBridge ? '' : 'off'}">
+    <div class="banner ${hasBridge ? '' : 'off'}" style=${isML ? { display: 'none' } : null}>
       ${hasBridge ? '✅ Подключено к нативному ядру Yomihon • React UI' : '🌐 Веб-режим: откройте PWA внутри приложения Yomihon'}
     </div>
-    <div class="content">${body}</div>
+    ${body != null ? html`<div class="content">${body}</div>` : null}
+    ${mlLoaded ? html`<div class="mlwrap ${isML ? 'on' : ''}"><${MangaLibTab} /></div>` : null}
     <div class="nav">
       ${TABS.map(function (t) {
         return html`<button key=${t[0]} class="nav-b ${tab === t[0] ? 'act' : ''}"
-          onClick=${function () { setTab(t[0]); }}>
+          onClick=${function () { if (t[0] === 'mangalib') setMlLoaded(true); setTab(t[0]); }}>
           <span class="nico">${t[1]}</span><span>${t[2]}</span></button>`;
       })}
     </div>

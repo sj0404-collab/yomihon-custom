@@ -7,7 +7,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -78,6 +81,13 @@ object PwaScreen : Screen() {
             )
         }
 
+        // Реальные системные отступы (статус-бар/навигация): env(safe-area-inset-*)
+        // в Android WebView всегда 0, из-за чего нижняя навигация PWA уезжала
+        // под системную панель. Пробрасываем инсеты в CSS-переменные --sat/--sab.
+        val insets = WindowInsets.systemBars.asPaddingValues()
+        val topPx = insets.calculateTopPadding().value
+        val bottomPx = insets.calculateBottomPadding().value
+
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -86,11 +96,32 @@ object PwaScreen : Screen() {
                     settings.domStorageEnabled = true
                     settings.allowFileAccess = true
                     settings.allowContentAccess = true
-                    webViewClient = WebViewClient()
+                    // Встроенное MangaLib PWA (iframe из assets) ходит по https
+                    // за обложками/главами, а само открыто с file:// — без этих
+                    // флагов WebView блокирует такие запросы.
+                    @Suppress("DEPRECATION")
+                    settings.allowFileAccessFromFileURLs = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            view.evaluateJavascript(
+                                "document.documentElement.style.setProperty('--sat','${topPx}px');" +
+                                    "document.documentElement.style.setProperty('--sab','${bottomPx}px');",
+                                null,
+                            )
+                        }
+                    }
                     webChromeClient = WebChromeClient()
                     addJavascriptInterface(bridge, "YomihonBridge")
                     loadUrl("file:///android_asset/pwa/index.html")
                 }
+            },
+            update = { webView ->
+                webView.evaluateJavascript(
+                    "document.documentElement.style.setProperty('--sat','${topPx}px');" +
+                        "document.documentElement.style.setProperty('--sab','${bottomPx}px');",
+                    null,
+                )
             },
         )
     }

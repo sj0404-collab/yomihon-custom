@@ -1,9 +1,10 @@
-const CACHE_NAME = 'yomihon-pwa-v8';
+const CACHE_NAME = 'yomihon-pwa-v9';
 const ASSETS = [
   './index.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './mangalib/index.html'
 ];
 
 self.addEventListener('install', (event) => {

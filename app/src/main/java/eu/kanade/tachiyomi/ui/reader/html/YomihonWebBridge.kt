@@ -20,7 +20,10 @@ import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -94,6 +97,7 @@ class YomihonWebBridge(
     private val updateManga: UpdateManga by lazy { Injekt.get() }
     private val updateMangaFromRemote: UpdateMangaFromRemote by lazy { Injekt.get() }
     private val downloadManager: DownloadManager by lazy { Injekt.get() }
+    private val extensionManager: ExtensionManager by lazy { Injekt.get() }
     private val getCategories: GetCategories by lazy { Injekt.get() }
     private val setMangaCategories: SetMangaCategories by lazy { Injekt.get() }
     private val createCategoryWithName: CreateCategoryWithName by lazy { Injekt.get() }
@@ -488,6 +492,172 @@ class YomihonWebBridge(
                 )
             }
         }.getOrDefault("error:internal")
+    }
+
+    // endregion
+
+    // region Async tasks: точная индикация загрузки без блокировки JS-потока
+
+    /**
+     * Запускает загрузку каталога в фоне и сразу возвращает id задачи.
+     * Раньше browseSource выполнялся синхронно в JS-потоке WebView — интерфейс
+     * замирал, а спиннер «Загрузка…» не соответствовал реальному состоянию.
+     * Теперь фронт опрашивает pollTask(id) и индикатор честный.
+     */
+    @JavascriptInterface
+    fun startBrowseSource(sourceIdStr: String, mode: String, query: String, page: Int): Int {
+        val taskId = taskCounter.incrementAndGet()
+        ioScope.launch {
+            val result = runCatching { browseSource(sourceIdStr, mode, query, page) }
+                .getOrElse { e -> """{"error":${JSONObject.quote(e.message ?: "ошибка сети")}}""" }
+            taskResults[taskId] = result
+        }
+        return taskId
+    }
+
+    /** Пустая строка = задача ещё выполняется; иначе — готовый JSON (одноразово). */
+    @JavascriptInterface
+    fun pollTask(taskId: Int): String {
+        val r = taskResults[taskId] ?: return ""
+        taskResults.remove(taskId)
+        return r
+    }
+
+    // endregion
+
+    // region Extensions: список, установка и удаление прямо из PWA (как в нативе)
+
+    /** Обновляет список доступных расширений с репозиториев. Возвращает id задачи. */
+    @JavascriptInterface
+    fun refreshExtensions(): Int {
+        val taskId = taskCounter.incrementAndGet()
+        ioScope.launch {
+            runCatching { extensionManager.findAvailableExtensions() }
+            taskResults[taskId] = "done"
+        }
+        return taskId
+    }
+
+    /**
+     * Установленные + доступные для скачивания расширения одним JSON.
+     * Тот же ExtensionManager, что и у нативного экрана — никаких заглушек.
+     */
+    @JavascriptInterface
+    fun getExtensionsList(): String {
+        return runCatching {
+            val installed = extensionManager.installedExtensionsFlow.value
+            val installedPkgs = installed.map { it.pkgName }.toSet()
+            val available = extensionManager.availableExtensionsFlow.value
+            val untrusted = extensionManager.untrustedExtensionsFlow.value
+            JSONObject().apply {
+                put(
+                    "installed",
+                    JSONArray().apply {
+                        installed.sortedBy { it.name.lowercase() }.forEach { ext ->
+                            put(
+                                JSONObject().apply {
+                                    put("pkgName", ext.pkgName)
+                                    put("name", ext.name)
+                                    put("versionName", ext.versionName)
+                                    put("lang", ext.lang)
+                                    put("isNsfw", ext.isNsfw)
+                                    put("hasUpdate", ext.hasUpdate)
+                                    put("isObsolete", ext.isObsolete)
+                                    put("step", extensionSteps[ext.pkgName] ?: "")
+                                },
+                            )
+                        }
+                    },
+                )
+                put(
+                    "available",
+                    JSONArray().apply {
+                        available
+                            .filter { it.pkgName !in installedPkgs }
+                            .sortedWith(compareBy({ it.lang != "ru" && it.lang != "all" }, { it.name.lowercase() }))
+                            .forEach { ext ->
+                                put(
+                                    JSONObject().apply {
+                                        put("pkgName", ext.pkgName)
+                                        put("name", ext.name)
+                                        put("versionName", ext.versionName)
+                                        put("lang", ext.lang)
+                                        put("isNsfw", ext.isNsfw)
+                                        put("iconUrl", ext.iconUrl)
+                                        put("step", extensionSteps[ext.pkgName] ?: "")
+                                    },
+                                )
+                            }
+                    },
+                )
+                put(
+                    "untrusted",
+                    JSONArray().apply {
+                        untrusted.forEach { ext ->
+                            put(JSONObject().apply { put("pkgName", ext.pkgName); put("name", ext.name) })
+                        }
+                    },
+                )
+            }.toString()
+        }.getOrDefault("""{"installed":[],"available":[],"untrusted":[]}""")
+    }
+
+    /**
+     * Скачивает и устанавливает расширение. Прогресс (Pending/Downloading/Installing/
+     * Installed/Error) фронт читает через getExtensionsList — поле step.
+     * Финальная установка APK идёт через системный инсталлятор, как в нативе.
+     */
+    @JavascriptInterface
+    fun installExtension(pkgName: String): Boolean {
+        val ext = extensionManager.availableExtensionsFlow.value.find { it.pkgName == pkgName }
+            ?: return false
+        extensionSteps[pkgName] = InstallStep.Pending.name
+        ioScope.launch {
+            extensionManager.installExtension(ext)
+                .onEach { step ->
+                    extensionSteps[pkgName] = step.name
+                    if (step == InstallStep.Installed || step == InstallStep.Error) {
+                        // держим финальный статус недолго, чтобы фронт успел показать
+                        launch {
+                            kotlinx.coroutines.delay(4000)
+                            if (extensionSteps[pkgName] == step.name) extensionSteps.remove(pkgName)
+                        }
+                    }
+                }
+                .catch { extensionSteps[pkgName] = InstallStep.Error.name }
+                .collect()
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun updateExtension(pkgName: String): Boolean {
+        val ext = extensionManager.installedExtensionsFlow.value.find { it.pkgName == pkgName }
+            ?: return false
+        extensionSteps[pkgName] = InstallStep.Pending.name
+        ioScope.launch {
+            extensionManager.updateExtension(ext)
+                .onEach { step -> extensionSteps[pkgName] = step.name }
+                .catch { extensionSteps[pkgName] = InstallStep.Error.name }
+                .collect()
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun uninstallExtension(pkgName: String) {
+        val ext = extensionManager.installedExtensionsFlow.value.find { it.pkgName == pkgName }
+            ?: return
+        extensionManager.uninstallExtension(ext)
+    }
+
+    @JavascriptInterface
+    fun cancelExtensionInstall(pkgName: String) {
+        val ext = extensionManager.availableExtensionsFlow.value.find { it.pkgName == pkgName }
+            ?: extensionManager.installedExtensionsFlow.value.find { it.pkgName == pkgName }
+            ?: return
+        extensionManager.cancelInstallUpdateExtension(ext)
+        extensionSteps.remove(pkgName)
     }
 
     // endregion
