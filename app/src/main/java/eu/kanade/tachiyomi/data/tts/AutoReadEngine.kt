@@ -214,7 +214,7 @@ class AutoReadEngine(
                     else -> true
                 }
             }
-            return matching.toFloat() / letters.size >= 0.6f
+            return matching.toFloat() / letters.length >= 0.6f
         }
     }
 }

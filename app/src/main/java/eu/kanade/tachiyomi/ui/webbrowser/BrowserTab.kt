@@ -72,6 +72,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.util.Tab
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.data.tts.AutoReadEngine
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import kotlinx.coroutines.delay
@@ -212,7 +214,7 @@ data object BrowserTab : Tab {
                 while (!finished && isAutoRead) delay(150)
                 if (!isAutoRead) break
 
-                val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                val prefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
                 if (!prefs.autoReadAutoAdvance().get()) { isAutoRead = false; break }
 
                 // скролл на ~90% высоты кадра (плавно), после полного прочтения
@@ -380,7 +382,7 @@ data object BrowserTab : Tab {
                                 }
                             }
                             run {
-                                val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                                val prefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
                                 var lang by remember { mutableStateOf(prefs.autoReadLanguage().get()) }
                                 var translate by remember { mutableStateOf(prefs.autoReadTranslate().get()) }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
