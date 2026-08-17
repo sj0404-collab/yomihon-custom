@@ -701,6 +701,19 @@ class ReaderActivity : BaseActivity() {
 
             Box(modifier = Modifier.fillMaxSize()) {
                 val isHttpSource = viewModel.getSource() is HttpSource
+                var showTtsDialog by remember { mutableStateOf(false) }
+                if (showTtsDialog) {
+                    eu.kanade.presentation.reader.TtsSettingsDialog(
+                        onDismissRequest = { showTtsDialog = false },
+                        onOpenFullSettings = {
+                            showTtsDialog = false
+                            val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
+                                putExtra("open_ocr_settings", true)
+                            }
+                            startActivity(intent)
+                        },
+                    )
+                }
                 val isFullscreen by readerPreferences.fullscreen.collectAsState()
                 val flashOnPageChange by readerPreferences.flashOnPageChange.collectAsState()
 
@@ -781,11 +794,10 @@ class ReaderActivity : BaseActivity() {
                     },
                     onClickSettings = viewModel::openSettingsDialog,
                     onClickOcrSettings = {
-                        // БЕЗ CLEAR_TOP — иначе система убивала читалку под собой.
-                        val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
-                            putExtra("open_ocr_settings", true)
-                        }
-                        startActivity(intent)
+                        // Верхняя AI-кнопка теперь открывает настройки озвучки
+                        // прямо в читалке (раньше дублировала плавающую кнопку
+                        // и уводила из читалки).
+                        showTtsDialog = true
                     },
                     onClickOcr = ::enterOcrMode,
                 )

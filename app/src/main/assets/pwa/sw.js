@@ -1,4 +1,4 @@
-const CACHE_NAME = 'yomihon-pwa-v10';
+const CACHE_NAME = 'yomihon-pwa-v11';
 const ASSETS = [
   './index.html',
   './manifest.json',

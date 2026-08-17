@@ -667,10 +667,25 @@ function ExtensionsView(props) {
     return function () { clearInterval(poll); clearInterval(pollRef.current); };
   }, []);
 
+  var lf = useState('all'), langF = lf[0], setLangF = lf[1];
+  var nf = useState(false), showNsfw = nf[0], setShowNsfw = nf[1];
+
+  var allLangs = useMemo(function () {
+    var s = {};
+    (data.available || []).concat(data.installed || []).forEach(function (x) {
+      if (x.lang) s[x.lang] = true;
+    });
+    return Object.keys(s).sort();
+  }, [data]);
+
   var flt = function (list) {
-    if (!q) return list;
     var s = q.toLowerCase();
-    return list.filter(function (x) { return (x.name || '').toLowerCase().indexOf(s) >= 0; });
+    return list.filter(function (x) {
+      if (q && (x.name || '').toLowerCase().indexOf(s) < 0) return false;
+      if (langF !== 'all' && x.lang !== langF && x.lang !== 'all') return false;
+      if (!showNsfw && x.isNsfw) return false;
+      return true;
+    });
   };
   var installed = flt(data.installed || []);
   var available = flt(data.available || []);
@@ -695,6 +710,16 @@ function ExtensionsView(props) {
     <div class="toolbar">
       <input class="search" placeholder="🔍 Поиск расширений…" value=${q}
         onInput=${function (e) { setQ(e.target.value); }} />
+      <select class="sortsel" value=${langF} onChange=${function (e) { setLangF(e.target.value); }}>
+        <option value="all">Все языки</option>
+        ${allLangs.map(function (l) { return html`<option key=${l} value=${l}>${l.toUpperCase()}</option>`; })}
+      </select>
+    </div>
+    <div class="swrow" style=${{ marginBottom: '10px' }}>
+      <div><div class="lbl">Показывать 18+</div>
+        <div class="sub">Источники для взрослой аудитории скрыты по умолчанию</div></div>
+      <label class="toggle"><input type="checkbox" checked=${showNsfw}
+        onChange=${function (e) { setShowNsfw(e.target.checked); }} /><span class="slider"></span></label>
     </div>
     ${refreshing ? html`<div class="loadrow"><span class="spin"></span>Обновление списка репозиториев…</div> ` : null}
     ${(data.untrusted || []).length ? html`<div class="secH">Требуют доверия</div>

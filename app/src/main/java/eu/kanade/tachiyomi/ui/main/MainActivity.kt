@@ -196,6 +196,12 @@ class MainActivity : BaseActivity() {
 
                         // Reset Incognito Mode on relaunch
                         preferences.incognitoMode.set(false)
+
+                        // Обычный запуск (без deep-link) возвращает false из
+                        // handleIntentAction, и ready оставался false — сплэш
+                        // висел все SPLASH_MAX_DURATION (5 секунд). Приложение
+                        // "очень долго запускалось" именно из-за этого.
+                        ready = true
                     }
                 }
                 LaunchedEffect(navigator.lastItem) {

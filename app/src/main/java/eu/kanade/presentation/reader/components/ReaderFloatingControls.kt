@@ -14,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -159,12 +158,8 @@ fun ReaderFloatingControls(
                         )
                     }
 
-                    IconButton(onClick = onOpenOcrSettings) {
-                        Icon(
-                            imageVector = Icons.Outlined.Psychology,
-                            contentDescription = "Настройки OCR",
-                        )
-                    }
+                    // Дублирующая AI-кнопка удалена: настройки OCR/озвучки
+                    // открываются кнопкой в верхнем баре читалки.
                 }
             }
 
