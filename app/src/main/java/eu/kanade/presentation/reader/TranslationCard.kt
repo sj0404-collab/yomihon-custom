@@ -61,8 +61,29 @@ fun TranslationCard(
         var tts: TextToSpeech? = null
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("ru", "RU")
-                ttsEngine = tts
+                tts?.let { engine ->
+                    engine.language = Locale("ru", "RU")
+                    // Применяем голос и скорость из настроек приложения —
+                    // раньше выбор голоса игнорировался.
+                    runCatching {
+                        val prefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                        val savedVoice = prefs.voiceName().get()
+                        engine.setSpeechRate(prefs.speechRate().get().coerceIn(0.5f, 2.0f))
+                        engine.voices?.find { it.name == savedVoice }?.let { engine.voice = it }
+                    }
+                    // Сбрасываем "isSpeaking", когда озвучка закончилась сама —
+                    // иначе кнопка застревала в состоянии "Стоп".
+                    engine.setOnUtteranceProgressListener(
+                        object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) {}
+                            override fun onDone(utteranceId: String?) { isSpeaking = false }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(utteranceId: String?) { isSpeaking = false }
+                            override fun onError(utteranceId: String?, errorCode: Int) { isSpeaking = false }
+                        },
+                    )
+                    ttsEngine = engine
+                }
             }
         }
         onDispose {
@@ -159,8 +180,18 @@ fun TranslationCard(
                                 ttsEngine?.stop()
                                 isSpeaking = false
                             } else {
-                                ttsEngine?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "yomihon_tts")
-                                isSpeaking = true
+                                val engine = ttsEngine
+                                if (engine == null) {
+                                    // Движок ещё не инициализировался или TTS в системе нет
+                                    context.toast("Озвучка недоступна: TTS-движок не готов")
+                                } else {
+                                    val result = engine.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "yomihon_tts")
+                                    if (result == TextToSpeech.SUCCESS) {
+                                        isSpeaking = true
+                                    } else {
+                                        context.toast("Ошибка озвучки: проверьте системный TTS")
+                                    }
+                                }
                             }
                         },
                     ) {

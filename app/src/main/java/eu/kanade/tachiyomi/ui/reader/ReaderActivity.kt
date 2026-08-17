@@ -177,6 +177,35 @@ class ReaderActivity : BaseActivity() {
     private var config: ReaderConfig? = null
 
     private var menuToggleToast: Toast? = null
+
+    private var autoscrollJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Реальная автопрокрутка вместо прежней тост-заглушки: вебтун плавно
+     * скроллится, пейджер листает страницы с интервалом, зависящим от скорости.
+     */
+    private fun toggleAutoscroll(active: Boolean, speed: Float) {
+        autoscrollJob?.cancel()
+        autoscrollJob = null
+        if (!active) return
+        autoscrollJob = lifecycleScope.launch {
+            while (true) {
+                when (val viewer = viewModel.state.value.viewer) {
+                    is eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer -> {
+                        // ~60 Гц; скорость 1..10 → 1..10 px за кадр
+                        viewer.recycler.scrollBy(0, speed.toInt().coerceAtLeast(1))
+                        kotlinx.coroutines.delay(16)
+                    }
+                    is eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer -> {
+                        // Скорость 1..10 → пауза 11..2 сек на страницу
+                        kotlinx.coroutines.delay((12_000L - speed.toLong() * 1_000L).coerceAtLeast(2_000L))
+                        viewer.moveToNext()
+                    }
+                    else -> kotlinx.coroutines.delay(250)
+                }
+            }
+        }
+    }
     private var readingModeToast: Toast? = null
     private val displayRefreshHost = DisplayRefreshHost()
 
@@ -467,6 +496,7 @@ class ReaderActivity : BaseActivity() {
      */
     override fun onDestroy() {
         super.onDestroy()
+        autoscrollJob?.cancel()
         viewModel.state.value.viewer?.destroy()
         config = null
         menuToggleToast?.cancel()
@@ -751,9 +781,9 @@ class ReaderActivity : BaseActivity() {
                     },
                     onClickSettings = viewModel::openSettingsDialog,
                     onClickOcrSettings = {
+                        // БЕЗ CLEAR_TOP — иначе система убивала читалку под собой.
                         val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
                             putExtra("open_ocr_settings", true)
-                            addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
                         }
                         startActivity(intent)
                     },
@@ -761,11 +791,13 @@ class ReaderActivity : BaseActivity() {
                 )
 
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
+                    visible = state.menuVisible,
                     onTriggerOcr = ::enterOcrMode,
                     onOpenOcrSettings = {
+                        // БЕЗ CLEAR_TOP: раньше флаг сносил ReaderActivity из стека,
+                        // и кнопка "настройки OCR" просто закрывала читалку.
                         val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
                             putExtra("open_ocr_settings", true)
-                            addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
                         }
                         startActivity(intent)
                     },
@@ -773,9 +805,7 @@ class ReaderActivity : BaseActivity() {
                         uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().scanRegion().set(region)
                         toast("Область сканирования изменена")
                     },
-                    onAutoscrollToggle = { active, speed ->
-                        toast(if (active) "Автопрокрутка запущенa (скорость x${speed.toInt()})" else "Автопрокрутка остановлена")
-                    },
+                    onAutoscrollToggle = ::toggleAutoscroll,
                 )
 
                 // OCR selection overlay

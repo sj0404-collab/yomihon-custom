@@ -39,6 +39,7 @@ import mihon.domain.ocr.service.ScanRegion
 
 @Composable
 fun ReaderFloatingControls(
+    visible: Boolean,
     onTriggerOcr: () -> Unit,
     onOpenOcrSettings: () -> Unit,
     onScanRegionChange: (ScanRegion) -> Unit,
@@ -53,6 +54,14 @@ fun ReaderFloatingControls(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomEnd,
     ) {
+        // Панель видна только вместе с меню читалки: раньше она висела поверх
+        // страницы постоянно и перехватывала тапы по нижнему правому углу
+        // (перелистывание "не реагировало"). Скрытая панель тапы не ловит.
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
         Column(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.End,
@@ -171,6 +180,7 @@ fun ReaderFloatingControls(
                     contentDescription = "Сканировать OCR",
                 )
             }
+        }
         }
     }
 }

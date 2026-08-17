@@ -35,6 +35,12 @@
 
     <queries>
         <package android:name="com.ichi2.anki" />
+        <!-- Android 11+ package visibility: без этого TextToSpeech не видит
+             ни одного движка озвучки и все голоса (системные/локальные/сетевые)
+             молча не работают. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <application

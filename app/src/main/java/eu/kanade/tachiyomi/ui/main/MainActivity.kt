@@ -522,6 +522,17 @@ class MainActivity : BaseActivity() {
             )
         }
 
+        // Кнопка "настройки OCR" из читалки: раньше экстра игнорировалась,
+        // и переход просто открывал главный экран. Настройки OCR/озвучки
+        // живут в разделе Словарь.
+        if (intent.getBooleanExtra("open_ocr_settings", false)) {
+            intent.removeExtra("open_ocr_settings")
+            navigator.popUntilRoot()
+            navigator.push(SettingsScreen(SettingsScreen.Destination.Dictionary))
+            ready = true
+            return true
+        }
+
         val tabToOpen = when (intent.action) {
             Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_MANGA -> {

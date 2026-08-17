@@ -967,8 +967,11 @@ class YomihonWebBridge(
     fun speakText(text: String, voiceName: String, rate: Float) {
         runCatching {
             ttsEngine?.let { tts ->
-                tts.setSpeechRate(rate.coerceIn(0.5f, 2.0f))
-                val targetVoice = tts.voices?.find { it.name == voiceName }
+                // Пустое имя голоса = использовать голос из настроек приложения
+                val effectiveVoice = voiceName.ifBlank { ocrPreferences.voiceName().get() }
+                val effectiveRate = if (rate > 0f) rate else ocrPreferences.speechRate().get()
+                tts.setSpeechRate(effectiveRate.coerceIn(0.5f, 2.0f))
+                val targetVoice = tts.voices?.find { it.name == effectiveVoice }
                 if (targetVoice != null) {
                     tts.voice = targetVoice
                 }
