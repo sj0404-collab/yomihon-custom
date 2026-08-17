@@ -131,10 +131,12 @@ actual class LocalSource(
                         }
                         url = mangaDir.name.orEmpty()
 
-                        // Try to find the cover
-                        coverManager.find(mangaDir.name.orEmpty())?.let {
-                            thumbnail_url = it.uri.toString()
-                        }
+                        // Обложка: из кэша, иначе сразу извлекаем первую картинку
+                        // (архива или папки) — превью видно уже в каталоге, а не
+                        // после открытия карточки. Результат кэшируется.
+                        val cover = coverManager.find(mangaDir.name.orEmpty())
+                            ?: tryGenerateCover(mangaDir, this)
+                        cover?.let { thumbnail_url = it.uri.toString() }
                     }
                 }
             }
@@ -355,6 +357,30 @@ actual class LocalSource(
         } catch (e: Exception) {
             throw e
         }
+    }
+
+    /**
+     * Генерирует обложку сразу при сканировании каталога: одиночный архив —
+     * первая картинка внутри; папка-манга — первая картинка первой главы.
+     * Дорогая часть выполняется один раз, дальше отдаётся из кэша .covers/cover.jpg.
+     */
+    private fun tryGenerateCover(entry: UniFile, manga: SManga): UniFile? {
+        return runCatching {
+            val chapterFile = if (entry.isDirectory) {
+                entry.listFiles().orEmpty()
+                    .filterNot { it.name.orEmpty().startsWith('.') }
+                    .filter { it.isDirectory || Archive.isSupported(it) }
+                    .minByOrNull { it.name.orEmpty().lowercase() }
+            } else {
+                entry.takeIf { Archive.isSupported(it) }
+            } ?: return null
+
+            val chapter = SChapter.create().apply {
+                url = if (entry.isDirectory) "${entry.name}/${chapterFile.name}" else entry.name.orEmpty()
+                name = chapterFile.nameWithoutExtension.orEmpty()
+            }
+            updateCover(chapter, manga)
+        }.getOrNull()
     }
 
     private fun updateCover(chapter: SChapter, manga: SManga): UniFile? {

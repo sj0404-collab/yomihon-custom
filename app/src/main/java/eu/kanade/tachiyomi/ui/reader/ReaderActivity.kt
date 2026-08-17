@@ -806,12 +806,8 @@ class ReaderActivity : BaseActivity() {
                     visible = state.menuVisible,
                     onTriggerOcr = ::enterOcrMode,
                     onOpenOcrSettings = {
-                        // БЕЗ CLEAR_TOP: раньше флаг сносил ReaderActivity из стека,
-                        // и кнопка "настройки OCR" просто закрывала читалку.
-                        val intent = android.content.Intent(this@ReaderActivity, eu.kanade.tachiyomi.ui.main.MainActivity::class.java).apply {
-                            putExtra("open_ocr_settings", true)
-                        }
-                        startActivity(intent)
+                        // Настройки озвучки — диалог прямо в читалке, никуда не уходим
+                        showTtsDialog = true
                     },
                     onScanRegionChange = { region ->
                         uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().scanRegion().set(region)

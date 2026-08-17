@@ -52,6 +52,12 @@ class StorageManager(
             .distinctUntilChanged()
             .onEach { _changes.send(Unit) }
             .launchIn(scope)
+
+        storagePreferences.externalLibraryActiveRoot.changes()
+            .drop(1)
+            .distinctUntilChanged()
+            .onEach { _changes.send(Unit) }
+            .launchIn(scope)
     }
 
     private fun getBaseDir(uri: String): UniFile? {
@@ -79,7 +85,10 @@ class StorageManager(
      * Android/data через SAF). Каждая папка — отдельный корень со своей мангой.
      */
     fun getExternalLibraryRoots(): List<UniFile> {
-        return preferences.externalLibraryRoots.get()
+        val active = preferences.externalLibraryActiveRoot.get()
+        val uris = preferences.externalLibraryRoots.get()
+            .let { all -> if (active.isNotBlank() && active in all) setOf(active) else all }
+        return uris
             .mapNotNull { uri -> UniFile.fromUri(context, uri.toUri()).takeIf { it?.exists() == true } }
     }
 }

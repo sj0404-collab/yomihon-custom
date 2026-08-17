@@ -10,11 +10,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,11 +55,10 @@ import uy.kohesive.injekt.api.get
 /**
  * Сторонняя (локальная) библиотека — отдельная от основного хранилища.
  *
- * Пользователь добавляет СКОЛЬКО УГОДНО папок из любых мест (включая
- * Android/data через SAF). Каждая папка сканируется: папка = манга
- * (CBZ/CBR/ZIP-главы или папки-главы), одиночный архив = манга с одной
- * главой, обложка из первого изображения архива. Загрузки из сети живут
- * в основном хранилище и здесь не показываются — никаких дублей.
+ * Неограниченное число папок из любых мест (включая Android/data через SAF).
+ * Каждая папка — категория: чипы под шапкой переключают «Все / конкретная
+ * папка». Папка = манга, одиночный CBZ/CBR = манга с одной главой,
+ * обложка из первого изображения. Статус-бар не перекрывается.
  */
 data object LocalLibraryTab : Tab {
 
@@ -82,8 +85,9 @@ data object LocalLibraryTab : Tab {
 
         var scanning by remember { mutableStateOf(true) }
         var stats by remember { mutableStateOf<ScanStats?>(null) }
-        var roots by remember { mutableStateOf(storagePreferences.externalLibraryRoots.get()) }
-        var showRoots by remember { mutableStateOf(false) }
+        var roots by remember { mutableStateOf(storagePreferences.externalLibraryRoots.get().toList()) }
+        var activeRoot by remember { mutableStateOf(storagePreferences.externalLibraryActiveRoot.get()) }
+        var manageMode by remember { mutableStateOf(false) }
 
         val addFolderLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocumentTree(),
@@ -95,24 +99,28 @@ data object LocalLibraryTab : Tab {
                 storagePreferences.externalLibraryRoots.set(
                     storagePreferences.externalLibraryRoots.get() + uri.toString(),
                 )
-                roots = storagePreferences.externalLibraryRoots.get()
-                context.toast("Папка добавлена в библиотеку")
+                roots = storagePreferences.externalLibraryRoots.get().toList()
+                context.toast("Папка добавлена")
             }
         }
 
-        // Быстрый скан (только имена) + автоперескан при изменении набора папок
         LaunchedEffect(Unit) {
             storageManager.changes
                 .onStart { emit(Unit) }
                 .collectLatest {
                     scanning = true
-                    roots = storagePreferences.externalLibraryRoots.get()
+                    roots = storagePreferences.externalLibraryRoots.get().toList()
+                    activeRoot = storagePreferences.externalLibraryActiveRoot.get()
                     stats = withIOContext { scanStorage(storageManager) }
                     scanning = false
                 }
         }
 
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+        ) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
@@ -139,14 +147,14 @@ data object LocalLibraryTab : Tab {
                                     roots.isEmpty() ->
                                         "📂 Добавьте папки с мангой (можно несколько, в т.ч. Android/data)"
                                     s == null || (s.mangaDirs == 0 && s.archives == 0) ->
-                                        "📂 В добавленных папках (${roots.size}) манга не найдена"
+                                        "📂 В выбранных папках манга не найдена"
                                     else ->
-                                        "📚 Папок-манг: ${s.mangaDirs} • Архивов: ${s.archives} • Источников: ${roots.size}"
+                                        "📚 Папок-манг: ${s.mangaDirs} • Архивов: ${s.archives}"
                                 },
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable { showRoots = !showRoots },
+                                    .clickable { manageMode = !manageMode },
                             )
                         }
                         IconButton(onClick = { addFolderLauncher.launch(null) }) {
@@ -157,36 +165,62 @@ data object LocalLibraryTab : Tab {
                             )
                         }
                     }
-                    if (showRoots && roots.isNotEmpty()) {
-                        roots.forEach { uriString ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 4.dp),
-                            ) {
-                                Text(
-                                    text = "📁 " + prettyUri(uriString),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IconButton(
+                    if (roots.isNotEmpty()) {
+                        // Категории: Все + чип на каждую папку-источник
+                        LazyRow(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        ) {
+                            item(key = "__all__") {
+                                FilterChip(
+                                    selected = activeRoot.isBlank(),
                                     onClick = {
-                                        storagePreferences.externalLibraryRoots.set(
-                                            storagePreferences.externalLibraryRoots.get() - uriString,
-                                        )
-                                        roots = storagePreferences.externalLibraryRoots.get()
-                                        context.toast("Папка убрана из библиотеки")
+                                        storagePreferences.externalLibraryActiveRoot.set("")
+                                        activeRoot = ""
                                     },
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Close,
-                                        contentDescription = "Убрать папку",
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
+                                    label = { Text("Все") },
+                                    modifier = Modifier.padding(end = 6.dp),
+                                )
+                            }
+                            items(roots, key = { it }) { uriString ->
+                                FilterChip(
+                                    selected = activeRoot == uriString,
+                                    onClick = {
+                                        val next = if (activeRoot == uriString) "" else uriString
+                                        storagePreferences.externalLibraryActiveRoot.set(next)
+                                        activeRoot = next
+                                    },
+                                    label = {
+                                        Text(
+                                            prettyUri(uriString),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    trailingIcon = if (manageMode) {
+                                        {
+                                            Icon(
+                                                Icons.Outlined.Close,
+                                                contentDescription = "Убрать",
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .clickable {
+                                                        storagePreferences.externalLibraryRoots.set(
+                                                            storagePreferences.externalLibraryRoots.get() - uriString,
+                                                        )
+                                                        if (activeRoot == uriString) {
+                                                            storagePreferences.externalLibraryActiveRoot.set("")
+                                                            activeRoot = ""
+                                                        }
+                                                        roots = storagePreferences.externalLibraryRoots.get().toList()
+                                                        context.toast("Папка убрана")
+                                                    },
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    modifier = Modifier.padding(end = 6.dp),
+                                )
                             }
                         }
                     }
@@ -205,6 +239,7 @@ data object LocalLibraryTab : Tab {
         return runCatching {
             java.net.URLDecoder.decode(uriString.substringAfterLast("/"), "UTF-8")
                 .substringAfterLast(':')
+                .substringAfterLast('/')
                 .ifBlank { uriString }
         }.getOrDefault(uriString)
     }

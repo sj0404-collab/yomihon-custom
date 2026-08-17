@@ -44,8 +44,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    if (System.getenv("MIHON_GITHUB_RELEASE").toBoolean()) {
-        val tempStoreFile = file(System.getenv("RUNNER_TEMP")).resolve("antsy.keystore")
+    // Подписываем НАШИМ постоянным релиз-ключом всегда, когда он передан в env
+    // (и в обычных CI-сборках, и в релизных). Раньше CI подписывал случайным
+    // debug-ключом раннера — каждая сборка имела новую подпись, и приходилось
+    // переустанавливать приложение вместо обновления поверх.
+    if (!System.getenv("storeFileBase64").isNullOrBlank()) {
+        val tempStoreFile = file(System.getenv("RUNNER_TEMP") ?: layout.buildDirectory.get().asFile.path)
+            .resolve("antsy.keystore")
 
         val storeFileBytes = System.getenv("storeFileBase64").let(Base64::decode)
         tempStoreFile.outputStream().use { it.write(storeFileBytes) }

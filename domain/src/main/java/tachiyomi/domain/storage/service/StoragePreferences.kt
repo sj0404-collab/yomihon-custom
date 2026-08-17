@@ -23,4 +23,10 @@ class StoragePreferences(
         Preference.appStateKey("external_library_roots"),
         emptySet(),
     )
+
+    /** Активная категория сторонней библиотеки: URI папки или "" (все папки). */
+    val externalLibraryActiveRoot: Preference<String> = preferenceStore.getString(
+        Preference.appStateKey("external_library_active_root"),
+        "",
+    )
 }

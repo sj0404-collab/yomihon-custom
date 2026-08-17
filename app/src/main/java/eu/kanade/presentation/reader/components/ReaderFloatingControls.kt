@@ -1,30 +1,39 @@
 package eu.kanade.presentation.reader.components
 
+import android.media.AudioManager
+import android.media.ToneGenerator
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -32,10 +41,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import mihon.domain.ocr.service.ScanRegion
+import kotlin.math.roundToInt
 
+/**
+ * SAO-стиль: единственная перемещаемая плавающая кнопка. Тап (со звуком)
+ * раскрывает вертикальное меню со всеми действиями: OCR (с выбором области),
+ * автопрокрутка со скоростью, настройки озвучки. Кнопку можно перетащить
+ * в любое место экрана — позиция сохраняется, пока открыта читалка.
+ */
 @Composable
 fun ReaderFloatingControls(
     visible: Boolean,
@@ -45,137 +62,159 @@ fun ReaderFloatingControls(
     onAutoscrollToggle: (Boolean, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var showRegions by remember { mutableStateOf(false) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
-    var autoscrollSpeed by remember { mutableFloatStateOf(2f) } // 1x to 10x
-    var showRegionSelector by remember { mutableStateOf(false) }
+    var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    // Короткий SAO-подобный "бип" на открытие/закрытие меню и действия
+    val tone = remember { runCatching { ToneGenerator(AudioManager.STREAM_SYSTEM, 55) }.getOrNull() }
+    DisposableEffect(Unit) {
+        onDispose { runCatching { tone?.release() } }
+    }
+    fun beepOpen() = runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 60) }
+    fun beepAction() = runCatching { tone?.startTone(ToneGenerator.TONE_PROP_ACK, 70) }
 
     Box(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomEnd,
     ) {
-        // Панель видна только вместе с меню читалки: раньше она висела поверх
-        // страницы постоянно и перехватывала тапы по нижнему правому углу
-        // (перелистывание "не реагировало"). Скрытая панель тапы не ловит.
         AnimatedVisibility(
             visible = visible,
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // Region Selector Dropdown Panel
-            AnimatedVisibility(
-                visible = showRegionSelector,
-                enter = fadeIn(),
-                exit = fadeOut(),
+            Column(
+                modifier = Modifier
+                    .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    ),
+                // Раскрывающееся меню (SAO): столбец пунктов над кнопкой
+                AnimatedVisibility(
+                    visible = menuOpen,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
                 ) {
-                    Column(
-                        modifier = Modifier.padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
+                        ),
                     ) {
-                        Text(
-                            text = "Область сканирования:",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                        SmallFloatingActionButton(
-                            onClick = {
-                                onScanRegionChange(ScanRegion.FULL_PAGE)
-                                showRegionSelector = false
-                                onTriggerOcr()
-                            },
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.End,
                         ) {
-                            Text("100% Вся страница")
-                        }
-                        SmallFloatingActionButton(
-                            onClick = {
-                                onScanRegionChange(ScanRegion.TOP_HALF)
-                                showRegionSelector = false
-                                onTriggerOcr()
-                            },
-                        ) {
-                            Text("⬆ Верхняя часть (50%)")
-                        }
-                        SmallFloatingActionButton(
-                            onClick = {
-                                onScanRegionChange(ScanRegion.BOTTOM_HALF)
-                                showRegionSelector = false
-                                onTriggerOcr()
-                            },
-                        ) {
-                            Text("⬇ Нижняя часть (50%)")
+                            if (showRegions) {
+                                Text(
+                                    "Область сканирования",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                SmallFloatingActionButton(onClick = {
+                                    beepAction()
+                                    onScanRegionChange(ScanRegion.FULL_PAGE)
+                                    showRegions = false; menuOpen = false
+                                    onTriggerOcr()
+                                }) { Text("  100% страница  ") }
+                                SmallFloatingActionButton(onClick = {
+                                    beepAction()
+                                    onScanRegionChange(ScanRegion.TOP_HALF)
+                                    showRegions = false; menuOpen = false
+                                    onTriggerOcr()
+                                }) { Text("  ⬆ Верхние 50%  ") }
+                                SmallFloatingActionButton(onClick = {
+                                    beepAction()
+                                    onScanRegionChange(ScanRegion.BOTTOM_HALF)
+                                    showRegions = false; menuOpen = false
+                                    onTriggerOcr()
+                                }) { Text("  ⬇ Нижние 50%  ") }
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("OCR скан  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        showRegions = true
+                                    }) {
+                                        Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (isAutoscrollActive) "Стоп прокрутки  " else "Автопрокрутка  ",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        isAutoscrollActive = !isAutoscrollActive
+                                        onAutoscrollToggle(isAutoscrollActive, autoscrollSpeed)
+                                    }) {
+                                        Icon(
+                                            if (isAutoscrollActive) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                            contentDescription = "Автопрокрутка",
+                                            tint = if (isAutoscrollActive) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                        )
+                                    }
+                                }
+                                if (isAutoscrollActive) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Outlined.Speed, contentDescription = null)
+                                        Slider(
+                                            value = autoscrollSpeed,
+                                            onValueChange = {
+                                                autoscrollSpeed = it
+                                                onAutoscrollToggle(true, autoscrollSpeed)
+                                            },
+                                            valueRange = 1f..10f,
+                                            modifier = Modifier.width(140.dp),
+                                        )
+                                        Text("×${autoscrollSpeed.roundToInt()}")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Озвучка (TTS)  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        menuOpen = false
+                                        onOpenOcrSettings()
+                                    }) {
+                                        Icon(Icons.Outlined.RecordVoiceOver, contentDescription = "Озвучка")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            // Autoscroll Control Widget Bar
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                // Главная кнопка: тап — меню, перетаскивание — перемещение
+                FloatingActionButton(
+                    onClick = {
+                        beepOpen()
+                        if (menuOpen) showRegions = false
+                        menuOpen = !menuOpen
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            offsetX = (offsetX + dragAmount.x).coerceAtMost(0f)
+                            offsetY = (offsetY + dragAmount.y).coerceAtMost(0f)
+                        }
+                    },
                 ) {
-                    IconButton(
-                        onClick = {
-                            isAutoscrollActive = !isAutoscrollActive
-                            onAutoscrollToggle(isAutoscrollActive, autoscrollSpeed)
-                        },
-                    ) {
-                        Icon(
-                            imageVector = if (isAutoscrollActive) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                            contentDescription = "Автопрокрутка",
-                            tint = if (isAutoscrollActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-
-                    if (isAutoscrollActive) {
-                        Icon(
-                            imageVector = Icons.Outlined.Speed,
-                            contentDescription = null,
-                        )
-                        Slider(
-                            value = autoscrollSpeed,
-                            onValueChange = {
-                                autoscrollSpeed = it
-                                onAutoscrollToggle(true, autoscrollSpeed)
-                            },
-                            valueRange = 1f..10f,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                    }
-
-                    // Дублирующая AI-кнопка удалена: настройки OCR/озвучки
-                    // открываются кнопкой в верхнем баре читалки.
+                    Icon(
+                        if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
+                        contentDescription = "Меню читалки",
+                    )
                 }
             }
-
-            // Floating OCR Scan Button
-            FloatingActionButton(
-                onClick = {
-                    showRegionSelector = !showRegionSelector
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.DocumentScanner,
-                    contentDescription = "Сканировать OCR",
-                )
-            }
-        }
         }
     }
 }
