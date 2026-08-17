@@ -118,6 +118,26 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         setupNotificationChannels()
         Injekt.get<OcrScanManager>().startIfPending()
 
+        // Первый запуск без онбординга: сразу создаём основную папку
+        // "Yomikai" на телефоне (как у CDisplayEx) и помечаем онбординг
+        // пройденным — приложение открывается прямо в библиотеке.
+        Thread {
+            runCatching {
+                val prefs = basePreferences
+                if (!prefs.shownOnboardingFlow.get()) {
+                    val dir = java.io.File(
+                        android.os.Environment.getExternalStorageDirectory(),
+                        "Yomikai",
+                    )
+                    dir.mkdirs()
+                    java.io.File(dir, "local").mkdirs()
+                    java.io.File(dir, "downloads").mkdirs()
+                    java.io.File(dir, "backup").mkdirs()
+                    prefs.shownOnboardingFlow.set(true)
+                }
+            }
+        }.apply { name = "first-run-setup"; priority = Thread.MIN_PRIORITY }.start()
+
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
         val scope = ProcessLifecycleOwner.get().lifecycleScope

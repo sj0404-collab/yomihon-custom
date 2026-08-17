@@ -509,6 +509,10 @@ class MainActivity : BaseActivity() {
                     addUpdateListener { va ->
                         val value = va.animatedValue as Float
                         splashProvider.view.alpha = value
+                        // Маскот мягко «вылетает»: масштаб 1.0 -> 1.25 при затухании
+                        val scale = 1F + (1F - value) * 0.25F
+                        splashProvider.iconView.scaleX = scale
+                        splashProvider.iconView.scaleY = scale
                     }
                     doOnEnd {
                         splashProvider.remove()
