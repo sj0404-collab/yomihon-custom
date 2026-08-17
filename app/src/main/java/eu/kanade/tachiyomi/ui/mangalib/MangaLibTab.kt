@@ -177,7 +177,7 @@ data object MangaLibTab : Tab {
                     )
                     addJavascriptInterface(bridge, "YomihonBridge")
 
-                    loadUrl("file:///android_asset/pwa/mangalib/index.html")
+                    loadUrl("file:///android_asset/pwa/mangalib_host.html")
                     activeWebView = this
                 }
             },
