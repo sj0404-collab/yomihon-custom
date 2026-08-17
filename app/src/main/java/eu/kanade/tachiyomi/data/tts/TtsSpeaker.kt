@@ -143,15 +143,57 @@ object TtsSpeaker {
             } else {
                 engine.language = Locale("ru", "RU")
             }
+            // Пунктуация → реальные паузы и интонация: текст режется на
+            // предложения, каждое говорится отдельной utterance, между ними
+            // тишина (250мс после точки, 420мс после !/?, 160мс после запятой).
+            // Вопросительные получают лёгкий подъём питча, восклицательные —
+            // чуть быстрее и выше.
+            val sentences = splitSentences(text)
+            if (sentences.isEmpty()) { setSpeaking(false); return@ensureSystem }
+            val lastId = "yk_${sentences.size - 1}"
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = setSpeaking(true)
-                override fun onDone(utteranceId: String?) = setSpeaking(false)
+                override fun onStart(utteranceId: String?) {
+                    if (utteranceId == "yk_0") setSpeaking(true)
+                }
+                override fun onDone(utteranceId: String?) {
+                    if (utteranceId == lastId) setSpeaking(false)
+                }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) = setSpeaking(false)
                 override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
             })
-            val r = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "yomikai_tts")
-            if (r != TextToSpeech.SUCCESS) setSpeaking(false)
+            val baseRate = p.speechRate().get().coerceIn(0.5f, 2f)
+            val basePitch = p.speechPitch().get().coerceIn(0.5f, 2f)
+            var queued = false
+            sentences.forEachIndexed { i, sentence ->
+                val trimmed = sentence.trim()
+                if (trimmed.isEmpty()) return@forEachIndexed
+                when {
+                    trimmed.endsWith("?") || trimmed.endsWith("?!") || trimmed.endsWith("⁇") -> {
+                        engine.setPitch((basePitch * 1.12f).coerceAtMost(2f))
+                        engine.setSpeechRate(baseRate * 0.95f)
+                    }
+                    trimmed.endsWith("!") || trimmed.endsWith("‼") -> {
+                        engine.setPitch((basePitch * 1.07f).coerceAtMost(2f))
+                        engine.setSpeechRate((baseRate * 1.05f).coerceAtMost(2f))
+                    }
+                    else -> {
+                        engine.setPitch(basePitch)
+                        engine.setSpeechRate(baseRate)
+                    }
+                }
+                val mode = if (queued) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
+                val r = engine.speak(trimmed, mode, null, "yk_$i")
+                if (r == TextToSpeech.SUCCESS) queued = true
+                val pauseMs = when {
+                    trimmed.endsWith("!") || trimmed.endsWith("?") ||
+                        trimmed.endsWith("‼") || trimmed.endsWith("⁇") -> 420L
+                    trimmed.endsWith(",") || trimmed.endsWith(";") -> 160L
+                    else -> 260L
+                }
+                engine.playSilentUtterance(pauseMs, TextToSpeech.QUEUE_ADD, "yk_p$i")
+            }
+            if (!queued) setSpeaking(false)
         }
     }
 
@@ -256,6 +298,24 @@ object TtsSpeaker {
             }
         }
         return sb.append('"').toString()
+    }
+
+    /** Делит текст на предложения по .!?…; куски без знаков — по 200 симв. */
+    fun splitSentences(text: String): List<String> {
+        val result = mutableListOf<String>()
+        val sb = StringBuilder()
+        for (ch in text) {
+            sb.append(ch)
+            if (ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '‼' || ch == '⁇') {
+                if (sb.isNotBlank()) result += sb.toString()
+                sb.clear()
+            } else if (sb.length >= 200 && ch == ' ') {
+                result += sb.toString()
+                sb.clear()
+            }
+        }
+        if (sb.isNotBlank()) result += sb.toString()
+        return result
     }
 
     private fun splitForWeb(text: String, max: Int): List<String> {

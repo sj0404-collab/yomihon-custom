@@ -197,13 +197,18 @@ data object BrowserTab : Tab {
         val readEngine = remember { autoReadEngine ?: AutoReadEngine(ctx.applicationContext).also { autoReadEngine = it } }
         val currentRegion by readEngine.currentRegion.collectAsState()
 
-        // Цикл авточтения: читаем кадр; по завершении, если включено
-        // автолистание — скроллим ровно на высоту кадра и читаем дальше.
-        // Скролл НЕ происходит, пока движок читает (страница «стоит»).
+        // Цикл авточтения:
+        // • кадр = ПОЛНЫЙ видимый вьюпорт;
+        // • скролл на 60% кадра => соседние кадры перекрываются на 40%,
+        //   текст на стыке гарантированно попадает в один из кадров целиком
+        //   (дубликаты отсекает нечёткая история движка);
+        // • скролл ПЛАВНЫЙ (тот же механизм, что «Автопрокрутка»: мелкие шаги
+        //   каждые 16мс) и идёт ТОЛЬКО после полного прочтения кадра;
+        // • пустые кадры (нет нового текста) проходятся сразу, без задержек.
         LaunchedEffect(isAutoRead) {
             if (!isAutoRead) { readEngine.stop(); return@LaunchedEffect }
             readEngine.clearHistory()
-            var lastScrollY = -1
+            var stuckCounter = 0
             while (isAutoRead) {
                 val wv = sharedWebView
                 val bmp = captureWebView()
@@ -211,26 +216,42 @@ data object BrowserTab : Tab {
 
                 var finished = false
                 readEngine.readFrame(bmp, chapterId = -1L, pageIndex = wv.scrollY) { finished = true }
-                while (!finished && isAutoRead) delay(150)
+                while (!finished && isAutoRead) delay(120)
                 if (!isAutoRead) break
 
                 val prefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
                 if (!prefs.autoReadAutoAdvance().get()) { isAutoRead = false; break }
 
-                // скролл на ~90% высоты кадра (плавно), после полного прочтения
-                val step = (wv.height * 0.9f).roundToInt()
-                val target = wv.scrollY + step
+                // Плавный скролл на 60% высоты кадра (перекрытие 40%)
+                val startY = wv.scrollY
+                val step = (wv.height * 0.6f).roundToInt().coerceAtLeast(1)
                 var scrolled = 0
                 while (scrolled < step && isAutoRead) {
-                    val d = minOf(24, step - scrolled)
+                    val d = minOf(6, step - scrolled) // мелкий шаг = плавно, без рывков
                     wv.scrollBy(0, d)
                     scrolled += d
-                    delay(8)
+                    delay(16)
                 }
-                delay(400) // дать странице дорисоваться
-                // если упёрлись в конец страницы — стоп
-                if (wv.scrollY == lastScrollY) { isAutoRead = false; break }
-                lastScrollY = wv.scrollY
+                // Пустой кадр — не ждём дорисовку, идём дальше сразу
+                if (readEngine.lastFrameHadText) delay(350)
+
+                if (wv.scrollY <= startY) {
+                    // Не сдвинулись — конец страницы (или контент короче экрана)
+                    stuckCounter++
+                    if (stuckCounter >= 2) { isAutoRead = false; break }
+                } else {
+                    stuckCounter = 0
+                }
+            }
+        }
+
+        // Живучесть стопа: уход с вкладки/сворачивание = полная остановка
+        DisposableEffect(Unit) {
+            onDispose {
+                if (autoReadActive.value) {
+                    autoReadActive.value = false
+                    readEngine.stop()
+                }
             }
         }
         DisposableEffect(Unit) {

@@ -499,6 +499,8 @@ class ReaderActivity : BaseActivity() {
      * Called when the activity is destroyed. Cleans up the viewer, configuration and any view.
      */
     override fun onDestroy() {
+        // Полный стоп авточтения и голоса при выходе из читалки
+        stopAutoReadLoop()
         super.onDestroy()
         autoscrollJob?.cancel()
         viewModel.state.value.viewer?.destroy()
@@ -508,6 +510,8 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
+        // Сворачивание/уход с экрана — голос не должен продолжать звучать
+        stopAutoReadLoop()
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
         }
@@ -1331,12 +1335,17 @@ class ReaderActivity : BaseActivity() {
      */
     fun startAutoReadLoop() {
         stopAutoReadLoop()
+        autoReadActive = true
         autoReadEngine.clearHistory()
         toast("▶ Авточтение включено")
         readCurrentPage(thenAdvance = true)
     }
 
+    @Volatile
+    private var autoReadActive = false
+
     fun stopAutoReadLoop() {
+        autoReadActive = false
         autoReadLoop?.cancel()
         autoReadLoop = null
         autoReadEngine.stop()
@@ -1357,10 +1366,11 @@ class ReaderActivity : BaseActivity() {
                 val pageIndex = (viewModel.state.value.currentPage - 1).coerceAtLeast(0)
 
                 autoReadEngine.readFrame(bitmap, chapterId, pageIndex) {
-                    if (!thenAdvance) return@readFrame
+                    if (!thenAdvance || !autoReadActive) return@readFrame
                     // Страница дочитана целиком — ТОЛЬКО теперь листаем
                     lifecycleScope.launchIO {
                         kotlinx.coroutines.delay(350)
+                        if (!autoReadActive) return@launchIO
                         withUIContext {
                             when (val viewer = viewModel.state.value.viewer) {
                                 is eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer ->
@@ -1371,7 +1381,7 @@ class ReaderActivity : BaseActivity() {
                             }
                         }
                         kotlinx.coroutines.delay(900) // дать странице отрисоваться
-                        readCurrentPage(thenAdvance = true)
+                        if (autoReadActive) readCurrentPage(thenAdvance = true)
                     }
                 }
             } catch (e: Exception) {

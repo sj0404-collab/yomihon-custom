@@ -58,23 +58,54 @@ class AutoReadEngine(
     private val _isReading = MutableStateFlow(false)
     val isReading = _isReading.asStateFlow()
 
+    /** Был ли в последнем кадре новый текст (для темпа автоскролла). */
+    @Volatile
+    var lastFrameHadText: Boolean = false
+        private set
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 
-    /** История прочитанного: нормализованные ключи реплик (на сессию, с лимитом). */
-    private val spokenHistory = object : LinkedHashSet<Long>() {
-        fun addCapped(e: Long): Boolean {
-            val added = add(e)
-            if (size > HISTORY_LIMIT) {
-                val it = iterator()
-                it.next()
-                it.remove()
-            }
-            return added
+    /** Поколение запуска: stop() инвалидирует все колбэки прежних запусков. */
+    @Volatile
+    private var generation = 0
+
+    /**
+     * История прочитанного с НЕЧЁТКИМ сравнением: OCR той же реплики при
+     * смещённом кадре даёт слегка другой текст (обрезанные края, дрожание),
+     * поэтому точный хэш пропускал дубли. Храним нормализованные строки и
+     * сравниваем по включению/похожести 3-граммами (порог 0.75).
+     */
+    private val spokenTexts = ArrayDeque<String>()
+
+    @Synchronized
+    private fun isDuplicate(rawText: String): Boolean {
+        val norm = rawText.lowercase().filter { it.isLetterOrDigit() }
+        if (norm.length < 4) return true // мусор/односимвольные не читаем повторно
+        for (old in spokenTexts) {
+            if (old.contains(norm) || norm.contains(old)) return true
+            if (trigramSimilarity(old, norm) >= 0.75f) return true
         }
+        spokenTexts.addLast(norm)
+        while (spokenTexts.size > HISTORY_LIMIT) spokenTexts.removeFirst()
+        return false
     }
 
-    fun clearHistory() = spokenHistory.clear()
+    private fun trigramSimilarity(a: String, b: String): Float {
+        if (a.length < 3 || b.length < 3) return if (a == b) 1f else 0f
+        val ta = HashSet<String>(a.length)
+        for (i in 0..a.length - 3) ta.add(a.substring(i, i + 3))
+        var common = 0
+        var total = 0
+        for (i in 0..b.length - 3) {
+            total++
+            if (b.substring(i, i + 3) in ta) common++
+        }
+        return if (total == 0) 0f else common.toFloat() / total
+    }
+
+    @Synchronized
+    fun clearHistory() = spokenTexts.clear()
 
     /**
      * Прочитать кадр. [onPageFinished] вызывается ПОСЛЕ озвучки всех реплик —
@@ -88,6 +119,8 @@ class AutoReadEngine(
         onPageFinished: () -> Unit,
     ) {
         job?.cancel()
+        TtsSpeaker.stop()
+        val myGen = ++generation
         job = scope.launch {
             _isReading.value = true
             try {
@@ -121,7 +154,7 @@ class AutoReadEngine(
                     .map { it.copy(text = normalizeOcrTextForDisplay(it.text).trim()) }
                     .filter { it.text.length >= MIN_TEXT_LENGTH }
                     .filter { matchesLanguage(it.text, language) }
-                    .filter { spokenHistory.addCapped(historyKey(it.text)) }
+                    .filter { !isDuplicate(it.text) }
                     .toList()
 
                 // 3) порядок чтения
@@ -138,6 +171,8 @@ class AutoReadEngine(
                 } else {
                     List(ordered.size) { null }
                 }
+
+                lastFrameHadText = ordered.isNotEmpty()
 
                 // 4) реплика за репликой: подсветка -> (перевод) -> озвучка -> ждём конца
                 for ((i, region) in ordered.withIndex()) {
@@ -167,7 +202,9 @@ class AutoReadEngine(
             } finally {
                 _currentRegion.value = null
                 _isReading.value = false
-                if (job?.isCancelled != true) {
+                // Колбэк только для АКТУАЛЬНОГО запуска: после stop() старый
+                // цикл не имеет права листать дальше или перезапускать чтение
+                if (myGen == generation && job?.isCancelled != true) {
                     onPageFinished()
                 }
             }
@@ -175,6 +212,7 @@ class AutoReadEngine(
     }
 
     fun stop() {
+        generation++ // инвалидируем все pending-колбэки
         job?.cancel()
         job = null
         TtsSpeaker.stop()
@@ -191,7 +229,7 @@ class AutoReadEngine(
             if (!speaking && started) done.value = true
         }
         // страховка: макс. время = длина текста * 180мс + 4с
-        val timeoutMs = text.length * 180L + 4_000L
+        val timeoutMs = text.length * 220L + 5_000L
         val start = System.currentTimeMillis()
         while (!done.value && System.currentTimeMillis() - start < timeoutMs) {
             if (job?.isActive != true) {
@@ -205,17 +243,9 @@ class AutoReadEngine(
     /** Строка (ряд) для сортировки: реплики в пределах 12% высоты — один ряд. */
     private fun rowOf(top: Float): Int = (top / 0.12f).toInt()
 
-    private fun historyKey(text: String): Long {
-        // Нормализация против дрожания OCR: только буквы/цифры, нижний регистр
-        val norm = text.lowercase().filter { it.isLetterOrDigit() }
-        var h = 1125899906842597L
-        for (c in norm) h = 31 * h + c.code
-        return h
-    }
-
     companion object {
         private const val MIN_TEXT_LENGTH = 2
-        private const val HISTORY_LIMIT = 3000
+        private const val HISTORY_LIMIT = 600
 
         /**
          * Определение языка текста по алфавиту. Реплика проходит фильтр,

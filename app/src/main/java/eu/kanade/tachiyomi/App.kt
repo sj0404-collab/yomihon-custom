@@ -280,6 +280,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        // Приложение свернули — останавливаем любой звучащий TTS
+        runCatching { eu.kanade.tachiyomi.data.tts.TtsSpeaker.stop() }
         SecureActivityDelegate.onApplicationStopped()
     }
 
