@@ -70,20 +70,34 @@ fun TtsSettingsDialog(
         var probe: TextToSpeech? = null
         probe = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
+                // Группировка из overlay-translator: русские голоса,
+                // классифицированные по полу (Svetlana и др. — ♀,
+                // Dmitry и др. — ♂, детские — подростковые)
                 voices = runCatching {
-                    probe!!.voices.orEmpty()
+                    eu.kanade.tachiyomi.data.tts.VoiceHelper.russianVoices(probe)
                         .sortedWith(
                             compareBy(
-                                { !it.locale.language.equals("ru", ignoreCase = true) },
+                                {
+                                    when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(it)) {
+                                        eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> 0
+                                        eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> 1
+                                        eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> 2
+                                        else -> 3
+                                    }
+                                },
                                 { it.isNetworkConnectionRequired },
                                 { it.name },
                             ),
                         )
                         .map { v ->
-                            v.name to (
-                                v.locale.displayName +
-                                    if (v.isNetworkConnectionRequired) " • сеть" else " • локальный"
-                                )
+                            val kind = when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(v)) {
+                                eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> "♀ Женский"
+                                eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> "♂ Мужской"
+                                eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> "👦 Подросток"
+                                else -> "Другой"
+                            }
+                            val net = if (v.isNetworkConnectionRequired) "☁ сеть" else "📱 локальный"
+                            v.name to "$kind • $net • ${v.name.substringAfterLast(':')}"
                         }
                 }.getOrDefault(emptyList())
             }

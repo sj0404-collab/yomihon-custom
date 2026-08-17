@@ -124,20 +124,28 @@ object TtsSpeaker {
             val p = prefs()
             engine.setSpeechRate(p.speechRate().get().coerceIn(0.5f, 2f))
             engine.setPitch(p.speechPitch().get().coerceIn(0.5f, 2f))
-            // Пол говорящего: приоритет — пресет для пола, затем общий голос
+            // Пол говорящего (логика из overlay-translator):
+            // 1) явный пресет пользователя для пола; 2) VoiceHelper.pick —
+            // автоподбор по классификации имён (Svetlana/Dmitry/детские);
+            // 3) общий голос; 4) язык ru-RU как последний рубеж.
             val presetVoice = when (gender) {
                 "female" -> p.voiceFemale().get()
                 "male" -> p.voiceMale().get()
                 else -> ""
             }
-            val savedVoice = presetVoice.ifBlank { p.voiceName().get() }
-            val v = engine.voices?.find { it.name == savedVoice }
+            val v: android.speech.tts.Voice? = when {
+                presetVoice.isNotBlank() ->
+                    engine.voices?.find { it.name == presetVoice }
+                        ?: VoiceHelper.pick(engine, if (gender == "male") VoiceKind.MALE else VoiceKind.FEMALE, null)
+                gender == "female" -> VoiceHelper.pick(engine, VoiceKind.FEMALE, null)
+                gender == "male" -> VoiceHelper.pick(engine, VoiceKind.MALE, null)
+                else -> engine.voices?.find { it.name == p.voiceName().get() }
+            }
             if (v != null) {
                 val res = engine.setVoice(v)
                 if (res != TextToSpeech.SUCCESS) {
-                    // Локальный голос не установлен в системе (нет данных) —
-                    // откатываемся на язык, чтобы звук был всегда
-                    logcat(LogPriority.WARN) { "Voice ${'$'}savedVoice rejected (missing data?), falling back to ru-RU" }
+                    // Голос без данных — откат на язык, звук будет всегда
+                    logcat(LogPriority.WARN) { "Voice ${'$'}{v.name} rejected (missing data?), falling back to ru-RU" }
                     engine.language = Locale("ru", "RU")
                 }
             } else {
