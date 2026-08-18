@@ -45,6 +45,21 @@ jobs:
       - name: Verify SQLDelight migrations
         run: ./gradlew verifySqlDelightMigration
 
+      - name: Run unit tests
+        # Воркфлоу называется "Build & Test", но тестов до этого не запускал:
+        # юнит-тесты (включая SpeechMarkupTest) молча не выполнялись.
+        run: ./gradlew testReleaseUnitTest
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-report-${{ github.sha }}
+          path: |
+            app/build/reports/tests
+            data/build/reports/tests
+            domain/build/reports/tests
+
       - name: Build app
         run: ./gradlew assembleRelease -Penable-updater
         env:
