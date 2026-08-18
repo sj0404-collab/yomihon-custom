@@ -48,7 +48,9 @@ jobs:
       - name: Run unit tests
         # Воркфлоу называется "Build & Test", но тестов до этого не запускал:
         # юнит-тесты (включая SpeechMarkupTest) молча не выполнялись.
-        run: ./gradlew testReleaseUnitTest
+        # Задача `test` агрегирует юнит-тесты всех модулей; имя варианта
+        # (testReleaseUnitTest) в этом проекте не существует.
+        run: ./gradlew test
 
       - name: Upload test report
         if: failure()
