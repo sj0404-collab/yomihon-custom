@@ -24,7 +24,11 @@ package eu.kanade.tachiyomi.data.tts
  */
 object SpeechMarkup {
 
-    private val TAG = Regex("""\{[^{}]{0,40}}""")
+    // ВАЖНО: закрывающая } обязана быть экранирована. На JVM/ART без экрана
+    // работает, но ICU-движок регулярок (Itel, Infinix и др. Android 13+)
+    // бросает PatternSyntaxException прямо в <clinit>, из-за чего ЛЮБОЕ
+    // обращение к TTS роняло приложение (ExceptionInInitializerError).
+    private val TAG = Regex("""\{[^{}]{0,40}\}""")
     private val DIVIDER = '÷'
 
     /** Пол, объявленный разметкой: "female" | "male" | null. */
