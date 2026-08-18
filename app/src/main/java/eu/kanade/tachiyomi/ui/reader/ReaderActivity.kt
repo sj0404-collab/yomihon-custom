@@ -820,7 +820,7 @@ class ReaderActivity : BaseActivity() {
                 run {
                     val autoRegion by autoReadEngine.currentRegion.collectAsState()
                     autoRegion?.let { region ->
-                        eu.kanade.presentation.reader.components.AutoReadHighlight(region = region)
+                        eu.kanade.presentation.reader.components.AutoReadHighlight(region = region, engine = autoReadEngine)
                     }
                 }
 

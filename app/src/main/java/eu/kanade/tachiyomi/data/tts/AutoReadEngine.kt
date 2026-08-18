@@ -57,6 +57,42 @@ class AutoReadEngine(
     private val _currentRegion = MutableStateFlow<SpokenRegion?>(null)
     val currentRegion = _currentRegion.asStateFlow()
 
+    /**
+     * ВСЕ реплики кадра с их статусом: прочитана / читается / предстоит.
+     * Оверлей рисует прочитанные полупрозрачно, текущую — ярко, будущие —
+     * пунктирно, так видно и историю, и план чтения.
+     */
+    data class FrameRegion(
+        val box: OcrBoundingBox,
+        val index: Int,
+        val state: State,
+    ) {
+        enum class State { DONE, CURRENT, UPCOMING }
+    }
+
+    private val _frameRegions = MutableStateFlow<List<FrameRegion>>(emptyList())
+    val frameRegions = _frameRegions.asStateFlow()
+
+    /**
+     * Зона книги внутри вьюпорта (доли 0..1) — если кадр перед OCR был
+     * обрезан до неё, оверлей обязан пересчитать box'ы обратно.
+     */
+    @Volatile
+    var highlightZone: android.graphics.RectF? = null
+
+    /** Box из координат обрезанного кадра -> координаты вьюпорта. */
+    fun mapToViewport(box: OcrBoundingBox): OcrBoundingBox {
+        val z = highlightZone ?: return box
+        val zw = z.right - z.left
+        val zh = z.bottom - z.top
+        return OcrBoundingBox(
+            left = z.left + box.left * zw,
+            top = z.top + box.top * zh,
+            right = z.left + box.right * zw,
+            bottom = z.top + box.bottom * zh,
+        )
+    }
+
     private val _isReading = MutableStateFlow(false)
     val isReading = _isReading.asStateFlow()
 
@@ -166,12 +202,20 @@ class AutoReadEngine(
                     else -> fresh.sortedWith(compareBy({ rowOf(it.boundingBox.top) }, { -it.boundingBox.right }))
                 }
 
-                // 3.5) AI-определение пола говорящих (Gemini Vision по лицам
-                // и хвостикам баллонов); при выключенной опции/без ключа — null
-                val genders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty()) {
-                    SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                // 3.5) Пол говорящих. Приоритет:
+                //  а) ВСТРОЕННЫЙ локальный AI (LocalSpeakerAi) — морфология
+                //     русского текста, работает без сети и без ключей;
+                //  б) Gemini Vision — только если включена опция И задан ключ
+                //     (уточняет по лицам то, что не смогла морфология).
+                val localGenders = LocalSpeakerAi.guessGenders(ordered.map { it.text })
+                val genders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty() &&
+                    prefs.googleApiKey().get().isNotBlank()
+                ) {
+                    val remote = SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                    // локальная уверенность важнее «unknown» от сети, и наоборот
+                    List(ordered.size) { i -> localGenders[i] ?: remote.getOrNull(i) }
                 } else {
-                    List(ordered.size) { null }
+                    localGenders
                 }
 
                 lastFrameHadText = ordered.isNotEmpty()
@@ -187,9 +231,27 @@ class AutoReadEngine(
                     ordered.map { it.text }
                 }
 
+                // Публикуем карту кадра: всё, что будет прочитано
+                _frameRegions.value = ordered.mapIndexed { i, r ->
+                    FrameRegion(r.boundingBox, i + 1, FrameRegion.State.UPCOMING)
+                }
+
                 // 4) реплика за репликой: подсветка -> озвучка -> ждём конца
                 for ((i, region) in ordered.withIndex()) {
                     if (job?.isActive != true) break
+
+                    // Обновляем статусы: до i — прочитано, i — читается, после — предстоит
+                    _frameRegions.value = ordered.mapIndexed { j, r ->
+                        FrameRegion(
+                            r.boundingBox,
+                            j + 1,
+                            when {
+                                j < i -> FrameRegion.State.DONE
+                                j == i -> FrameRegion.State.CURRENT
+                                else -> FrameRegion.State.UPCOMING
+                            },
+                        )
+                    }
 
                     val speakTextRaw = translations.getOrNull(i) ?: region.text
 
@@ -233,6 +295,7 @@ class AutoReadEngine(
                 logcat(LogPriority.ERROR, e) { "AutoRead frame failed" }
             } finally {
                 _currentRegion.value = null
+                _frameRegions.value = emptyList()
                 _isReading.value = false
                 // Колбэк только для АКТУАЛЬНОГО запуска: после stop() старый
                 // цикл не имеет права листать дальше или перезапускать чтение
@@ -249,6 +312,7 @@ class AutoReadEngine(
         job = null
         TtsSpeaker.stop()
         _currentRegion.value = null
+        _frameRegions.value = emptyList()
         _isReading.value = false
     }
 

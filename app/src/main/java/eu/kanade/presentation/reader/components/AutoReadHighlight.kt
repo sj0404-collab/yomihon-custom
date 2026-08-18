@@ -49,23 +49,55 @@ import kotlin.math.roundToInt
 fun AutoReadHighlight(
     region: AutoReadEngine.SpokenRegion,
     modifier: Modifier = Modifier,
+    engine: AutoReadEngine? = null,
 ) {
     val prefs = remember { Injekt.get<OcrPreferences>() }
-    val accent = remember { Color(prefs.highlightColor().get().toULong().toLong()) }
-    val style = remember { prefs.highlightStyle().get() }
-    val strokeWidth = remember { prefs.highlightWidth().get().coerceIn(1f, 12f) }
+    // Не кэшируем навсегда: пользователь меняет цвет в настройках — рамки
+    // перекрашиваются со следующей реплики, без перезапуска читалки
+    val accent = Color(prefs.highlightColor().get().toULong().toLong())
+    val style = prefs.highlightStyle().get()
+    val strokeWidth = prefs.highlightWidth().get().coerceIn(1f, 12f)
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val w = constraints.maxWidth.toFloat()
         val h = constraints.maxHeight.toFloat()
         val density = LocalDensity.current
 
-        val boxWidth = with(density) { ((region.box.right - region.box.left) * w).toDp() }
-        val boxHeight = with(density) { ((region.box.bottom - region.box.top) * h).toDp() }
+        // Карта кадра: прочитанные (тускло), текущая (ярко), будущие (пунктир).
+        // Видно и историю, и предстоящий план чтения.
+        val frameRegions = engine?.frameRegions?.let { flow ->
+            androidx.compose.runtime.collectAsState(flow, initial = emptyList()).value
+        } ?: emptyList()
+        for (fr in frameRegions) {
+            if (fr.state == AutoReadEngine.FrameRegion.State.CURRENT) continue // текущую рисуем ниже ярче
+            val b = engine?.mapToViewport(fr.box) ?: fr.box
+            val frW = with(density) { ((b.right - b.left) * w).toDp() }
+            val frH = with(density) { ((b.bottom - b.top) * h).toDp() }
+            val done = fr.state == AutoReadEngine.FrameRegion.State.DONE
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset((b.left * w).roundToInt(), (b.top * h).roundToInt()) }
+                    .width(frW)
+                    .height(frH)
+                    .border(
+                        width = 1.5.dp,
+                        color = if (done) accent.copy(alpha = 0.25f) else accent.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(4.dp),
+                    )
+                    .background(
+                        if (done) accent.copy(alpha = 0.05f) else Color.Transparent,
+                        RoundedCornerShape(4.dp),
+                    ),
+            )
+        }
+
+        val mapped = engine?.mapToViewport(region.box) ?: region.box
+        val boxWidth = with(density) { ((mapped.right - mapped.left) * w).toDp() }
+        val boxHeight = with(density) { ((mapped.bottom - mapped.top) * h).toDp() }
         val offsetModifier = Modifier.offset {
             IntOffset(
-                (region.box.left * w).roundToInt(),
-                (region.box.top * h).roundToInt(),
+                (mapped.left * w).roundToInt(),
+                (mapped.top * h).roundToInt(),
             )
         }
 
@@ -89,8 +121,8 @@ fun AutoReadHighlight(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (region.box.left * w).roundToInt(),
-                            (region.box.bottom * h).roundToInt(),
+                            (mapped.left * w).roundToInt(),
+                            (mapped.bottom * h).roundToInt(),
                         )
                     }
                     .width(boxWidth)

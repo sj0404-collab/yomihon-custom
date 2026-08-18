@@ -121,6 +121,68 @@ data object BrowserTab : Tab {
         }.getOrNull()
     }
 
+    /**
+     * Зона СТРАНИЦЫ КНИГИ во вьюпорте (доли 0..1): JS находит все крупные
+     * <img>/<canvas> (страницы манги — читалки сайтов рисуют их именно так),
+     * объединяет видимые прямоугольники и возвращает их границы. Шапки,
+     * меню, комментарии и прочий интерфейс сайта в зону не попадают — OCR
+     * получает уже обрезанный кадр.
+     */
+    private suspend fun detectBookZone(): android.graphics.RectF? {
+        val wv = sharedWebView ?: return null
+        val js = """
+            (function() {
+                var vh = window.innerHeight, vw = window.innerWidth;
+                var minArea = vw * vh * 0.10; // картинка занимает >=10% экрана
+                var top = vh, bottom = 0, left = vw, right = 0, found = false;
+                var nodes = document.querySelectorAll('img, canvas');
+                for (var i = 0; i < nodes.length; i++) {
+                    var r = nodes[i].getBoundingClientRect();
+                    var visW = Math.min(r.right, vw) - Math.max(r.left, 0);
+                    var visH = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+                    if (visW <= 0 || visH <= 0) continue;
+                    if (visW * visH < minArea) continue;
+                    found = true;
+                    top = Math.min(top, Math.max(r.top, 0));
+                    bottom = Math.max(bottom, Math.min(r.bottom, vh));
+                    left = Math.min(left, Math.max(r.left, 0));
+                    right = Math.max(right, Math.min(r.right, vw));
+                }
+                if (!found) return "";
+                return (left / vw) + "," + (top / vh) + "," + (right / vw) + "," + (bottom / vh);
+            })()
+        """.trimIndent()
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            try {
+                wv.post {
+                    wv.evaluateJavascript(js) { raw ->
+                        val body = raw?.trim('"').orEmpty()
+                        val parts = body.split(',').mapNotNull { it.toFloatOrNull() }
+                        val rect = if (parts.size == 4 && parts[3] > parts[1] && parts[2] > parts[0]) {
+                            android.graphics.RectF(parts[0], parts[1], parts[2], parts[3])
+                        } else null
+                        if (cont.isActive) cont.resume(rect) {}
+                    }
+                }
+            } catch (e: Exception) {
+                if (cont.isActive) cont.resume(null) {}
+            }
+        }
+    }
+
+    /** Кадр, обрезанный до зоны книги (если зона найдена). */
+    private fun cropToZone(src: android.graphics.Bitmap, zone: android.graphics.RectF?): android.graphics.Bitmap {
+        if (zone == null) return src
+        val l = (zone.left * src.width).toInt().coerceIn(0, src.width - 1)
+        val t = (zone.top * src.height).toInt().coerceIn(0, src.height - 1)
+        val r = (zone.right * src.width).toInt().coerceIn(l + 1, src.width)
+        val b = (zone.bottom * src.height).toInt().coerceIn(t + 1, src.height)
+        if (r - l < 64 || b - t < 64) return src
+        val cropped = android.graphics.Bitmap.createBitmap(src, l, t, r - l, b - t)
+        if (cropped !== src && !src.isRecycled) src.recycle()
+        return cropped
+    }
+
     override val options: TabOptions
         @Composable
         get() {
@@ -211,8 +273,13 @@ data object BrowserTab : Tab {
             var stuckCounter = 0
             while (isAutoRead) {
                 val wv = sharedWebView
-                val bmp = captureWebView()
-                if (wv == null || bmp == null) { delay(500); continue }
+                val raw = captureWebView()
+                if (wv == null || raw == null) { delay(500); continue }
+
+                // Только страница книги: зона крупных картинок, без UI сайта
+                val zone = detectBookZone()
+                readEngine.highlightZone = zone
+                val bmp = cropToZone(raw, zone)
 
                 var finished = false
                 readEngine.readFrame(bmp, chapterId = -1L, pageIndex = wv.scrollY) { finished = true }
@@ -325,7 +392,7 @@ data object BrowserTab : Tab {
 
         // Линейка чтения (как в AlReader): подсветка текущей реплики
         currentRegion?.let { region ->
-            eu.kanade.presentation.reader.components.AutoReadHighlight(region = region)
+            eu.kanade.presentation.reader.components.AutoReadHighlight(region = region, engine = readEngine)
         }
 
         // Плавающее SAO-меню браузера: автоскролл, наверх, закрыть
