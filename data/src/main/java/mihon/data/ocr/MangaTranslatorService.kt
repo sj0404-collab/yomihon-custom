@@ -15,6 +15,47 @@ import org.json.JSONArray
  */
 object MangaTranslatorService {
 
+    /** Переводчик может расставить пробелы внутри @@@ — учитываем это. */
+    private val SEPARATOR_REGEX = Regex("""\s*@\s*@\s*@\s*""")
+
+    /**
+     * Переводит СПИСОК реплик одним запросом.
+     *
+     * Раньше авточтение переводило по одной реплике на HTTP-запрос: на
+     * странице с 15 бабблами это 15 последовательных обращений между
+     * озвучками. Здесь строки склеиваются разделителем, который переводчик
+     * не трогает, и режутся обратно; при несовпадении числа строк —
+     * безопасный откат на построчный перевод.
+     */
+    suspend fun translateAll(
+        texts: List<String>,
+        targetLang: String = "ru",
+        sourceLang: String = "auto",
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (texts.isEmpty()) return@withContext emptyList()
+        if (texts.size == 1) return@withContext listOf(translate(texts[0], targetLang, sourceLang))
+
+        // Разделитель из символов, которые переводчик оставляет как есть.
+        val separator = "\n@@@\n"
+        val joined = texts.joinToString(separator)
+
+        // У endpoint есть лимит на длину query — режем на порции.
+        if (joined.length > 1500) {
+            val half = texts.size / 2
+            return@withContext translateAll(texts.take(half), targetLang, sourceLang) +
+                translateAll(texts.drop(half), targetLang, sourceLang)
+        }
+
+        val translated = translate(joined, targetLang, sourceLang)
+        val parts = translated.split(SEPARATOR_REGEX).map { it.trim() }
+        if (parts.size == texts.size) {
+            parts.mapIndexed { index, part -> part.ifBlank { texts[index] } }
+        } else {
+            logcat(LogPriority.INFO) { "Batch translate mismatch, falling back to per-line" }
+            texts.map { translate(it, targetLang, sourceLang) }
+        }
+    }
+
     /**
      * Translates input text into target language (default: Russian "ru").
      */

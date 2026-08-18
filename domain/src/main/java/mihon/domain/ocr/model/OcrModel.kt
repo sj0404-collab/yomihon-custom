@@ -35,7 +35,11 @@ enum class OcrModel {
     GOOGLE,
 
     /**
-     * Zen Free AI model (Free zero-config, works without API key).
+     * Бесплатный режим без ключа и без настройки.
+     *
+     * Исполняется движком Google Lens: бесплатные модели провайдера Zen
+     * не принимают изображения ("No endpoints found that support image
+     * input"), поэтому OCR через них невозможен.
      */
     ZEN_FREE,
 }

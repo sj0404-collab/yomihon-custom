@@ -121,7 +121,9 @@ class OcrRepositoryImpl(
             EngineType.OWOCR -> EngineType.GLENS
             EngineType.OPENROUTER -> EngineType.ZEN_FREE
             EngineType.GOOGLE -> EngineType.ZEN_FREE
-            EngineType.ZEN_FREE -> EngineType.GLENS
+            // ZEN_FREE исполняется движком Google Lens, поэтому фолбэк в GLENS
+            // был повтором той же попытки. Уходим на локальную модель.
+            EngineType.ZEN_FREE -> EngineType.FAST
         }
     }
 

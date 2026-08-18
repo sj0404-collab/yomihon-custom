@@ -85,14 +85,29 @@ object TtsSpeaker {
      * (Настройки озвучки → Женский голос / Мужской голос). Для веб-движка
      * пол недоступен (у Google Translate один голос на язык).
      */
-    fun speakAs(context: Context, text: String, gender: String?, onState: (Boolean) -> Unit = {}) {
+    @JvmOverloads
+    fun speakAs(
+        context: Context,
+        text: String,
+        gender: String?,
+        speakerSlot: Int = 0,
+        onState: (Boolean) -> Unit = {},
+    ) {
         stop()
         onStateChange = onState
-        val engine = prefs().voiceEngine().get()
-        when (engine) {
-            ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, text)
-            ENGINE_ELEVENLABS -> speakElevenLabs(context, text)
-            else -> speakSystem(context, text, gender)
+        // Служебная разметка ({1}{ж}, ÷) не должна попасть в синтез, даже
+        // если вызывающий код забыл её снять.
+        val spoken = SpeechMarkup.strip(text)
+        if (spoken.isBlank()) {
+            setSpeaking(false)
+            return
+        }
+        val effectiveGender = gender ?: SpeechMarkup.genderOf(text)
+        val slot = if (speakerSlot != 0) speakerSlot else SpeechMarkup.speakerSlot(text)
+        when (prefs().voiceEngine().get()) {
+            ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, spoken)
+            ENGINE_ELEVENLABS -> speakElevenLabs(context, spoken)
+            else -> speakSystem(context, spoken, effectiveGender, slot)
         }
     }
 
@@ -115,7 +130,12 @@ object TtsSpeaker {
 
     // region SYSTEM
 
-    private fun speakSystem(context: Context, text: String, gender: String? = null) {
+    private fun speakSystem(
+        context: Context,
+        text: String,
+        gender: String? = null,
+        speakerSlot: Int = 0,
+    ) {
         ensureSystem(context) { engine ->
             if (engine == null) {
                 setSpeaking(false)
@@ -133,12 +153,22 @@ object TtsSpeaker {
                 "male" -> p.voiceMale().get()
                 else -> ""
             }
+            val kind = when (gender) {
+                "male" -> VoiceKind.MALE
+                "female" -> VoiceKind.FEMALE
+                else -> null
+            }
+            // Разные персонажи одного пола получают разные голоса: слот > 0
+            // сдвигает выбор внутри группы. Явный пресет пользователя всегда
+            // важнее автоподбора.
             val v: android.speech.tts.Voice? = when {
-                presetVoice.isNotBlank() ->
+                presetVoice.isNotBlank() && speakerSlot == 0 ->
                     engine.voices?.find { it.name == presetVoice }
-                        ?: VoiceHelper.pick(engine, if (gender == "male") VoiceKind.MALE else VoiceKind.FEMALE, null)
-                gender == "female" -> VoiceHelper.pick(engine, VoiceKind.FEMALE, null)
-                gender == "male" -> VoiceHelper.pick(engine, VoiceKind.MALE, null)
+                        ?: VoiceHelper.pick(engine, kind ?: VoiceKind.FEMALE, null)
+                kind != null && speakerSlot > 0 ->
+                    VoiceHelper.pickForSpeaker(engine, kind, speakerSlot)
+                        ?: VoiceHelper.pick(engine, kind, null)
+                kind != null -> VoiceHelper.pick(engine, kind, null)
                 else -> engine.voices?.find { it.name == p.voiceName().get() }
             }
             if (v != null) {

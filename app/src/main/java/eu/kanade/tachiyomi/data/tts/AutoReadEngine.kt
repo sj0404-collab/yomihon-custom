@@ -46,6 +46,8 @@ class AutoReadEngine(
     data class SpokenRegion(
         val text: String,
         val translated: String?,
+        /** Служебные пометки для показа ({1}{ж}) — TTS их не произносит. */
+        val marks: String = "",
         val box: OcrBoundingBox,
         val index: Int,
         val total: Int,
@@ -174,15 +176,34 @@ class AutoReadEngine(
 
                 lastFrameHadText = ordered.isNotEmpty()
 
-                // 4) реплика за репликой: подсветка -> (перевод) -> озвучка -> ждём конца
+                // 3.7) перевод ВСЕЙ страницы одним запросом (раньше был
+                // отдельный HTTP-запрос на каждую реплику — на 15 бабблах
+                // это 15 последовательных обращений между озвучками).
+                val target = prefs.translateTarget().get().ifBlank { "ru" }
+                val translations: List<String> = if (translate && language != target) {
+                    runCatching { MangaTranslatorService.translateAll(ordered.map { it.text }, target) }
+                        .getOrElse { ordered.map { it.text } }
+                } else {
+                    ordered.map { it.text }
+                }
+
+                // 4) реплика за репликой: подсветка -> озвучка -> ждём конца
                 for ((i, region) in ordered.withIndex()) {
                     if (job?.isActive != true) break
 
-                    val speakTextRaw = if (translate && language != "ru") {
-                        runCatching { MangaTranslatorService.translate(region.text, "ru") }
-                            .getOrDefault(region.text)
-                    } else {
-                        region.text
+                    val speakTextRaw = translations.getOrNull(i) ?: region.text
+
+                    val gender = genders.getOrNull(i)
+
+                    // Служебные пометки: номер по порядку чтения и пол.
+                    // Они показываются на экране, но НЕ произносятся —
+                    // SpeechMarkup.strip() снимает их перед синтезом.
+                    val marks = buildString {
+                        if (prefs.showSpeechNumbers().get()) append("{").append(i + 1).append("}")
+                        when (gender) {
+                            "female" -> append("{ж}")
+                            "male" -> append("{м}")
+                        }
                     }
 
                     _currentRegion.value = SpokenRegion(
@@ -191,9 +212,20 @@ class AutoReadEngine(
                         box = region.boundingBox,
                         index = i + 1,
                         total = ordered.size,
+                        marks = marks,
                     )
 
-                    speakAndAwait(speakTextRaw, genders.getOrNull(i))
+                    // Слот говорящего: два персонажа одного пола в сцене
+                    // получают разные голоса. Считаем по индексам, а не через
+                    // indexOf: одинаковые реплики иначе дали бы один и тот же
+                    // слот.
+                    val slot = if (prefs.perSpeakerVoices().get()) {
+                        (0 until i).count { genders.getOrNull(it) == gender }
+                    } else {
+                        0
+                    }
+
+                    speakAndAwait(SpeechMarkup.strip(speakTextRaw), gender, slot)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -221,10 +253,10 @@ class AutoReadEngine(
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
-    private suspend fun speakAndAwait(text: String, gender: String? = null) {
+    private suspend fun speakAndAwait(text: String, gender: String? = null, speakerSlot: Int = 0) {
         val done = MutableStateFlow(false)
         var started = false
-        TtsSpeaker.speakAs(context, text, gender) { speaking ->
+        TtsSpeaker.speakAs(context, text, gender, speakerSlot) { speaking ->
             if (speaking) started = true
             if (!speaking && started) done.value = true
         }

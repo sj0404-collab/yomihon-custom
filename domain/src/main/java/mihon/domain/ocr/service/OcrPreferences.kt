@@ -81,6 +81,29 @@ class OcrPreferences(
     // Требует Google AI ключ; выключено по умолчанию (онлайн, медленнее).
     fun aiGenderVoices() = preferenceStore.getBoolean("pref_ai_gender_voices", false)
 
+    // Целевой язык перевода перед озвучкой. Раньше был жёстко "ru" в коде
+    // AutoReadEngine, из-за чего англоязычный пользователь получал русскую
+    // озвучку независимо от настроек.
+    fun translateTarget() = preferenceStore.getString("pref_translate_target", "ru")
+
+    // ---- Вид подсветки реплики ----
+    // Цвет рамки/подчёркивания текущей реплики (ARGB). По умолчанию — бирюзовый,
+    // как на скриншотах пользователя.
+    fun highlightColor() = preferenceStore.getLong("pref_highlight_color", 0xFF00E5FFL)
+
+    // Стиль: box (рамка) | underline (подчёркивание) | both
+    fun highlightStyle() = preferenceStore.getString("pref_highlight_style", "box")
+
+    // Толщина рамки/линии в dp
+    fun highlightWidth() = preferenceStore.getFloat("pref_highlight_width", 3f)
+
+    // Показывать номера реплик на странице (порядок чтения). Номера видны
+    // глазами, но TTS их не произносит — см. SpeechMarkup.
+    fun showSpeechNumbers() = preferenceStore.getBoolean("pref_show_speech_numbers", true)
+
+    // Разные голоса разным персонажам одного пола в сцене
+    fun perSpeakerVoices() = preferenceStore.getBoolean("pref_per_speaker_voices", true)
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)
