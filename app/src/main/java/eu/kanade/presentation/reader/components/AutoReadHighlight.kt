@@ -18,6 +18,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,9 +66,11 @@ fun AutoReadHighlight(
 
         // Карта кадра: прочитанные (тускло), текущая (ярко), будущие (пунктир).
         // Видно и историю, и предстоящий план чтения.
-        val frameRegions = engine?.frameRegions?.let { flow ->
-            androidx.compose.runtime.collectAsState(flow, initial = emptyList()).value
-        } ?: emptyList()
+        val frameRegions: List<AutoReadEngine.FrameRegion> = if (engine != null) {
+            engine.frameRegions.collectAsState().value
+        } else {
+            emptyList()
+        }
         for (fr in frameRegions) {
             if (fr.state == AutoReadEngine.FrameRegion.State.CURRENT) continue // текущую рисуем ниже ярче
             val b = engine?.mapToViewport(fr.box) ?: fr.box
