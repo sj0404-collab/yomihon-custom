@@ -219,11 +219,14 @@ private fun showTranslationNotification(context: Context, text: String) {
             notificationManager.createNotificationChannel(channel)
         }
 
+        // Полная страница OCR даёт тысячи символов: Notification такого
+        // размера отклоняется системой (TransactionTooLargeException).
+        val safeText = text.take(800)
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_search)
-            .setContentTitle("Yomihon: Перевод OCR")
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentTitle("Yomikai: Перевод OCR")
+            .setContentText(safeText.take(120))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(safeText))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .build()

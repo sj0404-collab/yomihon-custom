@@ -10,6 +10,8 @@ import android.content.IntentFilter
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import eu.kanade.tachiyomi.R
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 
 /**
  * Уведомление «Сейчас читается»: распознанный текст страницы + кнопка
@@ -33,7 +35,18 @@ object TtsReadingNotifier {
         }
     }
 
+    /**
+     * Лимит текста в уведомлении.
+     *
+     * Android отбрасывает Notification, чей суммарный размер превышает
+     * ~500 КБ (RemoteViews / Bundle), и падает с TransactionTooLargeException
+     * либо DeadObjectException, залив logcat простынёй. Полная страница OCR
+     * легко даёт несколько тысяч символов, поэтому режем жёстко.
+     */
+    private const val MAX_NOTIFICATION_TEXT = 800
+
     fun show(context: Context, text: String) {
+        if (text.isBlank()) return
         val app = context.applicationContext
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -49,13 +62,17 @@ object TtsReadingNotifier {
 
         if (!receiverRegistered) {
             val filter = IntentFilter(ACTION_STOP)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                app.registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("UnspecifiedRegisterReceiverFlag")
-                app.registerReceiver(stopReceiver, filter)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    app.registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    app.registerReceiver(stopReceiver, filter)
+                }
+                receiverRegistered = true
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "Failed to register TTS stop receiver" }
             }
-            receiverRegistered = true
         }
 
         val stopIntent = PendingIntent.getBroadcast(
@@ -65,17 +82,24 @@ object TtsReadingNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val safeText = text.take(MAX_NOTIFICATION_TEXT)
         val notification = NotificationCompat.Builder(app, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mihon)
             .setContentTitle("🔊 Читается страница")
-            .setContentText(text.take(120))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(2000)))
+            .setContentText(safeText.take(120))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(safeText))
             .setOnlyAlertOnce(true)
             .setOngoing(false)
             .addAction(0, "⏹ Остановить", stopIntent)
             .build()
 
-        nm.notify(NOTIFICATION_ID, notification)
+        // Без разрешения POST_NOTIFICATIONS (Android 13+) notify() бросает
+        // SecurityException; уведомление — не повод ронять читалку.
+        try {
+            nm.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "TTS notification rejected" }
+        }
     }
 
     fun dismiss(context: Context) {

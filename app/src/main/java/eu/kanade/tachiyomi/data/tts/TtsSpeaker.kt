@@ -37,6 +37,12 @@ import kotlin.coroutines.resume
  */
 object TtsSpeaker {
 
+    /**
+     * Предел одной utterance. TextToSpeech.getMaxSpeechInputLength() почти
+     * везде равен 4000; берём с запасом, чтобы не зависеть от прошивки.
+     */
+    private const val HARD_UTTERANCE_LIMIT = 3500
+
     const val ENGINE_SYSTEM = "system_tts"
     const val ENGINE_GOOGLE_WEB = "google_web"
     const val ENGINE_ELEVENLABS = "eleven_api"
@@ -221,7 +227,12 @@ object TtsSpeaker {
                     }
                 }
                 val mode = if (queued) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
-                val r = engine.speak(trimmed, mode, null, "yk_$i")
+                val r = try {
+                    engine.speak(trimmed, mode, null, "yk_$i")
+                } catch (e: Exception) {
+                    logcat(LogPriority.WARN, e) { "speak() rejected an utterance" }
+                    TextToSpeech.ERROR
+                }
                 if (r == TextToSpeech.SUCCESS) queued = true
                 val pauseMs = when {
                     trimmed.endsWith("!") || trimmed.endsWith("?") ||
@@ -229,7 +240,9 @@ object TtsSpeaker {
                     trimmed.endsWith(",") || trimmed.endsWith(";") -> 160L
                     else -> 260L
                 }
-                engine.playSilentUtterance(pauseMs, TextToSpeech.QUEUE_ADD, "yk_p$i")
+                runCatching {
+                    engine.playSilentUtterance(pauseMs, TextToSpeech.QUEUE_ADD, "yk_p$i")
+                }
             }
             if (!queued) setSpeaking(false)
         }
@@ -353,7 +366,11 @@ object TtsSpeaker {
             }
         }
         if (sb.isNotBlank()) result += sb.toString()
-        return result
+
+        // Страховка: TextToSpeech.speak() бросает IllegalArgumentException,
+        // если строка длиннее getMaxSpeechInputLength() (обычно 4000).
+        // Текст без знаков препинания и без пробелов не резался ничем выше.
+        return result.flatMap { it.chunked(HARD_UTTERANCE_LIMIT) }
     }
 
     private fun splitForWeb(text: String, max: Int): List<String> {

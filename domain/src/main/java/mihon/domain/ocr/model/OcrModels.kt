@@ -40,7 +40,21 @@ data class OcrRegion(
     val text: String,
     val boundingBox: OcrBoundingBox,
     val textOrientation: OcrTextOrientation,
-)
+) {
+    /**
+     * Регион покрывает всю страницу целиком.
+     *
+     * Так выглядит результат полностраничного OCR: текст всего листа лежит
+     * в одной рамке (0,0,1,1). Такой регион нельзя использовать как цель
+     * для тапа — иначе касание ЛЮБОЙ точки страницы, включая пустые поля,
+     * открывает панель распознанного текста.
+     */
+    val isWholePage: Boolean
+        get() = boundingBox.left <= 0.001f &&
+            boundingBox.top <= 0.001f &&
+            boundingBox.right >= 0.999f &&
+            boundingBox.bottom >= 0.999f
+}
 
 data class OcrPageResult(
     val chapterId: Long,

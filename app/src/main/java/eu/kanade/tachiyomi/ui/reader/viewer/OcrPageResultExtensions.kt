@@ -23,12 +23,20 @@ fun OcrPageResult.findRegionAt(
     sourceX: Float,
     sourceY: Float,
 ): OcrRegion? {
-    return regions.firstOrNull { region ->
-        region.boundingBox.contains(
-            sourceX = sourceX,
-            sourceY = sourceY,
-            imageWidth = imageWidth,
-            imageHeight = imageHeight,
-        )
-    }
+    // Регионы «на всю страницу» пропускаем: они не указывают на конкретную
+    // реплику, и раньше из-за них панель открывалась от тапа в любом месте.
+    // Сначала ищем самый маленький подходящий регион — вложенные баблы
+    // должны выигрывать у крупных панелей.
+    return regions
+        .asSequence()
+        .filterNot { it.isWholePage }
+        .filter { region ->
+            region.boundingBox.contains(
+                sourceX = sourceX,
+                sourceY = sourceY,
+                imageWidth = imageWidth,
+                imageHeight = imageHeight,
+            )
+        }
+        .minByOrNull { it.boundingBox.width * it.boundingBox.height }
 }
