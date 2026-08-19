@@ -14,7 +14,7 @@ import tachiyomi.core.common.util.system.logcat
 import java.io.File
 
 /**
- * Офлайн-паки моделей из APK: assets/ocr_packs/*.tar.xz.
+ * Офлайн-паки моделей из APK: файлы tar.xz в assets/ocr_packs.
  *
  * Реализация идеи пользователя:
  * • В ПОКОЕ модели живут ТОЛЬКО как tar.xz внутри APK (Tesseract eng+rus
