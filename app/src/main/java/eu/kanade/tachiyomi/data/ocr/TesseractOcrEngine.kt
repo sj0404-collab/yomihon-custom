@@ -37,7 +37,7 @@ class TesseractOcrEngine(private val context: Context) {
         val packDir = OfflinePackManager.activate(context, OfflinePackManager.PACK_TESSERACT)
             ?: return@withLock null
 
-        // Tesseract ждёт структуру <root>/tessdata/*.traineddata
+        // Tesseract ждёт структуру <root>/tessdata/ с файлами .traineddata
         val root = File(context.cacheDir, "tess_root")
         val tessdata = File(root, "tessdata").apply { mkdirs() }
         packDir.listFiles()?.forEach { f ->
