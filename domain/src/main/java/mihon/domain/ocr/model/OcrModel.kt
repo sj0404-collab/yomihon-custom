@@ -42,4 +42,10 @@ enum class OcrModel {
      * input"), поэтому OCR через них невозможен.
      */
     ZEN_FREE,
+
+    /**
+     * Полностью офлайн Tesseract (модели eng+rus в tar.xz внутри APK,
+     * активируются только при включении движка).
+     */
+    TESSERACT,
 }

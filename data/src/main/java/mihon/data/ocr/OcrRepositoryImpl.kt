@@ -30,8 +30,16 @@ import java.net.UnknownHostException
 /**
  * OCR repository implementation that manages engine selection, page scanning, and OCR cache.
  */
+/** Внешний офлайн-движок, живущий в app-слое (Tesseract из tar.xz в APK). */
+interface ExternalOcrEngine {
+    suspend fun recognize(image: Bitmap): String
+    suspend fun close()
+}
+
 class OcrRepositoryImpl(
     private val context: Context,
+    /** Фабрика Tesseract-движка; null в сборках без него. */
+    private val tesseractFactory: (() -> ExternalOcrEngine)? = null,
 ) : OcrRepository {
     private val preferenceStore = AndroidPreferenceStore(context)
     private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
@@ -57,6 +65,7 @@ class OcrRepositoryImpl(
     private var openRouterEngine: OpenRouterOcrEngine? = null
     private var googleAiEngine: GoogleAiOcrEngine? = null
     private var zenFreeEngine: ZenFreeOcrEngine? = null
+    private var tesseractEngine: ExternalOcrEngine? = null
     private var detEngine: DetOcrEngine? = null
 
     private val engineLocks = OcrEngineLocks()
@@ -83,6 +92,7 @@ class OcrRepositoryImpl(
         OPENROUTER,
         GOOGLE,
         ZEN_FREE,
+        TESSERACT,
     }
 
     private fun selectedEngineType(): EngineType {
@@ -94,6 +104,7 @@ class OcrRepositoryImpl(
             OcrModel.OPENROUTER -> EngineType.OPENROUTER
             OcrModel.GOOGLE -> EngineType.GOOGLE
             OcrModel.ZEN_FREE -> EngineType.ZEN_FREE
+            OcrModel.TESSERACT -> EngineType.TESSERACT
         }
     }
 
@@ -124,6 +135,7 @@ class OcrRepositoryImpl(
             // ZEN_FREE исполняется движком Google Lens, поэтому фолбэк в GLENS
             // был повтором той же попытки. Уходим на локальную модель.
             EngineType.ZEN_FREE -> EngineType.FAST
+            EngineType.TESSERACT -> EngineType.GLENS
         }
     }
 
@@ -172,6 +184,15 @@ class OcrRepositoryImpl(
             EngineType.ZEN_FREE -> {
                 zenFreeEngine ?: ZenFreeOcrEngine(context, ocrPreferences).also {
                     zenFreeEngine = it
+                }
+            }
+            EngineType.TESSERACT -> {
+                val engine = tesseractEngine
+                    ?: tesseractFactory?.invoke()?.also { tesseractEngine = it }
+                    ?: error("Tesseract engine unavailable in this build")
+                object : OcrEngine {
+                    override suspend fun recognizeText(image: Bitmap): String = engine.recognize(image)
+                    override fun close() { /* закрывается в closeEngines() */ }
                 }
             }
         }
@@ -287,6 +308,13 @@ class OcrRepositoryImpl(
                         image = bitmap,
                         modelKey = selectedModel,
                         type = EngineType.GOOGLE,
+                    )
+                    OcrModel.TESSERACT -> scanWithEngineOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.TESSERACT,
                     )
                     OcrModel.ZEN_FREE -> scanWithEngineOrFallback(
                         chapterId = chapterId,
@@ -668,6 +696,9 @@ class OcrRepositoryImpl(
 
             zenFreeEngine?.close()
             zenFreeEngine = null
+
+            tesseractEngine?.close()
+            tesseractEngine = null
 
             detEngine?.close()
             detEngine = null

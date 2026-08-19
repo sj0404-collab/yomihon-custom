@@ -11,6 +11,7 @@ internal class OcrEngineLocks {
     private val openRouterMutex = Mutex()
     private val googleAiMutex = Mutex()
     private val zenFreeMutex = Mutex()
+    private val tesseractMutex = Mutex()
     private val detectionMutex = Mutex()
 
     suspend fun <T> withTextEngineLock(
@@ -57,6 +58,7 @@ internal class OcrEngineLocks {
             OcrRepositoryImpl.EngineType.OPENROUTER -> openRouterMutex
             OcrRepositoryImpl.EngineType.GOOGLE -> googleAiMutex
             OcrRepositoryImpl.EngineType.ZEN_FREE -> zenFreeMutex
+            OcrRepositoryImpl.EngineType.TESSERACT -> tesseractMutex
         }
     }
 }

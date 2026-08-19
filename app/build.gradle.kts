@@ -224,6 +224,8 @@ baselineProfile {
 }
 
 dependencies {
+    // Офлайн OCR: Tesseract (модели в assets/ocr_packs/*.tar.xz)
+    implementation(libs.tesseract4android)
     baselineProfile(projects.baselineProfile)
 
     implementation(projects.i18n)

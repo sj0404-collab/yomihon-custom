@@ -289,6 +289,14 @@ class DomainModule : InjektModule {
         addSingletonFactory<OcrRepository> {
             OcrRepositoryImpl(
                 context = get<Application>(),
+                tesseractFactory = {
+                    val app = get<Application>()
+                    val tess = eu.kanade.tachiyomi.data.ocr.TesseractOcrEngine(app)
+                    object : mihon.data.ocr.ExternalOcrEngine {
+                        override suspend fun recognize(image: android.graphics.Bitmap) = tess.recognize(image)
+                        override suspend fun close() = tess.close()
+                    }
+                },
             )
         }
         addSingletonFactory { OcrScanStore(get<Application>(), get()) }

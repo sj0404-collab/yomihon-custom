@@ -243,6 +243,7 @@ object OcrQueueScreen : Screen() {
                         OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
                         OcrModel.GOOGLE to stringResource(OcrModel.GOOGLE.titleRes),
                         OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
+                        OcrModel.TESSERACT to stringResource(OcrModel.TESSERACT.titleRes),
                     ),
                     onValueChange = ocrModelPreference::set,
                 )
