@@ -161,6 +161,7 @@ class AutoReadEngine(
         val myGen = ++generation
         job = scope.launch {
             _isReading.value = true
+            var aiRefine: Job? = null
             try {
                 val pixels = IntArray(bitmap.width * bitmap.height)
                 bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
@@ -208,27 +209,40 @@ class AutoReadEngine(
                 //  б) Gemini Vision — только если включена опция И задан ключ
                 //     (уточняет по лицам то, что не смогла морфология).
                 val localGenders = LocalSpeakerAi.guessGenders(ordered.map { it.text })
-                // Реплики без локального вердикта уточняет онлайн-ассистент
-                // (Zen без ключа / OpenRouter по ключу) одним батч-запросом.
-                val needsAi = prefs.aiGenderVoices().get() &&
-                    localGenders.any { it == null } && ordered.isNotEmpty()
-                val aiGenders: List<String?> = if (needsAi) {
-                    eu.kanade.tachiyomi.data.ai.AiAssistant
-                        .detectGendersByText(ordered.map { it.text })
-                } else {
-                    List(ordered.size) { null }
-                }
-                // Gemini Vision — последний уточнитель, только если задан ключ
-                val visionGenders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty() &&
-                    prefs.googleApiKey().get().isNotBlank() &&
-                    (0 until ordered.size).any { localGenders[it] == null && aiGenders[it] == null }
+                // НЕ БЛОКИРУЕМ ОЗВУЧКУ: чтение стартует сразу с локальными
+                // вердиктами морфологии. Онлайн-ассистент (быстрый формат
+                // «одна буква на реплику», max_tokens=40, таймаут 6с)
+                // работает ПАРАЛЛЕЛЬНО и дописывает пол реплик, до которых
+                // очередь озвучки ещё не дошла. Раньше тяжёлые reasoning-
+                // модели держали весь кадр — голос молчал, а на слабых
+                // устройствах приложение ловило ANR.
+                val genders = java.util.concurrent.atomic.AtomicReferenceArray<String?>(ordered.size)
+                for (i in ordered.indices) genders.set(i, localGenders[i])
+
+                aiRefine = if (
+                    prefs.aiGenderVoices().get() && ordered.isNotEmpty() &&
+                    localGenders.any { it == null }
                 ) {
-                    SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                    scope.launch {
+                        val ai = eu.kanade.tachiyomi.data.ai.AiAssistant
+                            .detectGendersByText(ordered.map { it.text })
+                        for (i in ordered.indices) {
+                            if (genders.get(i) == null) genders.set(i, ai.getOrNull(i))
+                        }
+                    }
                 } else {
-                    List(ordered.size) { null }
+                    null
                 }
-                val genders: List<String?> = List(ordered.size) { i ->
-                    localGenders[i] ?: aiGenders.getOrNull(i) ?: visionGenders.getOrNull(i)
+                // Gemini Vision как ещё один фоновый уточнитель — только с ключом
+                if (genderJpeg != null && ordered.isNotEmpty() &&
+                    prefs.googleApiKey().get().isNotBlank() && localGenders.any { it == null }
+                ) {
+                    scope.launch {
+                        val vision = SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                        for (i in ordered.indices) {
+                            if (genders.get(i) == null) genders.set(i, vision.getOrNull(i))
+                        }
+                    }
                 }
 
                 lastFrameHadText = ordered.isNotEmpty()
@@ -268,7 +282,7 @@ class AutoReadEngine(
 
                     val speakTextRaw = translations.getOrNull(i) ?: region.text
 
-                    val gender = genders.getOrNull(i)
+                    val gender = genders.get(i) // мог дозаполниться AI пока читали предыдущие
 
                     // Служебные пометки: номер по порядку чтения и пол.
                     // Они показываются на экране, но НЕ произносятся —
@@ -295,7 +309,7 @@ class AutoReadEngine(
                     // indexOf: одинаковые реплики иначе дали бы один и тот же
                     // слот.
                     val slot = if (prefs.perSpeakerVoices().get()) {
-                        (0 until i).count { genders.getOrNull(it) == gender }
+                        (0 until i).count { genders.get(it) == gender }
                     } else {
                         0
                     }
@@ -307,6 +321,7 @@ class AutoReadEngine(
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "AutoRead frame failed" }
             } finally {
+                aiRefine?.cancel()
                 _currentRegion.value = null
                 _frameRegions.value = emptyList()
                 _isReading.value = false

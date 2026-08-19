@@ -66,6 +66,7 @@ fun TtsSettingsDialog(
     var orFreeModel by remember { mutableStateOf(prefs.openrouterFreeModel().get()) }
     var orKey by remember { mutableStateOf(prefs.openrouterApiKey().get()) }
     var orModels by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showAiLog by remember { mutableStateOf(false) }
 
     // Живой список :free моделей OpenRouter (фолбэк при оффлайне)
     androidx.compose.runtime.LaunchedEffect(aiProvider) {
@@ -169,6 +170,58 @@ fun TtsSettingsDialog(
                 }
 
                 if (aiGender) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAiLog = !showAiLog }
+                            .padding(top = 4.dp),
+                    ) {
+                        Text(
+                            "⚙ Скрытый чат ассистента (журнал)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            if (showAiLog) "  ▲" else "  ▼",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    if (showAiLog) {
+                        val entries = eu.kanade.tachiyomi.data.ai.AiAssistant.log().asReversed()
+                        if (entries.isEmpty()) {
+                            Text(
+                                "Пока пусто: журнал наполняется при авточтении.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
+                                items(entries.size) { idx ->
+                                    val e = entries[idx]
+                                    Column(modifier = Modifier.padding(vertical = 3.dp)) {
+                                        Text(
+                                            "${e.model} • ${e.tookMs}мс",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Text(
+                                            "→ ${e.prompt}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                        )
+                                        Text(
+                                            "← ${e.answer}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Row(modifier = Modifier.padding(top = 4.dp)) {
                         FilterChip(
                             selected = aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_ZEN,

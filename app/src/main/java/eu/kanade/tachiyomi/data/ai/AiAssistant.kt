@@ -34,15 +34,21 @@ object AiAssistant {
     const val PROVIDER_ZEN = "zen"
     const val PROVIDER_OPENROUTER = "openrouter"
 
-    /** Модели Zen, проверенные без ключа (18.08.2026). */
+    /**
+     * Модели Zen, проверенные без ключа. Порядок = приоритет ротации:
+     * первыми идут БЫСТРЫЕ без тяжёлого reasoning (laguna отвечает «жмн»
+     * за долю секунды), reasoning-модели — в хвосте. При FreeUsageLimitError
+     * (rate limit конкретной модели) запрос автоматически повторяется на
+     * следующей модели списка.
+     */
     val ZEN_MODELS = listOf(
+        "laguna-s-2.1-free",
         "mimo-v2.5-free",
         "deepseek-v4-flash-free",
-        "laguna-s-2.1-free",
-        "nemotron-3.5-lightning-free",
-        "nemotron-3-ultra-free",
         "hy3-free",
         "big-pickle",
+        "nemotron-3.5-lightning-free",
+        "nemotron-3-ultra-free",
     )
 
     /** Запасной список OpenRouter :free на случай оффлайна при первом открытии. */
@@ -55,6 +61,27 @@ object AiAssistant {
     )
 
     private fun prefs(): OcrPreferences = Injekt.get()
+
+    /** Запись скрытого AI-чата: что спросили, что ответила модель, сколько заняло. */
+    data class LogEntry(
+        val time: Long,
+        val model: String,
+        val prompt: String,
+        val answer: String,
+        val tookMs: Long,
+    )
+
+    /** Кольцевой журнал последних обращений — «скрытый чат» ассистента. */
+    private val logBuffer = ArrayDeque<LogEntry>()
+
+    @Synchronized
+    fun log(): List<LogEntry> = logBuffer.toList()
+
+    @Synchronized
+    private fun addLog(e: LogEntry) {
+        logBuffer.addLast(e)
+        while (logBuffer.size > 40) logBuffer.removeFirst()
+    }
 
     /** Живой список бесплатных моделей OpenRouter (":free"). */
     suspend fun fetchOpenRouterFreeModels(): List<String> = withContext(Dispatchers.IO) {
@@ -79,7 +106,7 @@ object AiAssistant {
      * вызывающий код обязан деградировать мягко (нейтральный голос,
      * пропуск перевода и т.п.).
      */
-    suspend fun chat(userPrompt: String, systemPrompt: String? = null): String? =
+    suspend fun chat(userPrompt: String, systemPrompt: String? = null, maxTokens: Int = 500): String? =
         withContext(Dispatchers.IO) {
             val p = prefs()
             val provider = p.aiProvider().get()
@@ -97,16 +124,31 @@ object AiAssistant {
             }
             if (provider == PROVIDER_OPENROUTER && key.isBlank()) {
                 logcat(LogPriority.WARN) { "OpenRouter selected but no API key; falling back to Zen" }
-                return@withContext chatRaw(
-                    "https://opencode.ai/zen/v1/chat/completions",
-                    p.zenModel().get().ifBlank { ZEN_MODELS.first() },
-                    "",
-                    userPrompt,
-                    systemPrompt,
-                )
+                return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
             }
-            chatRaw(url, model, key, userPrompt, systemPrompt)
+            if (provider != PROVIDER_OPENROUTER) {
+                return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
+            }
+            chatRaw(url, model, key, userPrompt, systemPrompt, maxTokens)
         }
+
+    /**
+     * Zen с авторотацией: выбранная модель первая, при rate limit / ошибке —
+     * следующая из списка. Бесплатные лимиты Zen помодельные, поэтому
+     * ротация почти всегда находит живую модель.
+     */
+    private fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): String? {
+        val preferred = prefs().zenModel().get().ifBlank { ZEN_MODELS.first() }
+        val order = listOf(preferred) + ZEN_MODELS.filter { it != preferred }
+        for (m in order) {
+            val answer = chatRaw(
+                "https://opencode.ai/zen/v1/chat/completions",
+                m, "", userPrompt, systemPrompt, maxTokens,
+            )
+            if (answer != null) return answer
+        }
+        return null
+    }
 
     private fun chatRaw(
         url: String,
@@ -114,7 +156,9 @@ object AiAssistant {
         apiKey: String,
         userPrompt: String,
         systemPrompt: String?,
+        maxTokens: Int = 500,
     ): String? {
+        val startedAt = System.currentTimeMillis()
         return try {
             val messages = JSONArray()
             if (!systemPrompt.isNullOrBlank()) {
@@ -124,14 +168,14 @@ object AiAssistant {
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", messages)
-                .put("max_tokens", 500)
+                .put("max_tokens", maxTokens)
                 .put("temperature", 0.0)
 
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.doOutput = true
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 60_000
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 15_000
             conn.setRequestProperty("Content-Type", "application/json")
             if (apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer $apiKey")
 
@@ -144,42 +188,50 @@ object AiAssistant {
                 logcat(LogPriority.WARN) { "AI assistant HTTP $code ($model): ${text.take(160)}" }
                 return null
             }
-            JSONObject(text)
+            val answer = JSONObject(text)
                 .optJSONArray("choices")?.optJSONObject(0)
                 ?.optJSONObject("message")?.optString("content")
                 ?.trim()?.ifBlank { null }
+            addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
+            answer
         } catch (e: Exception) {
+            addLog(LogEntry(startedAt, model, userPrompt.take(200), "ОШИБКА: ${e.message?.take(120)}", System.currentTimeMillis() - startedAt))
             logcat(LogPriority.WARN, e) { "AI assistant call failed ($model)" }
             null
         }
     }
 
     /**
-     * Пол говорящих для реплик, где локальная морфология не уверена.
-     * Один батч-запрос на кадр. Ответ — JSON-массив "male"/"female"/"unknown".
+     * Пол говорящих — СВЕРХБЫСТРЫЙ формат: модель отвечает строкой из букв,
+     * по одной на реплику: «м» (мужской), «ж» (женский), «н» (не ясно).
+     * Никакого JSON и рассуждений: max_tokens=40, ответ приходит за долю
+     * секунды даже у reasoning-моделей. Плюс жёсткий таймаут 6с — если сеть
+     * тупит, чтение продолжается нейтральным голосом, а не ждёт модель.
+     * Фолбэк: локальный словарь морфологии (LocalSpeakerAi) уже отработал
+     * ДО этого вызова — сюда приходят только реплики без вердикта.
      */
     suspend fun detectGendersByText(lines: List<String>): List<String?> {
         if (lines.isEmpty()) return emptyList()
-        val numbered = lines.mapIndexed { i, t -> "${i + 1}. ${t.take(140)}" }.joinToString("\n")
-        val answer = chat(
-            userPrompt = "Реплики из манги. Определи пол говорящего КАЖДОЙ реплики по стилю речи, " +
-                "окончаниям глаголов и содержанию. Ответь ТОЛЬКО JSON-массивом строк той же длины, " +
-                "каждая строго \"male\", \"female\" или \"unknown\". Без пояснений.\n\n" + numbered,
-            systemPrompt = "Ты определяешь пол говорящего по тексту реплики. Отвечаешь только JSON-массивом.",
-        ) ?: return List(lines.size) { null }
+        val numbered = lines.mapIndexed { i, t -> "${i + 1}) ${t.take(100)}" }.joinToString("\n")
+        val answer = kotlinx.coroutines.withTimeoutOrNull(6_000) {
+            chat(
+                userPrompt = "Кто говорит каждую реплику? Ответь ТОЛЬКО строкой из ${lines.size} букв " +
+                    "без пробелов: м=мужчина, ж=женщина, н=неясно. Пример ответа: мжнм\n\n" + numbered,
+                systemPrompt = "Отвечай только буквами м/ж/н, ничего больше. Без рассуждений.",
+                maxTokens = 40,
+            )
+        } ?: return List(lines.size) { null }
 
-        return runCatching {
-            val cleaned = answer.replace("```json", "").replace("```", "").trim()
-            val start = cleaned.indexOf('[')
-            val end = cleaned.lastIndexOf(']')
-            val arr = JSONArray(cleaned.substring(start, end + 1))
-            List(lines.size) { i ->
-                when (arr.optString(i, "unknown").lowercase()) {
-                    "male" -> "male"
-                    "female" -> "female"
-                    else -> null
-                }
+        // Берём последнюю строку ответа (reasoning-модели любят префиксы),
+        // выбрасываем всё, кроме м/ж/н
+        val letters = answer.lines().lastOrNull { l -> l.any { it in "мжн" } }
+            ?.filter { it in "мжн" }.orEmpty()
+        return List(lines.size) { i ->
+            when (letters.getOrNull(i)) {
+                'м' -> "male"
+                'ж' -> "female"
+                else -> null
             }
-        }.getOrDefault(List(lines.size) { null })
+        }
     }
 }
