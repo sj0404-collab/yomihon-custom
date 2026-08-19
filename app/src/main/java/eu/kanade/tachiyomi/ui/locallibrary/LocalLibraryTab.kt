@@ -64,6 +64,19 @@ data object LocalLibraryTab : Tab {
 
     private data class ScanStats(val mangaDirs: Int, val archives: Int)
 
+    /**
+     * Кэш статистики между заходами на вкладку. Раньше scanStorage()
+     * перечитывал ВСЕ папки при каждом входе (и на каждый сигнал
+     * storageManager.changes) — на большой библиотеке это фризило UI.
+     * Теперь вход на вкладку мгновенный: показывается кэш, пересчёт
+     * идёт в фоне только если изменился набор корневых папок.
+     */
+    @Volatile
+    private var cachedStats: ScanStats? = null
+
+    @Volatile
+    private var cachedRootsKey: String = ""
+
     override val options: TabOptions
         @Composable
         get() {
@@ -83,8 +96,8 @@ data object LocalLibraryTab : Tab {
         val storageManager = remember { Injekt.get<StorageManager>() }
         val storagePreferences = remember { Injekt.get<StoragePreferences>() }
 
-        var scanning by remember { mutableStateOf(true) }
-        var stats by remember { mutableStateOf<ScanStats?>(null) }
+        var scanning by remember { mutableStateOf(cachedStats == null) }
+        var stats by remember { mutableStateOf(cachedStats) }
         var roots by remember { mutableStateOf(storagePreferences.externalLibraryRoots.get().toList()) }
         var activeRoot by remember { mutableStateOf(storagePreferences.externalLibraryActiveRoot.get()) }
         var manageMode by remember { mutableStateOf(false) }
@@ -108,11 +121,22 @@ data object LocalLibraryTab : Tab {
             storageManager.changes
                 .onStart { emit(Unit) }
                 .collectLatest {
-                    scanning = true
                     roots = storagePreferences.externalLibraryRoots.get().toList()
                     activeRoot = storagePreferences.externalLibraryActiveRoot.get()
-                    stats = withIOContext { scanStorage(storageManager) }
-                    scanning = false
+                    // Пересканируем ТОЛЬКО если изменился набор папок —
+                    // обычный вход на вкладку берёт кэш и не трогает диск
+                    val rootsKey = roots.sorted().joinToString("|")
+                    if (cachedStats == null || rootsKey != cachedRootsKey) {
+                        scanning = true
+                        val fresh = withIOContext { scanStorage(storageManager) }
+                        cachedStats = fresh
+                        cachedRootsKey = rootsKey
+                        stats = fresh
+                        scanning = false
+                    } else {
+                        stats = cachedStats
+                        scanning = false
+                    }
                 }
         }
 

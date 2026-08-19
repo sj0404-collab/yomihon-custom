@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +59,7 @@ fun ReaderFloatingControls(
     visible: Boolean,
     onTriggerOcr: () -> Unit,
     onOpenOcrSettings: () -> Unit,
+    onOpenAiChat: () -> Unit = {},
     onScanRegionChange: (ScanRegion) -> Unit,
     onAutoscrollToggle: (Boolean, Float) -> Unit,
     onAutoSpeakPage: () -> Unit = {},
@@ -218,6 +220,16 @@ fun ReaderFloatingControls(
                                         onReadingOrderChange(next)
                                     }) {
                                         Icon(Icons.Outlined.DocumentScanner, contentDescription = "Порядок чтения")
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("AI-чат по странице  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        menuOpen = false
+                                        onOpenAiChat()
+                                    }) {
+                                        Icon(Icons.Outlined.SmartToy, contentDescription = "AI-чат")
                                     }
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {

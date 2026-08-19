@@ -224,9 +224,12 @@ data object BrowserTab : Tab {
                     url?.let { urlState.value = it }
                 }
             }
-            loadUrl(HOME_URL)
         }
         sharedWebView = webView
+        // Загрузка стартовой страницы — ПОСЛЕ первого кадра вкладки:
+        // раньше loadUrl в момент создания фризил переход (инициализация
+        // сети/рендера WebView блокировала главный поток при открытии).
+        webView.post { webView.loadUrl(HOME_URL) }
         return webView
     }
 

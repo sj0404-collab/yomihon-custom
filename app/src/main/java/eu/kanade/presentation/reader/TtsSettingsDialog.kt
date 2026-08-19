@@ -113,6 +113,27 @@ fun TtsSettingsDialog(
                             v.name to "$kind • $net • ${v.name.substringAfterLast(':')}"
                         }
                 }.getOrDefault(emptyList())
+                // Автовыбор по умолчанию (как в overlay-translator): если
+                // голос не выбран или отсутствует в системе — подставляем
+                // лучший из группы (Svetlana для ♀, Dmitry для ♂).
+                runCatching {
+                    val names = voices.map { it.first }.toSet()
+                    if (selectedVoice.isBlank() || selectedVoice !in names) {
+                        eu.kanade.tachiyomi.data.tts.VoiceHelper
+                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE, null)
+                            ?.let { selectedVoice = it.name }
+                    }
+                    if (voiceFemale.isBlank() || voiceFemale !in names) {
+                        eu.kanade.tachiyomi.data.tts.VoiceHelper
+                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE, null)
+                            ?.let { voiceFemale = it.name }
+                    }
+                    if (voiceMale.isBlank() || voiceMale !in names) {
+                        eu.kanade.tachiyomi.data.tts.VoiceHelper
+                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.MALE, null)
+                            ?.let { voiceMale = it.name }
+                    }
+                }
             }
             sysReady = true
         }

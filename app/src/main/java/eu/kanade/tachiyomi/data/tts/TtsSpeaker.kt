@@ -175,7 +175,14 @@ object TtsSpeaker {
                     VoiceHelper.pickForSpeaker(engine, kind, speakerSlot)
                         ?: VoiceHelper.pick(engine, kind, null)
                 kind != null -> VoiceHelper.pick(engine, kind, null)
-                else -> engine.voices?.find { it.name == p.voiceName().get() }
+                else -> {
+                    val saved = p.voiceName().get()
+                    // Автоподбор как в overlay-translator: если голос не выбран
+                    // или его нет в системе — берём лучший русский женский
+                    // (Svetlana и др.), затем любой русский.
+                    engine.voices?.find { saved.isNotBlank() && it.name == saved }
+                        ?: VoiceHelper.pick(engine, VoiceKind.FEMALE, null)
+                }
             }
             if (v != null) {
                 val res = engine.setVoice(v)

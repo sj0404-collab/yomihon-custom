@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.json.Json
@@ -171,12 +172,16 @@ actual class LocalSource(
                         }
                         url = mangaDir.name.orEmpty()
 
-                        // Обложка: из кэша, иначе сразу извлекаем первую картинку
-                        // (архива или папки) — превью видно уже в каталоге, а не
-                        // после открытия карточки. Результат кэшируется.
+                        // Обложка: ТОЛЬКО из кэша — листинг каталога мгновенный.
+                        // Отсутствующие обложки генерируются в фоне по одной
+                        // (см. scheduleCoverGeneration) и появляются при
+                        // следующей перерисовке, не блокируя UI.
                         val cover = coverManager.find(mangaDir.name.orEmpty())
-                            ?: tryGenerateCover(mangaDir, this)
-                        cover?.let { thumbnail_url = it.uri.toString() }
+                        if (cover != null) {
+                            thumbnail_url = cover.uri.toString()
+                        } else {
+                            scheduleCoverGeneration(mangaDir, this)
+                        }
                     }
                 }
             }
@@ -418,6 +423,34 @@ actual class LocalSource(
      * первая картинка внутри; папка-манга — первая картинка первой главы.
      * Дорогая часть выполняется один раз, дальше отдаётся из кэша .covers/cover.jpg.
      */
+    private val coverQueue = java.util.concurrent.ConcurrentLinkedQueue<Pair<UniFile, SManga>>()
+    private val coverQueued = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>(),
+    )
+    private val coverWorkerRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val coverScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+    )
+
+    /** Ставит генерацию обложки в фоновую очередь (один воркер, по одной). */
+    private fun scheduleCoverGeneration(entry: UniFile, manga: SManga) {
+        val key = entry.name.orEmpty()
+        if (key.isBlank() || !coverQueued.add(key)) return
+        coverQueue.add(entry to manga.apply { url = entry.name.orEmpty() })
+        if (coverWorkerRunning.compareAndSet(false, true)) {
+            coverScope.launch {
+                try {
+                    while (true) {
+                        val (dir, m) = coverQueue.poll() ?: break
+                        runCatching { tryGenerateCover(dir, m) }
+                    }
+                } finally {
+                    coverWorkerRunning.set(false)
+                }
+            }
+        }
+    }
+
     private fun tryGenerateCover(entry: UniFile, manga: SManga): UniFile? {
         return runCatching {
             val chapterFile = if (entry.isDirectory) {

@@ -101,6 +101,11 @@ class AutoReadEngine(
     var lastFrameHadText: Boolean = false
         private set
 
+    /** Весь распознанный текст последнего кадра — контекст для AI-чата. */
+    @Volatile
+    var lastFrameText: String = ""
+        private set
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 
@@ -246,6 +251,9 @@ class AutoReadEngine(
                 }
 
                 lastFrameHadText = ordered.isNotEmpty()
+                if (ordered.isNotEmpty()) {
+                    lastFrameText = ordered.joinToString("\n") { it.text }
+                }
 
                 // 3.7) перевод ВСЕЙ страницы одним запросом (раньше был
                 // отдельный HTTP-запрос на каждую реплику — на 15 бабблах
