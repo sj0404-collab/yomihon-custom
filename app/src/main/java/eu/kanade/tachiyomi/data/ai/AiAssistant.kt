@@ -201,6 +201,64 @@ object AiAssistant {
         }
     }
 
+    /** Строка подготовленного кадра: говорить ли, каким полом, каким текстом. */
+    data class PreparedLine(val speak: Boolean, val gender: String?, val text: String)
+
+    /**
+     * ГЛАВНЫЙ шаг конвейера (по требованию пользователя): текст кадра
+     * отправляется В ЧАТ ДО озвучки. Модель одним запросом:
+     *  1) вычищает реплики, повторяющие прошлый кадр (перекрытие скролла);
+     *  2) назначает пол говорящего каждой оставшейся;
+     *  3) возвращает чистый текст для синтеза.
+     * Протокол ответа — по строке на реплику: «N|г|текст» (г: м/ж/н) или
+     * «N|-» для пропуска дубля. Всё видно в скрытом чате (журнале).
+     * Таймаут 8с: при сбое вызывающий код откатывается на локальный конвейер.
+     */
+    suspend fun prepareFrame(newLines: List<String>, prevLines: List<String>): List<PreparedLine>? {
+        if (newLines.isEmpty()) return emptyList()
+        val prevBlock = if (prevLines.isEmpty()) {
+            "(прошлый кадр пуст)"
+        } else {
+            prevLines.takeLast(20).joinToString("\n") { "- ${it.take(90)}" }
+        }
+        val newBlock = newLines.mapIndexed { i, t -> "${i + 1}. ${t.take(140)}" }.joinToString("\n")
+        val answer = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+            chat(
+                userPrompt = "Прошлый кадр манги содержал реплики:\n$prevBlock\n\n" +
+                    "Новый кадр:\n$newBlock\n\n" +
+                    "Для КАЖДОЙ реплики нового кадра ответь отдельной строкой строго в формате " +
+                    "«N|г|текст», где N — номер, г — пол говорящего (м/ж/н), " +
+                    "текст — реплика, очищенная от мусора OCR. Если реплика повторяет прошлый кадр " +
+                    "(даже частично/с искажениями) — ответь «N|-». Больше НИЧЕГО не пиши.",
+                systemPrompt = "Ты конвейер озвучки манги: чистишь повторы и назначаешь пол. " +
+                    "Отвечаешь только строками формата N|г|текст или N|-.",
+                maxTokens = 600,
+            )
+        } ?: return null
+
+        val byIndex = HashMap<Int, PreparedLine>()
+        for (line in answer.lines()) {
+            val parts = line.trim().split('|', limit = 3)
+            val n = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: continue
+            if (n !in 1..newLines.size) continue
+            if (parts.size < 2 || parts[1].trim() == "-") {
+                byIndex[n] = PreparedLine(speak = false, gender = null, text = "")
+                continue
+            }
+            val gender = when (parts[1].trim().lowercase()) {
+                "м" -> "male"
+                "ж" -> "female"
+                else -> null
+            }
+            val text = parts.getOrNull(2)?.trim().orEmpty().ifBlank { newLines[n - 1] }
+            byIndex[n] = PreparedLine(speak = true, gender = gender, text = text)
+        }
+        if (byIndex.isEmpty()) return null // модель ответила не по протоколу
+        return List(newLines.size) { i ->
+            byIndex[i + 1] ?: PreparedLine(speak = true, gender = null, text = newLines[i])
+        }
+    }
+
     /**
      * Пол говорящих — СВЕРХБЫСТРЫЙ формат: модель отвечает строкой из букв,
      * по одной на реплику: «м» (мужской), «ж» (женский), «н» (не ясно).

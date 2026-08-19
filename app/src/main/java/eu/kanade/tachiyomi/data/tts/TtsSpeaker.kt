@@ -214,7 +214,21 @@ object TtsSpeaker {
                 override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
             })
             val baseRate = p.speechRate().get().coerceIn(0.5f, 2f)
-            val basePitch = p.speechPitch().get().coerceIn(0.5f, 2f)
+            // Тон по полу: если для пола не нашлось ОТДЕЛЬНОГО голоса,
+            // различаем персонажей питчем — мужчины ниже, женщины выше.
+            // С отдельными голосами модификатор не нужен (=1.0).
+            val voiceMatchesGender = v != null && when (gender) {
+                "male" -> VoiceHelper.classify(v) == VoiceKind.MALE
+                "female" -> VoiceHelper.classify(v) == VoiceKind.FEMALE
+                else -> true
+            }
+            val genderPitchMod = when {
+                voiceMatchesGender -> 1.0f
+                gender == "male" -> 0.78f
+                gender == "female" -> 1.18f
+                else -> 1.0f
+            }
+            val basePitch = (p.speechPitch().get() * genderPitchMod).coerceIn(0.5f, 2f)
             var queued = false
             sentences.forEachIndexed { i, sentence ->
                 val trimmed = sentence.trim()
