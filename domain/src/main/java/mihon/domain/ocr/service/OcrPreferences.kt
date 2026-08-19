@@ -24,6 +24,13 @@ class OcrPreferences(
 
     fun useFallbackModels() = preferenceStore.getBoolean("pref_use_fallback_models", true)
 
+    // Пресет цепочки фолбэков:
+    //  auto      — умный порядок: онлайн при сети, локальные без сети
+    //  online    — только онлайн-движки (GLENS -> ZEN_FREE -> GOOGLE)
+    //  offline   — только локальные (TESSERACT -> FAST -> LEGACY)
+    //  single    — без фолбэков, только выбранный движок
+    fun fallbackPreset() = preferenceStore.getString("pref_fallback_preset", "auto")
+
     // OpenRouter Settings
     fun openrouterApiKey() = preferenceStore.getString("pref_openrouter_api_key", "")
     fun openrouterModel() = preferenceStore.getString("pref_openrouter_model", "google/gemini-2.5-flash")

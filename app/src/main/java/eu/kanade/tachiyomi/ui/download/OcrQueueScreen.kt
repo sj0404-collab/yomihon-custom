@@ -248,15 +248,39 @@ object OcrQueueScreen : Screen() {
                     onValueChange = ocrModelPreference::set,
                 )
 
+                run {
+                    val fallbackPresetPref = remember { ocrPreferences.fallbackPreset() }
+                    val fallbackPreset by fallbackPresetPref.changes()
+                        .collectAsState(initial = fallbackPresetPref.get())
+                    ListPreferenceWidget(
+                        value = fallbackPreset,
+                        title = "Фолбэк при сбое движка",
+                        subtitle = when (fallbackPreset) {
+                            "online" -> "Только онлайн: Lens → Zen → Gemini"
+                            "offline" -> "Только локальные: Tesseract → Fast → Legacy"
+                            "single" -> "Без фолбэков — только выбранный движок"
+                            else -> "Авто: при сети — онлайн, без сети — локальные"
+                        },
+                        icon = null,
+                        entries = mapOf(
+                            "auto" to "Авто (умный выбор по сети)",
+                            "online" to "Только онлайн-движки",
+                            "offline" to "Только локальные движки",
+                            "single" to "Один движок, без фолбэков",
+                        ),
+                        onValueChange = fallbackPresetPref::set,
+                    )
+                }
+
                 PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
                 InfoWidget(
-                    text = "Модели хранятся снаружи приложения (Android/data/…/files/ocr_models) и не увеличивают размер APK. " +
-                        "Их также можно положить вручную в папку Yomihon/OCR на внутренней памяти.",
+                    text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
+                        "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
                 )
                 SwitchPreferenceWidget(
                     checked = isMangaOcrDown,
-                    title = "Manga OCR (Full Float32, ~120 МБ)",
-                    subtitle = if (isMangaOcrDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
+                    title = "Manga OCR",
+                    subtitle = if (isMangaOcrDown) "Точная, ~120 МБ • установлена" else "Точная, ~120 МБ • включите для загрузки",
                     onCheckedChanged = { checked ->
                         if (checked) {
                             eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
@@ -270,8 +294,8 @@ object OcrQueueScreen : Screen() {
                 )
                 SwitchPreferenceWidget(
                     checked = isFastOcrDown,
-                    title = "Fast Manga OCR (ARM FP16, ~30 МБ)",
-                    subtitle = if (isFastOcrDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
+                    title = "Fast Manga OCR",
+                    subtitle = if (isFastOcrDown) "Быстрая, ~30 МБ • установлена" else "Быстрая, ~30 МБ • включите для загрузки",
                     onCheckedChanged = { checked ->
                         if (checked) {
                             eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
@@ -285,8 +309,8 @@ object OcrQueueScreen : Screen() {
                 )
                 SwitchPreferenceWidget(
                     checked = isPanelDetectorDown,
-                    title = "Panel Detector (YOLO, ~6 МБ)",
-                    subtitle = if (isPanelDetectorDown) "Модель установлена • Выключите чтобы удалить файлы" else "Модель не установлена • Включите чтобы скачать",
+                    title = "Panel Detector",
+                    subtitle = if (isPanelDetectorDown) "YOLO, ~6 МБ • установлена" else "YOLO, ~6 МБ • включите для загрузки",
                     onCheckedChanged = { checked ->
                         if (checked) {
                             eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->

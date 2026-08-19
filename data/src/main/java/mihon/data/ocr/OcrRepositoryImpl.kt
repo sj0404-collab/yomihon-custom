@@ -124,19 +124,44 @@ class OcrRepositoryImpl(
         return false
     }
 
-    private fun fallbackFor(type: EngineType): EngineType {
-        return when (type) {
-            EngineType.GLENS -> EngineType.FAST
-            EngineType.FAST -> EngineType.GLENS
-            EngineType.LEGACY -> EngineType.GLENS
-            EngineType.OWOCR -> EngineType.GLENS
-            EngineType.OPENROUTER -> EngineType.ZEN_FREE
-            EngineType.GOOGLE -> EngineType.ZEN_FREE
-            // ZEN_FREE исполняется движком Google Lens, поэтому фолбэк в GLENS
-            // был повтором той же попытки. Уходим на локальную модель.
-            EngineType.ZEN_FREE -> EngineType.FAST
-            EngineType.TESSERACT -> EngineType.GLENS
+    private val onlineEngines = setOf(
+        EngineType.GLENS, EngineType.ZEN_FREE, EngineType.OWOCR,
+        EngineType.OPENROUTER, EngineType.GOOGLE,
+    )
+    private val offlineEngines = listOf(
+        // Tesseract первым: всегда в APK, не требует скачивания
+        EngineType.TESSERACT, EngineType.FAST, EngineType.LEGACY,
+    )
+
+    private fun isNetworkAvailable(): Boolean {
+        return runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * ЦЕПОЧКА фолбэков (по пресету пользователя), а не один шаг:
+     *  auto    — при сети: онлайн → локальные; без сети: ТОЛЬКО локальные
+     *            (онлайн даже не пробуются — мгновенный переход, без таймаутов);
+     *  online  — только онлайн-движки;
+     *  offline — только локальные (TESSERACT всегда доступен: модели в APK);
+     *  single  — фолбэков нет.
+     */
+    private fun fallbackChain(primary: EngineType): List<EngineType> {
+        val preset = preferenceStore.getString("pref_fallback_preset", "auto").get()
+        val online = listOf(EngineType.GLENS, EngineType.ZEN_FREE, EngineType.GOOGLE)
+        val chain = when (preset) {
+            "single" -> emptyList()
+            "online" -> online
+            "offline" -> offlineEngines
+            else -> { // auto
+                if (isNetworkAvailable()) online + offlineEngines else offlineEngines
+            }
         }
+        return chain.filter { it != primary }
     }
 
     private fun requireEnvironment(): Environment {
@@ -217,32 +242,37 @@ class OcrRepositoryImpl(
     }
 
     private suspend fun recognizeWithFallback(primary: EngineType, image: Bitmap): String {
-        return try {
-            recognizeWithEngine(primary, image)
-        } catch (primaryError: Throwable) {
-            if (primaryError is CancellationException) throw primaryError
+        // Без сети онлайн-первичный движок не пробуем вовсе — сразу цепочка
+        val skipPrimary = primary in onlineEngines && !isNetworkAvailable()
+        var lastError: Throwable? = null
 
-            if (!useFallbackModelsPref.get()) {
-                throw primaryError
-            }
-
-            val fallback = fallbackFor(primary)
-            if (fallback == primary) {
-                throw primaryError
-            }
-
-            logcat(LogPriority.WARN, primaryError) {
-                "OCR (${primary.name.lowercase()}) failed, falling back to ${fallback.name.lowercase()}"
-            }
-
+        if (!skipPrimary) {
             try {
-                recognizeWithEngine(fallback, image)
-            } catch (fallbackError: Throwable) {
-                if (fallbackError is CancellationException) throw fallbackError
-                primaryError.addSuppressed(fallbackError)
-                throw primaryError
+                return recognizeWithEngine(primary, image)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                lastError = e
             }
         }
+
+        if (!useFallbackModelsPref.get()) {
+            throw lastError ?: OcrException.ConnectionError(null)
+        }
+
+        for (engine in fallbackChain(primary)) {
+            // Пропускаем онлайн-движки при отсутствии сети
+            if (engine in onlineEngines && !isNetworkAvailable()) continue
+            try {
+                logcat(LogPriority.WARN) {
+                    "OCR (${primary.name.lowercase()}) unavailable, trying ${engine.name.lowercase()}"
+                }
+                return recognizeWithEngine(engine, image)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                lastError?.addSuppressed(e) ?: run { lastError = e }
+            }
+        }
+        throw lastError ?: OcrException.InitializationError()
     }
 
     override suspend fun recognizeText(image: OcrImage): String {
@@ -402,12 +432,23 @@ class OcrRepositoryImpl(
             if (!useFallbackModelsPref.get()) {
                 throw e
             }
-            scanWithGlens(
-                chapterId = chapterId,
-                pageIndex = pageIndex,
-                image = image,
-                modelKey = modelKey,
-            )
+            if (isNetworkAvailable()) {
+                scanWithGlens(
+                    chapterId = chapterId,
+                    pageIndex = pageIndex,
+                    image = image,
+                    modelKey = modelKey,
+                )
+            } else {
+                // Без сети: Tesseract из APK как аварийный распознаватель
+                scanLocally(
+                    chapterId = chapterId,
+                    pageIndex = pageIndex,
+                    image = image,
+                    modelKey = modelKey,
+                    type = EngineType.TESSERACT,
+                )
+            }
         }
     }
 
@@ -427,15 +468,16 @@ class OcrRepositoryImpl(
                 type = type,
             )
         } catch (e: Throwable) {
+            val target = if (isNetworkAvailable()) EngineType.ZEN_FREE else EngineType.TESSERACT
             logcat(LogPriority.WARN, e) {
-                "Local OCR model unavailable or not installed; falling back to Zen Free online OCR"
+                "Local OCR model unavailable; falling back to ${target.name.lowercase()}"
             }
             scanWithEngineOrFallback(
                 chapterId = chapterId,
                 pageIndex = pageIndex,
                 image = image,
                 modelKey = modelKey,
-                type = EngineType.ZEN_FREE,
+                type = target,
             )
         }
     }
