@@ -86,6 +86,16 @@ class OcrPreferences(
     // озвучку независимо от настроек.
     fun translateTarget() = preferenceStore.getString("pref_translate_target", "ru")
 
+    // ---- Онлайн AI-ассистент (пол говорящих, помощь читалке) ----
+    // Провайдер: zen (без ключа) | openrouter (нужен ключ)
+    fun aiProvider() = preferenceStore.getString("pref_ai_provider", "zen")
+
+    // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
+    fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
+
+    // Бесплатная модель OpenRouter (суффикс :free)
+    fun openrouterFreeModel() = preferenceStore.getString("pref_openrouter_free_model", "")
+
     // ---- Вид подсветки реплики ----
     // Цвет рамки/подчёркивания текущей реплики (ARGB). По умолчанию — бирюзовый,
     // как на скриншотах пользователя.

@@ -61,6 +61,18 @@ fun TtsSettingsDialog(
     var voiceFemale by remember { mutableStateOf(prefs.voiceFemale().get()) }
     var voiceMale by remember { mutableStateOf(prefs.voiceMale().get()) }
     var aiGender by remember { mutableStateOf(prefs.aiGenderVoices().get()) }
+    var aiProvider by remember { mutableStateOf(prefs.aiProvider().get()) }
+    var zenModel by remember { mutableStateOf(prefs.zenModel().get()) }
+    var orFreeModel by remember { mutableStateOf(prefs.openrouterFreeModel().get()) }
+    var orKey by remember { mutableStateOf(prefs.openrouterApiKey().get()) }
+    var orModels by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // Живой список :free моделей OpenRouter (фолбэк при оффлайне)
+    androidx.compose.runtime.LaunchedEffect(aiProvider) {
+        if (aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_OPENROUTER && orModels.isEmpty()) {
+            orModels = eu.kanade.tachiyomi.data.ai.AiAssistant.fetchOpenRouterFreeModels()
+        }
+    }
     var assignMode by remember { mutableStateOf(0) } // 0=основной, 1=женский, 2=мужской
 
     var voices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
@@ -149,10 +161,80 @@ fun TtsSettingsDialog(
                     Column {
                         Text("AI-голоса по полу говорящего", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Gemini смотрит на лица и баллоны: женские реплики — голос ♀, мужские — ♂. Нужен Google AI ключ.",
+                            "Встроенная морфология + онлайн-ассистент (Zen — без ключа) определяют, кто говорит: реплики озвучиваются голосом ♀/♂.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+
+                if (aiGender) {
+                    Row(modifier = Modifier.padding(top = 4.dp)) {
+                        FilterChip(
+                            selected = aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_ZEN,
+                            onClick = { aiProvider = eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_ZEN },
+                            label = { Text("Zen (без ключа)") },
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                        FilterChip(
+                            selected = aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_OPENROUTER,
+                            onClick = { aiProvider = eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_OPENROUTER },
+                            label = { Text("OpenRouter") },
+                        )
+                    }
+                    if (aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_ZEN) {
+                        Text(
+                            "Модель Zen (бесплатно, без регистрации):",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        LazyColumn(modifier = Modifier.heightIn(max = 150.dp)) {
+                            items(
+                                eu.kanade.tachiyomi.data.ai.AiAssistant.ZEN_MODELS,
+                                key = { it },
+                            ) { m ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { zenModel = m },
+                                ) {
+                                    RadioButton(selected = zenModel == m, onClick = { zenModel = m })
+                                    Text(m, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = orKey,
+                            onValueChange = { orKey = it },
+                            label = { Text("OpenRouter API-ключ") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                        )
+                        Text(
+                            if (orModels.isEmpty()) "Загрузка списка :free моделей…"
+                            else "Бесплатные модели (:free):",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        LazyColumn(modifier = Modifier.heightIn(max = 150.dp)) {
+                            items(orModels, key = { it }) { m ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { orFreeModel = m },
+                                ) {
+                                    RadioButton(selected = orFreeModel == m, onClick = { orFreeModel = m })
+                                    Text(m, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -297,6 +379,10 @@ fun TtsSettingsDialog(
                     prefs.voiceFemale().set(voiceFemale)
                     prefs.voiceMale().set(voiceMale)
                     prefs.aiGenderVoices().set(aiGender)
+                    prefs.aiProvider().set(aiProvider)
+                    prefs.zenModel().set(zenModel)
+                    prefs.openrouterFreeModel().set(orFreeModel)
+                    prefs.openrouterApiKey().set(orKey.trim())
                     prefs.speechRate().set(rate.coerceIn(0.5f, 2f))
                     prefs.ttsWebLanguage().set(webLang.trim().ifBlank { "ru" })
                     prefs.elevenApiKey().set(elevenKey.trim())

@@ -208,14 +208,27 @@ class AutoReadEngine(
                 //  б) Gemini Vision — только если включена опция И задан ключ
                 //     (уточняет по лицам то, что не смогла морфология).
                 val localGenders = LocalSpeakerAi.guessGenders(ordered.map { it.text })
-                val genders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty() &&
-                    prefs.googleApiKey().get().isNotBlank()
-                ) {
-                    val remote = SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
-                    // локальная уверенность важнее «unknown» от сети, и наоборот
-                    List(ordered.size) { i -> localGenders[i] ?: remote.getOrNull(i) }
+                // Реплики без локального вердикта уточняет онлайн-ассистент
+                // (Zen без ключа / OpenRouter по ключу) одним батч-запросом.
+                val needsAi = prefs.aiGenderVoices().get() &&
+                    localGenders.any { it == null } && ordered.isNotEmpty()
+                val aiGenders: List<String?> = if (needsAi) {
+                    eu.kanade.tachiyomi.data.ai.AiAssistant
+                        .detectGendersByText(ordered.map { it.text })
                 } else {
-                    localGenders
+                    List(ordered.size) { null }
+                }
+                // Gemini Vision — последний уточнитель, только если задан ключ
+                val visionGenders: List<String?> = if (genderJpeg != null && ordered.isNotEmpty() &&
+                    prefs.googleApiKey().get().isNotBlank() &&
+                    (0 until ordered.size).any { localGenders[it] == null && aiGenders[it] == null }
+                ) {
+                    SpeakerGenderService.detect(genderJpeg, ordered.map { it.text }, prefs)
+                } else {
+                    List(ordered.size) { null }
+                }
+                val genders: List<String?> = List(ordered.size) { i ->
+                    localGenders[i] ?: aiGenders.getOrNull(i) ?: visionGenders.getOrNull(i)
                 }
 
                 lastFrameHadText = ordered.isNotEmpty()
