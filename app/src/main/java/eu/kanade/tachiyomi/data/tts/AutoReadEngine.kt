@@ -43,6 +43,15 @@ class AutoReadEngine(
     private val prefs: OcrPreferences = Injekt.get(),
 ) {
 
+    /** Детектор панелей/баллонов (YOLO Seeneva, модель в APK). */
+    private val detectPanels: mihon.domain.panel.interactor.DetectPanels by lazy { Injekt.get() }
+
+    /** Отдельный Tesseract для баллонов: кропы мелкие, распознаются быстро. */
+    private val bubbleTess by lazy { eu.kanade.tachiyomi.data.ocr.TesseractOcrEngine(context) }
+
+    /** Строка кадра: текст + нормализованный box (для подсветки/порядка). */
+    private data class Line(val text: String, val boundingBox: OcrBoundingBox)
+
     data class SpokenRegion(
         val text: String,
         val translated: String?,
@@ -187,7 +196,6 @@ class AutoReadEngine(
                         out.toByteArray()
                     }.getOrNull()
                 } else null
-                if (!bitmap.isRecycled) bitmap.recycle()
 
                 val result = scanPageOcr.await(chapterId, pageIndex, image)
 
@@ -195,12 +203,41 @@ class AutoReadEngine(
                 val translate = prefs.autoReadTranslate().get()
                 val order = prefs.scanReadingOrder().get()
 
-                // 1) фильтр по языку + отсев мусора; 2) отсев уже прочитанного
-                val fresh = result.regions
+                // ===== БАЛЛОНЫ ВМЕСТО «ВСЕЙ СТРАНИЦЫ» (фикс по скриншотам) =====
+                // Полностраничные движки (Tesseract/Zen/OwOCR) возвращают ОДИН
+                // регион 0,0-1,1: весь кадр читался как одна реплика «1/1» с
+                // мусором между баллонами. Теперь такой результат разбирается:
+                //  1) YOLO-детектор (модель в APK) находит баллоны;
+                //  2) каждый баллон кропается и распознаётся отдельно офлайн-
+                //     Tesseract'ом (кропы мелкие — это быстро);
+                //  3) каждый баллон = своя реплика со своей рамкой, номером
+                //     {N} и полом говорящего.
+                // Если детектор ничего не нашёл — текст страницы хотя бы
+                // делится на строки-реплики вместо одного блока.
+                var lines: List<Line> = result.regions.map {
+                    Line(normalizeOcrTextForDisplay(it.text).trim(), it.boundingBox)
+                }
+                val wholePage = result.regions.size == 1 && result.regions.first().isWholePage
+                if (wholePage && !bitmap.isRecycled) {
+                    val bubbleLines = runCatching { readBubbles(bitmap, chapterId, pageIndex, order) }
+                        .onFailure { logcat(LogPriority.WARN, it) { "Bubble detection failed" } }
+                        .getOrDefault(emptyList())
+                    lines = if (bubbleLines.isNotEmpty()) {
+                        bubbleLines
+                    } else {
+                        // Фолбэк: строки полностраничного текста как реплики
+                        lines.firstOrNull()?.let { splitWholePageToLines(it) } ?: emptyList()
+                    }
+                }
+                if (!bitmap.isRecycled) bitmap.recycle()
+
+                // 1) фильтр мусора OCR (обрывки «eS la 4», «| | > |», «о»)
+                //    + фильтр по языку; 2) отсев уже прочитанного
+                val fresh = lines
                     .asSequence()
-                    .map { it.copy(text = normalizeOcrTextForDisplay(it.text).trim()) }
+                    .map { it.copy(text = cleanOcrGarbage(it.text, language)) }
                     .filter { it.text.length >= MIN_TEXT_LENGTH }
-                    .filter { matchesLanguage(it.text, language) }
+                    .filter { isMeaningful(it.text, language) }
                     .filter { !isDuplicate(it.text) }
                     .toList()
 
@@ -368,6 +405,9 @@ class AutoReadEngine(
         _currentRegion.value = null
         _frameRegions.value = emptyList()
         _isReading.value = false
+        // Выгружаем баллонный Tesseract (модели по настройке либо стираются,
+        // либо остаются распакованными для быстрого рестарта)
+        scope.launch { runCatching { bubbleTess.close() } }
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
@@ -393,9 +433,153 @@ class AutoReadEngine(
     /** Строка (ряд) для сортировки: реплики в пределах 12% высоты — один ряд. */
     private fun rowOf(top: Float): Int = (top / 0.12f).toInt()
 
+    // region Баллоны (YOLO) и чистка OCR-мусора
+
+    /**
+     * YOLO-детект баллонов на кадре + пофрагментный OCR. Каждый найденный
+     * баллон становится отдельной репликой со своей рамкой. Работает
+     * полностью офлайн: модель детектора и Tesseract лежат в APK.
+     */
+    private suspend fun readBubbles(
+        bitmap: Bitmap,
+        chapterId: Long,
+        pageIndex: Int,
+        order: String,
+    ): List<Line> {
+        val direction = when (order) {
+            "ltr" -> tachiyomi.core.common.util.system.ReadingDirection.LTR
+            "vertical" -> tachiyomi.core.common.util.system.ReadingDirection.VERTICAL
+            else -> tachiyomi.core.common.util.system.ReadingDirection.RTL
+        }
+        val det = detectPanels.await(
+            cacheKey = "autoread_${chapterId}_$pageIndex",
+            image = bitmap,
+            originalWidth = bitmap.width,
+            originalHeight = bitmap.height,
+            direction = direction,
+        )
+        val bubbles = det.debugBubbles
+            .map { it.rect }
+            .filter { it.width() > 16 && it.height() > 16 }
+            .take(MAX_BUBBLES_PER_FRAME)
+        if (bubbles.isEmpty()) return emptyList()
+
+        val out = mutableListOf<Line>()
+        for (r in bubbles) {
+            if (job?.isActive != true) break
+            // Поля 6%: рамка YOLO бывает впритык к тексту
+            val padX = (r.width() * 0.06f).toInt()
+            val padY = (r.height() * 0.06f).toInt()
+            val left = (r.left - padX).coerceAtLeast(0)
+            val top = (r.top - padY).coerceAtLeast(0)
+            val right = (r.right + padX).coerceAtMost(bitmap.width)
+            val bottom = (r.bottom + padY).coerceAtMost(bitmap.height)
+            if (right - left < 16 || bottom - top < 16) continue
+            val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+            val text = try {
+                bubbleTess.recognize(crop)
+            } finally {
+                if (!crop.isRecycled) crop.recycle()
+            }
+            val clean = normalizeOcrTextForDisplay(text).trim()
+            if (clean.isNotBlank()) {
+                out += Line(
+                    text = clean,
+                    boundingBox = OcrBoundingBox(
+                        left = left.toFloat() / bitmap.width,
+                        top = top.toFloat() / bitmap.height,
+                        right = right.toFloat() / bitmap.width,
+                        bottom = bottom.toFloat() / bitmap.height,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    /**
+     * Полностраничный результат (один регион 0..1) делится на строки:
+     * каждая непустая строка — отдельная реплика. Рамки приблизительные
+     * (равномерно по высоте) — хоть какая-то подсветка вместо всей страницы.
+     */
+    private fun splitWholePageToLines(whole: Line): List<Line> {
+        val rows = whole.text.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (rows.size <= 1) return listOf(whole)
+        val h = 1f / rows.size
+        return rows.mapIndexed { i, t ->
+            Line(t, OcrBoundingBox(0.05f, i * h, 0.95f, (i + 1) * h))
+        }
+    }
+
+    // endregion
+
+    // region Чистка мусора OCR
+
     companion object {
         private const val MIN_TEXT_LENGTH = 2
         private const val HISTORY_LIMIT = 600
+        private const val MAX_BUBBLES_PER_FRAME = 14
+
+        /**
+         * Чистка OCR-мусора ВНУТРИ реплики (по скриншотам пользователя:
+         * «АХЕ возьмешь — МЕНЯ НА РУЧКИ? eS la 4…», «Я | | > | КАК ПРИНЦЕСС…»,
+         * «РУ у 4а (WX i ДЖЕЙН…»). Правила:
+         *  • строки из символов-палок/скобок/стрелок выбрасываются целиком;
+         *  • строки, где смесь латиницы+цифр не похожа на слова (eS la 4,
+         *    WX i, 4a) — выбрасываются при целевом языке ru;
+         *  • одиночные буквы-обрывки («о», «Я» без продолжения в 1 строку из
+         *    многих) — выбрасываются;
+         *  • остальные строки склеиваются пробелом.
+         */
+        fun cleanOcrGarbage(text: String, language: String): String {
+            val rows = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+            if (rows.isEmpty()) return ""
+            val kept = rows.filter { row -> isMeaningfulRow(row, language) }
+            // Если ВСЁ забраковано, но исходник был длинный — вернём самую
+            // «словесную» строку, чтобы не терять настоящие реплики.
+            if (kept.isEmpty()) {
+                val best = rows.maxByOrNull { r -> r.count { it.isLetter() } }
+                return if (best != null && best.count { it.isLetter() } >= 4) best else ""
+            }
+            return kept.joinToString(" ").replace(Regex("\\s+"), " ").trim()
+        }
+
+        /** Похожа ли строка на осмысленный текст (не обрывок/не мусор). */
+        private fun isMeaningfulRow(row: String, language: String): Boolean {
+            val letters = row.count { it.isLetter() }
+            val total = row.length
+            // Палки, скобки, стрелки, точки: буквы < 40% строки — мусор
+            if (letters == 0) return false
+            if (letters.toFloat() / total < 0.4f && total >= 3) return false
+            // Одна-две буквы («о», «РУ») — обрывок
+            if (letters <= 2) return false
+            when (language) {
+                "ru" -> {
+                    val cyr = row.count { it in '\u0400'..'\u04FF' }
+                    // Латиница с цифрами (eS la 4, WX i) при русском языке — мусор
+                    if (cyr == 0) return false
+                    if (cyr.toFloat() / letters < 0.6f) return false
+                    // Должно быть хотя бы одно «слово» из 3+ кириллических букв
+                    return Regex("[\\u0400-\\u04FF]{3,}").containsMatchIn(row)
+                }
+                "en" -> {
+                    val lat = row.count { it in 'a'..'z' || it in 'A'..'Z' }
+                    if (lat.toFloat() / letters < 0.6f) return false
+                    return Regex("[A-Za-z]{3,}").containsMatchIn(row)
+                }
+                else -> return true
+            }
+        }
+
+        /** Финальная проверка собранной реплики перед чтением. */
+        fun isMeaningful(text: String, language: String): Boolean {
+            if (text.isBlank()) return false
+            if (!matchesLanguage(text, language)) return false
+            // Реплика обязана содержать хотя бы одно слово из 3+ букв
+            return text.split(Regex("\\s+")).any { w -> w.count { it.isLetter() } >= 3 } ||
+                // …или быть короткой осмысленной («Да!», «Ах!», «Нет?»)
+                (text.length in 2..6 && text.count { it.isLetter() } >= 2)
+        }
 
         /**
          * Определение языка текста по алфавиту. Реплика проходит фильтр,
