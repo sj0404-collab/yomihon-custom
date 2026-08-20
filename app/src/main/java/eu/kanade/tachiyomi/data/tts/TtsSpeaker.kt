@@ -357,6 +357,47 @@ object TtsSpeaker {
 
     // region helpers
 
+    /**
+     * Реальный список голосов аккаунта ElevenLabs (GET /v1/voices по ключу).
+     * Возвращает пары (voice_id, имя + категория). Пустой список при ошибке
+     * или отсутствии ключа — никаких фейковых данных.
+     */
+    suspend fun fetchElevenVoices(apiKey: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext emptyList()
+        runCatching {
+            val conn = URL("https://api.elevenlabs.io/v1/voices").openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
+            conn.setRequestProperty("xi-api-key", apiKey)
+            if (conn.responseCode !in 200..299) {
+                logcat(LogPriority.WARN) { "ElevenLabs voices HTTP ${conn.responseCode}" }
+                conn.disconnect()
+                return@runCatching emptyList()
+            }
+            val body = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            val arr = org.json.JSONObject(body).optJSONArray("voices") ?: return@runCatching emptyList()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val v = arr.optJSONObject(i) ?: continue
+                    val id = v.optString("voice_id")
+                    if (id.isBlank()) continue
+                    val name = v.optString("name").ifBlank { id }
+                    val labels = v.optJSONObject("labels")
+                    val extra = buildList {
+                        labels?.optString("gender")?.takeIf { it.isNotBlank() }?.let(::add)
+                        labels?.optString("accent")?.takeIf { it.isNotBlank() }?.let(::add)
+                        v.optString("category").takeIf { it.isNotBlank() }?.let(::add)
+                    }.joinToString(", ")
+                    add(id to if (extra.isBlank()) name else "$name ($extra)")
+                }
+            }
+        }.getOrElse {
+            logcat(LogPriority.WARN, it) { "ElevenLabs voices fetch failed" }
+            emptyList()
+        }
+    }
+
     private fun jsonQuote(s: String): String {
         val sb = StringBuilder("\"")
         for (c in s) {

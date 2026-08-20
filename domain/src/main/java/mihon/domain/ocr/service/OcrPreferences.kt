@@ -93,6 +93,26 @@ class OcrPreferences(
     // озвучку независимо от настроек.
     fun translateTarget() = preferenceStore.getString("pref_translate_target", "ru")
 
+    // ---- Офлайн-распознавание (Tesseract, модели в APK) ----
+    // Языки распознавания: eng+rus | rus | eng (оба .traineddata лежат в APK)
+    fun tessLangs() = preferenceStore.getString("pref_tess_langs", "eng+rus")
+
+    // Режим сегментации страницы Tesseract:
+    // single_block (баллон целиком, дефолт) | auto | sparse | single_line
+    fun tessPsm() = preferenceStore.getString("pref_tess_psm", "single_block")
+
+    // Апскейл мелких кропов: минимальная короткая сторона в px (0 = выкл).
+    // Tesseract резко лучше читает текст, когда буквы >= ~20px.
+    fun tessUpscaleMinSide() = preferenceStore.getInt("pref_tess_upscale", 320)
+
+    // Предобработка перед распознаванием: ч/б + усиление контраста
+    fun tessPreprocess() = preferenceStore.getBoolean("pref_tess_preprocess", true)
+
+    // Держать офлайн-модели распакованными между сессиями:
+    // быстрее старт движка, но ~8МБ постоянно на диске (иначе — только
+    // tar.xz внутри APK, извлечение при каждом первом использовании).
+    fun keepOfflinePacks() = preferenceStore.getBoolean("pref_keep_offline_packs", false)
+
     // ---- Онлайн AI-ассистент (пол говорящих, помощь читалке) ----
     // Провайдер: zen (без ключа) | openrouter (нужен ключ)
     fun aiProvider() = preferenceStore.getString("pref_ai_provider", "zen")

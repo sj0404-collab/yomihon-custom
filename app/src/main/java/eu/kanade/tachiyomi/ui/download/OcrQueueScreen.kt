@@ -1,27 +1,40 @@
 package eu.kanade.tachiyomi.ui.download
 
+import android.speech.tts.TextToSpeech
 import android.view.LayoutInflater
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,6 +62,9 @@ import eu.kanade.presentation.more.settings.widget.ListPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.PreferenceGroupHeader
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.util.Screen
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
+import eu.kanade.tachiyomi.data.tts.VoiceHelper
+import eu.kanade.tachiyomi.data.tts.VoiceKind
 import eu.kanade.tachiyomi.databinding.DownloadListBinding
 import kotlinx.collections.immutable.toPersistentList
 import mihon.domain.ocr.model.OcrModel
@@ -57,7 +73,7 @@ import mihon.domain.ocr.service.ScanRegion
 import mihon.feature.ocr.titleRes
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
-import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import uy.kohesive.injekt.Injekt
@@ -74,43 +90,6 @@ object OcrQueueScreen : Screen() {
         val isQueueRunning by screenModel.isQueueRunning.collectAsState()
         val hasQueue = state.totalCount > 0
         val ocrPreferences = remember { Injekt.get<OcrPreferences>() }
-        val ocrModelPreference = remember { ocrPreferences.ocrModel() }
-        val ocrModel by ocrModelPreference.changes().collectAsState(initial = ocrModelPreference.get())
-        val autoOcrOnDownloadPreference = remember { ocrPreferences.autoOcrOnDownload() }
-        val autoOcrOnDownload by autoOcrOnDownloadPreference
-            .changes()
-            .collectAsState(initial = autoOcrOnDownloadPreference.get())
-        val owocrAddressPreference = remember { ocrPreferences.owocrAddress() }
-        val owocrAddress by owocrAddressPreference
-            .changes()
-            .collectAsState(initial = owocrAddressPreference.get())
-        val useFallbackModelsPreference = remember { ocrPreferences.useFallbackModels() }
-        val useFallbackModels by useFallbackModelsPreference
-            .changes()
-            .collectAsState(initial = useFallbackModelsPreference.get())
-        val openrouterKeyPref = remember { ocrPreferences.openrouterApiKey() }
-        val openrouterKey by openrouterKeyPref.changes().collectAsState(initial = openrouterKeyPref.get())
-        val googleKeyPref = remember { ocrPreferences.googleApiKey() }
-        val googleKey by googleKeyPref.changes().collectAsState(initial = googleKeyPref.get())
-        val tokenCountPref = remember { ocrPreferences.tokenUsageCount() }
-        val tokenCount by tokenCountPref.changes().collectAsState(initial = tokenCountPref.get())
-        val voiceNamePref = remember { ocrPreferences.voiceName() }
-        val voiceName by voiceNamePref.changes().collectAsState(initial = voiceNamePref.get())
-        val scanRegionPref = remember { ocrPreferences.scanRegion() }
-        val scanRegion by scanRegionPref.changes().collectAsState(initial = scanRegionPref.get())
-        val isMangaOcrDownPref = remember { ocrPreferences.isMangaOcrDownloaded() }
-        val isMangaOcrDown by isMangaOcrDownPref.changes().collectAsState(initial = isMangaOcrDownPref.get())
-        val isFastOcrDownPref = remember { ocrPreferences.isFastOcrDownloaded() }
-        val isFastOcrDown by isFastOcrDownPref.changes().collectAsState(initial = isFastOcrDownPref.get())
-        val isPanelDetectorDownPref = remember { ocrPreferences.isPanelDetectorDownloaded() }
-        val isPanelDetectorDown by isPanelDetectorDownPref.changes().collectAsState(initial = isPanelDetectorDownPref.get())
-
-        // Синхронизация флагов с реальным наличием файлов на диске
-        androidx.compose.runtime.LaunchedEffect(Unit) {
-            isMangaOcrDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr"))
-            isFastOcrDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr_fast"))
-            isPanelDetectorDownPref.set(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "panel_detector"))
-        }
 
         val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
         var fabExpanded by remember { mutableStateOf(true) }
@@ -135,7 +114,9 @@ object OcrQueueScreen : Screen() {
             }
         }
 
-        Scaffold(
+        var currentTab by remember { mutableIntStateOf(0) }
+
+        tachiyomi.presentation.core.components.material.Scaffold(
             topBar = {
                 AppBar(
                     titleContent = {
@@ -151,8 +132,7 @@ object OcrQueueScreen : Screen() {
                                 Pill(
                                     text = state.totalCount.toString(),
                                     modifier = Modifier.padding(start = 4.dp),
-                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onBackground
-                                        .copy(alpha = pillAlpha),
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = pillAlpha),
                                     fontSize = 14.sp,
                                 )
                             }
@@ -176,7 +156,7 @@ object OcrQueueScreen : Screen() {
             },
             floatingActionButton = {
                 AnimatedVisibility(
-                    visible = hasQueue,
+                    visible = hasQueue && currentTab == 0,
                     enter = fadeIn(),
                     exit = fadeOut(),
                 ) {
@@ -209,220 +189,736 @@ object OcrQueueScreen : Screen() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(contentPadding)
-                    .nestedScroll(nestedScrollConnection),
+                    .padding(contentPadding),
             ) {
-                PreferenceGroupHeader(title = stringResource(MR.strings.label_settings))
-                ListPreferenceWidget(
-                    value = scanRegion,
-                    title = "Область сканирования страницы",
-                    subtitle = when (scanRegion) {
-                        ScanRegion.FULL_PAGE -> "Сканировать всю страницу целиком (100%)"
-                        ScanRegion.TOP_HALF -> "Сканировать верхнюю часть страницы (Top 50%)"
-                        ScanRegion.BOTTOM_HALF -> "Сканировать нижнюю часть страницы (Bottom 50%)"
-                    },
-                    icon = null,
-                    entries = mapOf(
-                        ScanRegion.FULL_PAGE to "1. Вся страница целиком (100%)",
-                        ScanRegion.TOP_HALF to "2. Верхняя часть страницы (50%)",
-                        ScanRegion.BOTTOM_HALF to "3. Нижняя часть страницы (50%)",
-                    ),
-                    onValueChange = scanRegionPref::set,
-                )
-
-                ListPreferenceWidget(
-                    value = ocrModel,
-                    title = stringResource(MR.strings.pref_ocr_model),
-                    subtitle = stringResource(ocrModel.titleRes),
-                    icon = null,
-                    entries = mapOf(
-                        OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
-                        OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
-                        OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
-                        OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
-                        OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
-                        OcrModel.GOOGLE to stringResource(OcrModel.GOOGLE.titleRes),
-                        OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
-                        OcrModel.TESSERACT to stringResource(OcrModel.TESSERACT.titleRes),
-                    ),
-                    onValueChange = ocrModelPreference::set,
-                )
-
-                run {
-                    val fallbackPresetPref = remember { ocrPreferences.fallbackPreset() }
-                    val fallbackPreset by fallbackPresetPref.changes()
-                        .collectAsState(initial = fallbackPresetPref.get())
-                    ListPreferenceWidget(
-                        value = fallbackPreset,
-                        title = "Фолбэк при сбое движка",
-                        subtitle = when (fallbackPreset) {
-                            "online" -> "Только онлайн: Lens → Zen → Gemini"
-                            "offline" -> "Только локальные: Tesseract → Fast → Legacy"
-                            "single" -> "Без фолбэков — только выбранный движок"
-                            else -> "Авто: при сети — онлайн, без сети — локальные"
-                        },
-                        icon = null,
-                        entries = mapOf(
-                            "auto" to "Авто (умный выбор по сети)",
-                            "online" to "Только онлайн-движки",
-                            "offline" to "Только локальные движки",
-                            "single" to "Один движок, без фолбэков",
-                        ),
-                        onValueChange = fallbackPresetPref::set,
+                PrimaryTabRow(selectedTabIndex = currentTab) {
+                    Tab(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        text = { Text("Распознавание") },
+                    )
+                    Tab(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1 },
+                        text = { Text("Голоса") },
                     )
                 }
-
-                PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
-                InfoWidget(
-                    text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
-                        "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
-                )
-                SwitchPreferenceWidget(
-                    checked = isMangaOcrDown,
-                    title = "Manga OCR",
-                    subtitle = if (isMangaOcrDown) "Точная, ~120 МБ • установлена" else "Точная, ~120 МБ • включите для загрузки",
-                    onCheckedChanged = { checked ->
-                        if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
-                                isMangaOcrDownPref.set(ok)
-                            }
-                        } else {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr")
-                            isMangaOcrDownPref.set(false)
-                        }
-                    },
-                )
-                SwitchPreferenceWidget(
-                    checked = isFastOcrDown,
-                    title = "Fast Manga OCR",
-                    subtitle = if (isFastOcrDown) "Быстрая, ~30 МБ • установлена" else "Быстрая, ~30 МБ • включите для загрузки",
-                    onCheckedChanged = { checked ->
-                        if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
-                                isFastOcrDownPref.set(ok)
-                            }
-                        } else {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr_fast")
-                            isFastOcrDownPref.set(false)
-                        }
-                    },
-                )
-                SwitchPreferenceWidget(
-                    checked = isPanelDetectorDown,
-                    title = "Panel Detector",
-                    subtitle = if (isPanelDetectorDown) "YOLO, ~6 МБ • установлена" else "YOLO, ~6 МБ • включите для загрузки",
-                    onCheckedChanged = { checked ->
-                        if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->
-                                isPanelDetectorDownPref.set(ok)
-                            }
-                        } else {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "panel_detector")
-                            isPanelDetectorDownPref.set(false)
-                        }
-                    },
-                )
-                if (ocrModel == OcrModel.OWOCR) {
-                    EditTextPreferenceWidget(
-                        title = stringResource(MR.strings.pref_owocr_address),
-                        subtitle = stringResource(MR.strings.pref_owocr_address_summary),
-                        icon = null,
-                        value = owocrAddress,
-                        onConfirm = {
-                            owocrAddressPreference.set(it)
-                            true
-                        },
+                when (currentTab) {
+                    0 -> RecognitionTab(
+                        screenModel = screenModel,
+                        hasQueue = hasQueue,
+                        stateItems = state.items,
+                        ocrPreferences = ocrPreferences,
+                        nestedScrollConnection = nestedScrollConnection,
                     )
-                    InfoWidget(text = stringResource(MR.strings.pref_owocr_address_note))
-                }
-                if (ocrModel == OcrModel.OPENROUTER) {
-                    EditTextPreferenceWidget(
-                        title = "OpenRouter API Key",
-                        subtitle = "Key for OpenRouter vision model access",
-                        icon = null,
-                        value = openrouterKey,
-                        onConfirm = {
-                            openrouterKeyPref.set(it)
-                            true
-                        },
-                    )
-                }
-                if (ocrModel == OcrModel.GOOGLE) {
-                    EditTextPreferenceWidget(
-                        title = "Google AI API Key",
-                        subtitle = "Key for Gemini Vision model access",
-                        icon = null,
-                        value = googleKey,
-                        onConfirm = {
-                            googleKeyPref.set(it)
-                            true
-                        },
-                    )
-                }
-                if (ocrModel == OcrModel.ZEN_FREE) {
-                    InfoWidget(text = stringResource(MR.strings.zen_free_status_label))
-                }
-
-                PreferenceGroupHeader(title = stringResource(MR.strings.pref_category_voice))
-                EditTextPreferenceWidget(
-                    title = stringResource(MR.strings.pref_voice_name),
-                    subtitle = "Selected voice engine identifier",
-                    icon = null,
-                    value = voiceName,
-                    onConfirm = {
-                        voiceNamePref.set(it)
-                        true
-                    },
-                )
-
-                PreferenceGroupHeader(title = stringResource(MR.strings.pref_token_usage))
-                InfoWidget(text = stringResource(MR.strings.token_indicator_label, tokenCount))
-                SwitchPreferenceWidget(
-                    checked = autoOcrOnDownload,
-                    title = stringResource(MR.strings.pref_auto_ocr_on_download),
-                    onCheckedChanged = autoOcrOnDownloadPreference::set,
-                )
-                SwitchPreferenceWidget(
-                    checked = useFallbackModels,
-                    title = stringResource(MR.strings.pref_use_fallback_models),
-                    subtitle = stringResource(MR.strings.pref_use_fallback_models_summary),
-                    onCheckedChanged = useFallbackModelsPreference::set,
-                )
-
-                PreferenceGroupHeader(title = stringResource(MR.strings.ocr_queue_header))
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                ) {
-                    if (!hasQueue) {
-                        EmptyScreen(
-                            message = stringResource(MR.strings.ocr_queue_empty),
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { context ->
-                                screenModel.controllerBinding =
-                                    DownloadListBinding.inflate(LayoutInflater.from(context))
-                                screenModel.adapter = OcrAdapter(screenModel.listener)
-                                screenModel.controllerBinding.root.adapter = screenModel.adapter
-                                screenModel.adapter?.isHandleDragEnabled = true
-                                screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(context)
-
-                                ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
-
-                                screenModel.controllerBinding.root
-                            },
-                            update = {
-                                screenModel.adapter?.updateDataSet(state.items)
-                            },
-                        )
-                    }
+                    else -> VoicesTab(ocrPreferences = ocrPreferences)
                 }
             }
         }
     }
+
+    // region Вкладка «Распознавание» (OCR + офлайн-модели + очередь)
+
+    @Composable
+    private fun RecognitionTab(
+        screenModel: OcrQueueScreenModel,
+        hasQueue: Boolean,
+        stateItems: List<OcrItem>,
+        ocrPreferences: OcrPreferences,
+        nestedScrollConnection: NestedScrollConnection,
+    ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+
+        val ocrModelPreference = remember { ocrPreferences.ocrModel() }
+        val ocrModel by ocrModelPreference.changes().collectAsState(initial = ocrModelPreference.get())
+        val autoOcrOnDownloadPreference = remember { ocrPreferences.autoOcrOnDownload() }
+        val autoOcrOnDownload by autoOcrOnDownloadPreference
+            .changes()
+            .collectAsState(initial = autoOcrOnDownloadPreference.get())
+        val owocrAddressPreference = remember { ocrPreferences.owocrAddress() }
+        val owocrAddress by owocrAddressPreference
+            .changes()
+            .collectAsState(initial = owocrAddressPreference.get())
+        val useFallbackModelsPreference = remember { ocrPreferences.useFallbackModels() }
+        val useFallbackModels by useFallbackModelsPreference
+            .changes()
+            .collectAsState(initial = useFallbackModelsPreference.get())
+        val openrouterKeyPref = remember { ocrPreferences.openrouterApiKey() }
+        val openrouterKey by openrouterKeyPref.changes().collectAsState(initial = openrouterKeyPref.get())
+        val googleKeyPref = remember { ocrPreferences.googleApiKey() }
+        val googleKey by googleKeyPref.changes().collectAsState(initial = googleKeyPref.get())
+        val tokenCountPref = remember { ocrPreferences.tokenUsageCount() }
+        val tokenCount by tokenCountPref.changes().collectAsState(initial = tokenCountPref.get())
+        val scanRegionPref = remember { ocrPreferences.scanRegion() }
+        val scanRegion by scanRegionPref.changes().collectAsState(initial = scanRegionPref.get())
+        val isMangaOcrDownPref = remember { ocrPreferences.isMangaOcrDownloaded() }
+        val isMangaOcrDown by isMangaOcrDownPref.changes().collectAsState(initial = isMangaOcrDownPref.get())
+        val isFastOcrDownPref = remember { ocrPreferences.isFastOcrDownloaded() }
+        val isFastOcrDown by isFastOcrDownPref.changes().collectAsState(initial = isFastOcrDownPref.get())
+        val isPanelDetectorDownPref = remember { ocrPreferences.isPanelDetectorDownloaded() }
+        val isPanelDetectorDown by isPanelDetectorDownPref.changes()
+            .collectAsState(initial = isPanelDetectorDownPref.get())
+
+        // Офлайн-Tesseract: расширенные настройки
+        val tessLangsPref = remember { ocrPreferences.tessLangs() }
+        val tessLangs by tessLangsPref.changes().collectAsState(initial = tessLangsPref.get())
+        val tessPsmPref = remember { ocrPreferences.tessPsm() }
+        val tessPsm by tessPsmPref.changes().collectAsState(initial = tessPsmPref.get())
+        val tessUpscalePref = remember { ocrPreferences.tessUpscaleMinSide() }
+        val tessUpscale by tessUpscalePref.changes().collectAsState(initial = tessUpscalePref.get())
+        val tessPreprocessPref = remember { ocrPreferences.tessPreprocess() }
+        val tessPreprocess by tessPreprocessPref.changes().collectAsState(initial = tessPreprocessPref.get())
+        val keepPacksPref = remember { ocrPreferences.keepOfflinePacks() }
+        val keepPacks by keepPacksPref.changes().collectAsState(initial = keepPacksPref.get())
+
+        // Синхронизация флагов с реальным наличием файлов на диске
+        LaunchedEffect(Unit) {
+            isMangaOcrDownPref.set(
+                eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr"),
+            )
+            isFastOcrDownPref.set(
+                eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr_fast"),
+            )
+            isPanelDetectorDownPref.set(
+                eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "panel_detector"),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(nestedScrollConnection)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            PreferenceGroupHeader(title = stringResource(MR.strings.label_settings))
+            ListPreferenceWidget(
+                value = scanRegion,
+                title = "Область сканирования страницы",
+                subtitle = when (scanRegion) {
+                    ScanRegion.FULL_PAGE -> "Сканировать всю страницу целиком (100%)"
+                    ScanRegion.TOP_HALF -> "Сканировать верхнюю часть страницы (Top 50%)"
+                    ScanRegion.BOTTOM_HALF -> "Сканировать нижнюю часть страницы (Bottom 50%)"
+                },
+                icon = null,
+                entries = mapOf(
+                    ScanRegion.FULL_PAGE to "1. Вся страница целиком (100%)",
+                    ScanRegion.TOP_HALF to "2. Верхняя часть страницы (50%)",
+                    ScanRegion.BOTTOM_HALF to "3. Нижняя часть страницы (50%)",
+                ),
+                onValueChange = scanRegionPref::set,
+            )
+
+            ListPreferenceWidget(
+                value = ocrModel,
+                title = stringResource(MR.strings.pref_ocr_model),
+                subtitle = stringResource(ocrModel.titleRes),
+                icon = null,
+                entries = mapOf(
+                    OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
+                    OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
+                    OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
+                    OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
+                    OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
+                    OcrModel.GOOGLE to stringResource(OcrModel.GOOGLE.titleRes),
+                    OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
+                    OcrModel.TESSERACT to stringResource(OcrModel.TESSERACT.titleRes),
+                ),
+                onValueChange = ocrModelPreference::set,
+            )
+
+            run {
+                val fallbackPresetPref = remember { ocrPreferences.fallbackPreset() }
+                val fallbackPreset by fallbackPresetPref.changes()
+                    .collectAsState(initial = fallbackPresetPref.get())
+                ListPreferenceWidget(
+                    value = fallbackPreset,
+                    title = "Фолбэк при сбое движка",
+                    subtitle = when (fallbackPreset) {
+                        "online" -> "Только онлайн: Lens → Zen → Gemini"
+                        "offline" -> "Только локальные: Tesseract → Fast → Legacy"
+                        "single" -> "Без фолбэков — только выбранный движок"
+                        else -> "Авто: при сети — онлайн, без сети — локальные"
+                    },
+                    icon = null,
+                    entries = mapOf(
+                        "auto" to "Авто (умный выбор по сети)",
+                        "online" to "Только онлайн-движки",
+                        "offline" to "Только локальные движки",
+                        "single" to "Один движок, без фолбэков",
+                    ),
+                    onValueChange = fallbackPresetPref::set,
+                )
+            }
+
+            PreferenceGroupHeader(title = "Офлайн-распознавание (Tesseract)")
+            InfoWidget(
+                text = "Работает полностью без сети: модели eng+rus встроены в APK (tar.xz, 2.9 МБ) " +
+                    "и извлекаются только при использовании движка.",
+            )
+            ListPreferenceWidget(
+                value = tessLangs,
+                title = "Языки распознавания",
+                subtitle = when (tessLangs) {
+                    "rus" -> "Только русский — быстрее, если текст точно русский"
+                    "eng" -> "Только английский — быстрее, если текст точно английский"
+                    else -> "Русский + английский (по умолчанию)"
+                },
+                icon = null,
+                entries = mapOf(
+                    "eng+rus" to "Русский + английский",
+                    "rus" to "Только русский",
+                    "eng" to "Только английский",
+                ),
+                onValueChange = tessLangsPref::set,
+            )
+            ListPreferenceWidget(
+                value = tessPsm,
+                title = "Сегментация страницы",
+                subtitle = when (tessPsm) {
+                    "auto" -> "Авто — Tesseract сам ищет блоки текста"
+                    "sparse" -> "Разреженный текст — надписи разбросаны по странице"
+                    "single_line" -> "Одна строка — для узких горизонтальных кропов"
+                    else -> "Один блок — лучший режим для баллонов манги"
+                },
+                icon = null,
+                entries = mapOf(
+                    "single_block" to "Один блок (баллоны манги)",
+                    "auto" to "Авто (вся страница)",
+                    "sparse" to "Разреженный текст (звуки, надписи)",
+                    "single_line" to "Одна строка",
+                ),
+                onValueChange = tessPsmPref::set,
+            )
+            SliderItem(
+                value = tessUpscale,
+                valueRange = 0..640,
+                steps = 9, // позиции: 0, 64, 128, …, 640
+                label = "Апскейл мелкого текста",
+                valueString = if (tessUpscale == 0) "выкл" else "до $tessUpscale px",
+                onChange = { tessUpscalePref.set((it / 64) * 64) },
+            )
+            SwitchPreferenceWidget(
+                checked = tessPreprocess,
+                title = "Предобработка изображения",
+                subtitle = "Ч/б + контраст: убирает цветные фоны баллонов, повышает точность",
+                onCheckedChanged = tessPreprocessPref::set,
+            )
+            SwitchPreferenceWidget(
+                checked = keepPacks,
+                title = "Держать модели распакованными",
+                subtitle = if (keepPacks) {
+                    "Быстрый старт движка • ~8 МБ постоянно на диске"
+                } else {
+                    "Экономия места: в покое только tar.xz в APK, извлечение при использовании"
+                },
+                onCheckedChanged = keepPacksPref::set,
+            )
+
+            PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
+            InfoWidget(
+                text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
+                    "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
+            )
+            SwitchPreferenceWidget(
+                checked = isMangaOcrDown,
+                title = "Manga OCR",
+                subtitle = if (isMangaOcrDown) {
+                    "Точная, ~120 МБ • установлена"
+                } else {
+                    "Точная, ~120 МБ • включите для загрузки"
+                },
+                onCheckedChanged = { checked ->
+                    if (checked) {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
+                            isMangaOcrDownPref.set(ok)
+                        }
+                    } else {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr")
+                        isMangaOcrDownPref.set(false)
+                    }
+                },
+            )
+            SwitchPreferenceWidget(
+                checked = isFastOcrDown,
+                title = "Fast Manga OCR",
+                subtitle = if (isFastOcrDown) {
+                    "Быстрая, ~30 МБ • установлена"
+                } else {
+                    "Быстрая, ~30 МБ • включите для загрузки"
+                },
+                onCheckedChanged = { checked ->
+                    if (checked) {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
+                            isFastOcrDownPref.set(ok)
+                        }
+                    } else {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr_fast")
+                        isFastOcrDownPref.set(false)
+                    }
+                },
+            )
+            SwitchPreferenceWidget(
+                checked = isPanelDetectorDown,
+                title = "Panel Detector",
+                subtitle = if (isPanelDetectorDown) {
+                    "YOLO, ~6 МБ • установлена"
+                } else {
+                    "YOLO, ~6 МБ • включите для загрузки"
+                },
+                onCheckedChanged = { checked ->
+                    if (checked) {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->
+                            isPanelDetectorDownPref.set(ok)
+                        }
+                    } else {
+                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "panel_detector")
+                        isPanelDetectorDownPref.set(false)
+                    }
+                },
+            )
+            if (ocrModel == OcrModel.OWOCR) {
+                EditTextPreferenceWidget(
+                    title = stringResource(MR.strings.pref_owocr_address),
+                    subtitle = stringResource(MR.strings.pref_owocr_address_summary),
+                    icon = null,
+                    value = owocrAddress,
+                    onConfirm = {
+                        owocrAddressPreference.set(it)
+                        true
+                    },
+                )
+                InfoWidget(text = stringResource(MR.strings.pref_owocr_address_note))
+            }
+            if (ocrModel == OcrModel.OPENROUTER) {
+                EditTextPreferenceWidget(
+                    title = "OpenRouter API Key",
+                    subtitle = "Key for OpenRouter vision model access",
+                    icon = null,
+                    value = openrouterKey,
+                    onConfirm = {
+                        openrouterKeyPref.set(it)
+                        true
+                    },
+                )
+            }
+            if (ocrModel == OcrModel.GOOGLE) {
+                EditTextPreferenceWidget(
+                    title = "Google AI API Key",
+                    subtitle = "Key for Gemini Vision model access",
+                    icon = null,
+                    value = googleKey,
+                    onConfirm = {
+                        googleKeyPref.set(it)
+                        true
+                    },
+                )
+            }
+            if (ocrModel == OcrModel.ZEN_FREE) {
+                InfoWidget(text = stringResource(MR.strings.zen_free_status_label))
+            }
+
+            PreferenceGroupHeader(title = stringResource(MR.strings.pref_token_usage))
+            InfoWidget(text = stringResource(MR.strings.token_indicator_label, tokenCount))
+            SwitchPreferenceWidget(
+                checked = autoOcrOnDownload,
+                title = stringResource(MR.strings.pref_auto_ocr_on_download),
+                onCheckedChanged = autoOcrOnDownloadPreference::set,
+            )
+            SwitchPreferenceWidget(
+                checked = useFallbackModels,
+                title = stringResource(MR.strings.pref_use_fallback_models),
+                subtitle = stringResource(MR.strings.pref_use_fallback_models_summary),
+                onCheckedChanged = useFallbackModelsPreference::set,
+            )
+
+            PreferenceGroupHeader(title = stringResource(MR.strings.ocr_queue_header))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (hasQueue) 420.dp else 160.dp),
+            ) {
+                if (!hasQueue) {
+                    EmptyScreen(
+                        message = stringResource(MR.strings.ocr_queue_empty),
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            screenModel.controllerBinding =
+                                DownloadListBinding.inflate(LayoutInflater.from(ctx))
+                            screenModel.adapter = OcrAdapter(screenModel.listener)
+                            screenModel.controllerBinding.root.adapter = screenModel.adapter
+                            screenModel.adapter?.isHandleDragEnabled = true
+                            screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(ctx)
+
+                            ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
+
+                            screenModel.controllerBinding.root
+                        },
+                        update = {
+                            screenModel.adapter?.updateDataSet(stateItems)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    // endregion
+
+    // region Вкладка «Голоса» (офлайн и онлайн, реальные данные)
+
+    private data class VoiceRow(
+        val name: String,
+        val kindLabel: String,
+        val isOffline: Boolean,
+    )
+
+    @Composable
+    private fun VoicesTab(ocrPreferences: OcrPreferences) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+
+        val voiceEnginePref = remember { ocrPreferences.voiceEngine() }
+        val voiceEngine by voiceEnginePref.changes().collectAsState(initial = voiceEnginePref.get())
+        val voiceNamePref = remember { ocrPreferences.voiceName() }
+        val voiceName by voiceNamePref.changes().collectAsState(initial = voiceNamePref.get())
+        val voiceFemalePref = remember { ocrPreferences.voiceFemale() }
+        val voiceFemale by voiceFemalePref.changes().collectAsState(initial = voiceFemalePref.get())
+        val voiceMalePref = remember { ocrPreferences.voiceMale() }
+        val voiceMale by voiceMalePref.changes().collectAsState(initial = voiceMalePref.get())
+        val speechRatePref = remember { ocrPreferences.speechRate() }
+        val speechRate by speechRatePref.changes().collectAsState(initial = speechRatePref.get())
+        val speechPitchPref = remember { ocrPreferences.speechPitch() }
+        val speechPitch by speechPitchPref.changes().collectAsState(initial = speechPitchPref.get())
+        val webLangPref = remember { ocrPreferences.ttsWebLanguage() }
+        val webLang by webLangPref.changes().collectAsState(initial = webLangPref.get())
+        val elevenKeyPref = remember { ocrPreferences.elevenApiKey() }
+        val elevenKey by elevenKeyPref.changes().collectAsState(initial = elevenKeyPref.get())
+        val elevenVoiceIdPref = remember { ocrPreferences.elevenVoiceId() }
+        val elevenVoiceId by elevenVoiceIdPref.changes().collectAsState(initial = elevenVoiceIdPref.get())
+
+        // Живой probe системного TTS: реальные голоса устройства
+        var probe by remember { mutableStateOf<TextToSpeech?>(null) }
+        var probeReady by remember { mutableStateOf(false) }
+        DisposableEffect(Unit) {
+            var tts: TextToSpeech? = null
+            tts = TextToSpeech(context) { status ->
+                if (status == TextToSpeech.SUCCESS) probe = tts
+                probeReady = true
+            }
+            onDispose {
+                runCatching { tts?.shutdown() }
+            }
+        }
+
+        var langFilter by remember { mutableStateOf("ru") }
+        var assignMode by remember { mutableIntStateOf(0) } // 0=основной, 1=♀, 2=♂
+
+        // Реальный список голосов из системного движка, офлайн/онлайн раздельно
+        val allVoices = remember(probe, probeReady, langFilter) {
+            runCatching {
+                VoiceHelper.voicesFor(probe, langFilter)
+                    .sortedWith(
+                        compareBy(
+                            { it.isNetworkConnectionRequired }, // офлайн вверх
+                            {
+                                when (VoiceHelper.classify(it)) {
+                                    VoiceKind.FEMALE -> 0
+                                    VoiceKind.MALE -> 1
+                                    VoiceKind.TEEN -> 2
+                                    else -> 3
+                                }
+                            },
+                            { it.name },
+                        ),
+                    )
+                    .map { v ->
+                        val kind = when (VoiceHelper.classify(v)) {
+                            VoiceKind.FEMALE -> "♀ Женский"
+                            VoiceKind.MALE -> "♂ Мужской"
+                            VoiceKind.TEEN -> "👦 Подросток"
+                            else -> "Другой"
+                        }
+                        VoiceRow(
+                            name = v.name,
+                            kindLabel = kind,
+                            isOffline = !v.isNetworkConnectionRequired,
+                        )
+                    }
+            }.getOrDefault(emptyList())
+        }
+        val offlineVoices = allVoices.filter { it.isOffline }
+        val onlineVoices = allVoices.filter { !it.isOffline }
+
+        // Живой список голосов ElevenLabs по ключу (реальный API, без фейков)
+        var elevenVoices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+        var elevenLoading by remember { mutableStateOf(false) }
+        LaunchedEffect(elevenKey, voiceEngine) {
+            if (voiceEngine == TtsSpeaker.ENGINE_ELEVENLABS && elevenKey.isNotBlank()) {
+                elevenLoading = true
+                elevenVoices = TtsSpeaker.fetchElevenVoices(elevenKey)
+                elevenLoading = false
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            PreferenceGroupHeader(title = "Движок озвучки")
+            ListPreferenceWidget(
+                value = voiceEngine,
+                title = "Источник голоса",
+                subtitle = when (voiceEngine) {
+                    TtsSpeaker.ENGINE_GOOGLE_WEB -> "Онлайн: Google Translate, без API-ключа"
+                    TtsSpeaker.ENGINE_ELEVENLABS -> "Онлайн: ElevenLabs, нужен API-ключ"
+                    else -> "Системный TTS: офлайн- и онлайн-голоса устройства"
+                },
+                icon = null,
+                entries = mapOf(
+                    TtsSpeaker.ENGINE_SYSTEM to "📱 Системный TTS (офлайн + онлайн)",
+                    TtsSpeaker.ENGINE_GOOGLE_WEB to "☁ Google Web (онлайн, без ключа)",
+                    TtsSpeaker.ENGINE_ELEVENLABS to "☁ ElevenLabs (онлайн, по ключу)",
+                ),
+                onValueChange = voiceEnginePref::set,
+            )
+            SliderItem(
+                value = (speechRate * 100).toInt().coerceIn(50, 200),
+                valueRange = 50..200,
+                steps = 29,
+                label = "Скорость речи",
+                valueString = "×%.2f".format(speechRate),
+                onChange = { speechRatePref.set(it / 100f) },
+            )
+            SliderItem(
+                value = (speechPitch * 100).toInt().coerceIn(50, 200),
+                valueRange = 50..200,
+                steps = 29,
+                label = "Высота голоса",
+                valueString = "×%.2f".format(speechPitch),
+                onChange = { speechPitchPref.set(it / 100f) },
+            )
+
+            if (voiceEngine == TtsSpeaker.ENGINE_SYSTEM) {
+                PreferenceGroupHeader(title = "Голоса устройства")
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf("ru" to "Рус", "en" to "Eng", "ja" to "日本", "ko" to "한국", "zh" to "中文").forEach { (code, label) ->
+                        FilterChip(
+                            selected = langFilter == code,
+                            onClick = { langFilter = code },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = assignMode == 0,
+                        onClick = { assignMode = 0 },
+                        label = { Text("Основной") },
+                    )
+                    FilterChip(
+                        selected = assignMode == 1,
+                        onClick = { assignMode = 1 },
+                        label = { Text("♀ Женский") },
+                    )
+                    FilterChip(
+                        selected = assignMode == 2,
+                        onClick = { assignMode = 2 },
+                        label = { Text("♂ Мужской") },
+                    )
+                }
+                InfoWidget(
+                    text = when (assignMode) {
+                        1 -> "Выберите голос для женских реплик: " + voiceFemale.ifBlank { "не задан" }
+                        2 -> "Выберите голос для мужских реплик: " + voiceMale.ifBlank { "не задан" }
+                        else -> "Основной голос озвучки: " + voiceName.ifBlank { "автоподбор" }
+                    },
+                )
+
+                when {
+                    !probeReady -> InfoWidget(text = "Инициализация системного TTS…")
+                    allVoices.isEmpty() -> InfoWidget(
+                        text = "Голосов для этого языка не найдено. Установите TTS-движок " +
+                            "(Speech Services by Google, RHVoice) в настройках системы.",
+                    )
+                    else -> {
+                        if (offlineVoices.isNotEmpty()) {
+                            PreferenceGroupHeader(title = "📱 Офлайн (${offlineVoices.size}) — работают без сети")
+                            offlineVoices.forEach { row ->
+                                SystemVoiceRow(
+                                    row = row,
+                                    selected = when (assignMode) {
+                                        1 -> voiceFemale == row.name
+                                        2 -> voiceMale == row.name
+                                        else -> voiceName == row.name
+                                    },
+                                    onSelect = {
+                                        when (assignMode) {
+                                            1 -> voiceFemalePref.set(row.name)
+                                            2 -> voiceMalePref.set(row.name)
+                                            else -> voiceNamePref.set(row.name)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        if (onlineVoices.isNotEmpty()) {
+                            PreferenceGroupHeader(title = "☁ Онлайн (${onlineVoices.size}) — качественнее, нужна сеть")
+                            onlineVoices.forEach { row ->
+                                SystemVoiceRow(
+                                    row = row,
+                                    selected = when (assignMode) {
+                                        1 -> voiceFemale == row.name
+                                        2 -> voiceMale == row.name
+                                        else -> voiceName == row.name
+                                    },
+                                    onSelect = {
+                                        when (assignMode) {
+                                            1 -> voiceFemalePref.set(row.name)
+                                            2 -> voiceMalePref.set(row.name)
+                                            else -> voiceNamePref.set(row.name)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (voiceEngine == TtsSpeaker.ENGINE_GOOGLE_WEB) {
+                PreferenceGroupHeader(title = "Google Web TTS")
+                InfoWidget(
+                    text = "Голос берётся с сайта Google Translate без API-ключа. " +
+                        "У этого источника один голос на язык — выбирается только язык.",
+                )
+                ListPreferenceWidget(
+                    value = webLang,
+                    title = "Язык озвучки",
+                    subtitle = webLang,
+                    icon = null,
+                    entries = mapOf(
+                        "ru" to "Русский",
+                        "en" to "English",
+                        "ja" to "日本語",
+                        "ko" to "한국어",
+                        "zh-CN" to "中文",
+                        "uk" to "Українська",
+                    ),
+                    onValueChange = webLangPref::set,
+                )
+            }
+
+            if (voiceEngine == TtsSpeaker.ENGINE_ELEVENLABS) {
+                PreferenceGroupHeader(title = "ElevenLabs")
+                EditTextPreferenceWidget(
+                    title = "API-ключ ElevenLabs",
+                    subtitle = if (elevenKey.isBlank()) "Не задан — без ключа сработает фолбэк на Google Web" else "Задан",
+                    icon = null,
+                    value = elevenKey,
+                    onConfirm = {
+                        elevenKeyPref.set(it)
+                        true
+                    },
+                )
+                when {
+                    elevenKey.isBlank() -> InfoWidget(
+                        text = "Введите ключ с elevenlabs.io — список голосов вашего аккаунта загрузится автоматически.",
+                    )
+                    elevenLoading -> InfoWidget(text = "Загрузка голосов из вашего аккаунта…")
+                    elevenVoices.isEmpty() -> InfoWidget(
+                        text = "Голоса не загрузились: проверьте ключ и подключение к сети.",
+                    )
+                    else -> {
+                        PreferenceGroupHeader(title = "☁ Голоса аккаунта (${elevenVoices.size})")
+                        elevenVoices.forEach { (id, label) ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { elevenVoiceIdPref.set(id) }
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            ) {
+                                RadioButton(
+                                    selected = elevenVoiceId == id,
+                                    onClick = { elevenVoiceIdPref.set(id) },
+                                )
+                                Column {
+                                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        id,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Проба голоса — реальная озвучка текущими настройками
+            PreferenceGroupHeader(title = "Проверка")
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = false,
+                    onClick = {
+                        TtsSpeaker.speak(context, "Проверка голоса. Так будет звучать озвучка Ёмикай.")
+                    },
+                    label = { Text("▶ Прослушать") },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { TtsSpeaker.stop() },
+                    label = { Text("⏹ Стоп") },
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun SystemVoiceRow(
+        row: VoiceRow,
+        selected: Boolean,
+        onSelect: () -> Unit,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onSelect)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = onSelect,
+            )
+            Column {
+                Text(
+                    "${row.kindLabel} • ${row.name.substringAfterLast(':')}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    row.name,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    // endregion
 }
