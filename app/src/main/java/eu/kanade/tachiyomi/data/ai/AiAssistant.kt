@@ -101,45 +101,55 @@ object AiAssistant {
         }.getOrDefault(OPENROUTER_FREE_FALLBACK)
     }
 
+    /** Полный ответ модели: текст, «размышления» (reasoning), реальная модель. */
+    data class ChatReply(val content: String, val reasoning: String?, val model: String)
+
     /**
      * Один chat-запрос выбранному провайдеру. null при любой ошибке —
      * вызывающий код обязан деградировать мягко (нейтральный голос,
      * пропуск перевода и т.п.).
      */
     suspend fun chat(userPrompt: String, systemPrompt: String? = null, maxTokens: Int = 500): String? =
+        chatFull(userPrompt, systemPrompt, maxTokens)?.content
+
+    /**
+     * Как chat(), но с reasoning-блоком и именем фактически ответившей
+     * модели (при автосмене может отличаться от выбранной).
+     */
+    suspend fun chatFull(userPrompt: String, systemPrompt: String? = null, maxTokens: Int = 500): ChatReply? =
         withContext(Dispatchers.IO) {
             val p = prefs()
             val provider = p.aiProvider().get()
-            val (url, model, key) = when (provider) {
-                PROVIDER_OPENROUTER -> Triple(
+            val key = p.openrouterApiKey().get()
+            if (provider == PROVIDER_OPENROUTER && key.isNotBlank()) {
+                val model = p.openrouterFreeModel().get().ifBlank { OPENROUTER_FREE_FALLBACK.first() }
+                val reply = chatRaw(
                     "https://openrouter.ai/api/v1/chat/completions",
-                    p.openrouterFreeModel().get().ifBlank { OPENROUTER_FREE_FALLBACK.first() },
-                    p.openrouterApiKey().get(),
+                    model, key, userPrompt, systemPrompt, maxTokens,
                 )
-                else -> Triple(
-                    "https://opencode.ai/zen/v1/chat/completions",
-                    p.zenModel().get().ifBlank { ZEN_MODELS.first() },
-                    "", // Zen работает без ключа
-                )
+                if (reply != null || !p.aiAutoRotate().get()) return@withContext reply
+                // Автосмена: OpenRouter упал → пробуем Zen
+                return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
             }
-            if (provider == PROVIDER_OPENROUTER && key.isBlank()) {
+            if (provider == PROVIDER_OPENROUTER) {
                 logcat(LogPriority.WARN) { "OpenRouter selected but no API key; falling back to Zen" }
-                return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
             }
-            if (provider != PROVIDER_OPENROUTER) {
-                return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
-            }
-            chatRaw(url, model, key, userPrompt, systemPrompt, maxTokens)
+            zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
         }
 
     /**
      * Zen с авторотацией: выбранная модель первая, при rate limit / ошибке —
      * следующая из списка. Бесплатные лимиты Zen помодельные, поэтому
-     * ротация почти всегда находит живую модель.
+     * ротация почти всегда находит живую модель. Тумблер «Автосмена моделей»
+     * (pref_ai_auto_rotate) ограничивает попытки одной выбранной моделью.
      */
-    private fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): String? {
+    private fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): ChatReply? {
         val preferred = prefs().zenModel().get().ifBlank { ZEN_MODELS.first() }
-        val order = listOf(preferred) + ZEN_MODELS.filter { it != preferred }
+        val order = if (prefs().aiAutoRotate().get()) {
+            listOf(preferred) + ZEN_MODELS.filter { it != preferred }
+        } else {
+            listOf(preferred)
+        }
         for (m in order) {
             val answer = chatRaw(
                 "https://opencode.ai/zen/v1/chat/completions",
@@ -157,7 +167,7 @@ object AiAssistant {
         userPrompt: String,
         systemPrompt: String?,
         maxTokens: Int = 500,
-    ): String? {
+    ): ChatReply? {
         val startedAt = System.currentTimeMillis()
         return try {
             val messages = JSONArray()
@@ -175,7 +185,7 @@ object AiAssistant {
             conn.requestMethod = "POST"
             conn.doOutput = true
             conn.connectTimeout = 8_000
-            conn.readTimeout = 15_000
+            conn.readTimeout = 30_000
             conn.setRequestProperty("Content-Type", "application/json")
             if (apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer $apiKey")
 
@@ -188,12 +198,18 @@ object AiAssistant {
                 logcat(LogPriority.WARN) { "AI assistant HTTP $code ($model): ${text.take(160)}" }
                 return null
             }
-            val answer = JSONObject(text)
+            val message = JSONObject(text)
                 .optJSONArray("choices")?.optJSONObject(0)
-                ?.optJSONObject("message")?.optString("content")
-                ?.trim()?.ifBlank { null }
+                ?.optJSONObject("message")
+            val answer = message?.optString("content")?.trim()?.ifBlank { null }
+            // Размышления reasoning-моделей: Zen отдаёт их в «reasoning»
+            // (nemotron) или «reasoning_content» (hy3) — проверено живыми
+            // запросами. Показываются в AI-чате при включённой опции.
+            val reasoning = message?.let { m ->
+                m.optString("reasoning").ifBlank { m.optString("reasoning_content") }
+            }?.trim()?.ifBlank { null }
             addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
-            answer
+            answer?.let { ChatReply(it, reasoning, model) }
         } catch (e: Exception) {
             addLog(LogEntry(startedAt, model, userPrompt.take(200), "ОШИБКА: ${e.message?.take(120)}", System.currentTimeMillis() - startedAt))
             logcat(LogPriority.WARN, e) { "AI assistant call failed ($model)" }

@@ -39,6 +39,32 @@ object OcrModelDownloader {
         "panel_detector" to listOf(
             hf("leoxs22/manga-panel-detector-yolo26n", "manga_panel_detector_int8.tflite") to "panel_detector.tflite",
         ),
+        // ---- Языковые паки Tesseract (tessdata_fast, официальный репозиторий).
+        // Скачиваются один раз, удаляются одной кнопкой; после установки язык
+        // появляется в офлайн-движке (TesseractOcrEngine подключает их из
+        // ocr_models/tessdata). eng+rus уже в APK — их качать не нужно.
+        "tess_jpn" to listOf(
+            tess("jpn.traineddata") to "tessdata/jpn.traineddata",
+            tess("jpn_vert.traineddata") to "tessdata/jpn_vert.traineddata",
+        ),
+        "tess_kor" to listOf(
+            tess("kor.traineddata") to "tessdata/kor.traineddata",
+        ),
+        "tess_chi" to listOf(
+            tess("chi_sim.traineddata") to "tessdata/chi_sim.traineddata",
+        ),
+        "tess_ukr" to listOf(
+            tess("ukr.traineddata") to "tessdata/ukr.traineddata",
+        ),
+        "tess_deu" to listOf(
+            tess("deu.traineddata") to "tessdata/deu.traineddata",
+        ),
+        "tess_fra" to listOf(
+            tess("fra.traineddata") to "tessdata/fra.traineddata",
+        ),
+        "tess_spa" to listOf(
+            tess("spa.traineddata") to "tessdata/spa.traineddata",
+        ),
     )
 
     /** Asset-style paths per pack, used to check installation and delete files. */
@@ -46,7 +72,29 @@ object OcrModelDownloader {
         "manga_ocr" to listOf("ocr/encoder.tflite", "ocr/decoder.tflite", "ocr/embeddings.bin"),
         "manga_ocr_fast" to listOf("ocr_fast/encoder.tflite", "ocr_fast/decoder.tflite"),
         "panel_detector" to listOf("panel_detector/model.tflite"),
+        "tess_jpn" to listOf("tessdata/jpn.traineddata", "tessdata/jpn_vert.traineddata"),
+        "tess_kor" to listOf("tessdata/kor.traineddata"),
+        "tess_chi" to listOf("tessdata/chi_sim.traineddata"),
+        "tess_ukr" to listOf("tessdata/ukr.traineddata"),
+        "tess_deu" to listOf("tessdata/deu.traineddata"),
+        "tess_fra" to listOf("tessdata/fra.traineddata"),
+        "tess_spa" to listOf("tessdata/spa.traineddata"),
     )
+
+    /** Метаданные языковых паков Tesseract: pack -> (код языка, название, ~размер). */
+    val TESS_LANG_PACKS: List<Triple<String, String, String>> = listOf(
+        Triple("tess_jpn", "jpn", "Японский (+вертикальный) • ~5 МБ"),
+        Triple("tess_kor", "kor", "Корейский • ~2 МБ"),
+        Triple("tess_chi", "chi_sim", "Китайский упрощённый • ~3 МБ"),
+        Triple("tess_ukr", "ukr", "Украинский • ~4 МБ"),
+        Triple("tess_deu", "deu", "Немецкий • ~2 МБ"),
+        Triple("tess_fra", "fra", "Французский • ~2 МБ"),
+        Triple("tess_spa", "spa", "Испанский • ~3 МБ"),
+    )
+
+    private fun tess(file: String): String {
+        return "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$file"
+    }
 
     private fun hf(repo: String, path: String): String {
         return "https://huggingface.co/$repo/resolve/main/$path"
@@ -128,6 +176,7 @@ object OcrModelDownloader {
             return true
         }
 
+        destination.parentFile?.mkdirs() // паки с подпапками (tessdata/…)
         val part = File(destination.parentFile, destination.name + ".part")
         var connection: HttpURLConnection? = null
         return try {

@@ -361,16 +361,54 @@ object OcrQueueScreen : Screen() {
                 subtitle = when (tessLangs) {
                     "rus" -> "Только русский — быстрее, если текст точно русский"
                     "eng" -> "Только английский — быстрее, если текст точно английский"
-                    else -> "Русский + английский (по умолчанию)"
+                    "eng+rus" -> "Русский + английский (по умолчанию)"
+                    else -> tessLangs + " (языки без установленного пака пропускаются)"
                 },
                 icon = null,
-                entries = mapOf(
-                    "eng+rus" to "Русский + английский",
-                    "rus" to "Только русский",
-                    "eng" to "Только английский",
-                ),
+                entries = buildMap {
+                    put("eng+rus", "Русский + английский")
+                    put("rus", "Только русский")
+                    put("eng", "Только английский")
+                    // Скачанные языковые паки добавляют варианты
+                    eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.TESS_LANG_PACKS.forEach { (pack, code, label) ->
+                        if (eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack)) {
+                            put(code, label.substringBefore(" •"))
+                            put("$code+rus", label.substringBefore(" •") + " + русский")
+                        }
+                    }
+                },
                 onValueChange = tessLangsPref::set,
             )
+
+            PreferenceGroupHeader(title = "Языковые паки Tesseract (скачать один раз)")
+            InfoWidget(
+                text = "Официальные модели tessdata_fast. После установки язык появляется " +
+                    "в списке «Языки распознавания» выше. Русский и английский уже встроены в APK.",
+            )
+            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.TESS_LANG_PACKS.forEach { (pack, _, label) ->
+                var installed by remember(pack) {
+                    mutableStateOf(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack))
+                }
+                SwitchPreferenceWidget(
+                    checked = installed,
+                    title = label.substringBefore(" •"),
+                    subtitle = if (installed) {
+                        label.substringAfter("• ") + " • установлен"
+                    } else {
+                        label.substringAfter("• ") + " • включите для загрузки"
+                    },
+                    onCheckedChanged = { checked ->
+                        if (checked) {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, pack) { ok ->
+                                installed = ok
+                            }
+                        } else {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, pack)
+                            installed = false
+                        }
+                    },
+                )
+            }
             ListPreferenceWidget(
                 value = tessPsm,
                 title = "Сегментация страницы",

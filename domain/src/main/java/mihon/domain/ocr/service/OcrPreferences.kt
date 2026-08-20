@@ -128,6 +128,13 @@ class OcrPreferences(
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 
+    // Автосмена моделей: при лимите/ошибке выбранной модели запрос уходит
+    // следующей из списка. Выключено — только выбранная модель.
+    fun aiAutoRotate() = preferenceStore.getBoolean("pref_ai_auto_rotate", true)
+
+    // Показывать «размышления» reasoning-моделей в AI-чате (блок 🤔 под ответом)
+    fun aiShowReasoning() = preferenceStore.getBoolean("pref_ai_show_reasoning", false)
+
     // Бесплатная модель OpenRouter (суффикс :free)
     fun openrouterFreeModel() = preferenceStore.getString("pref_openrouter_free_model", "")
 

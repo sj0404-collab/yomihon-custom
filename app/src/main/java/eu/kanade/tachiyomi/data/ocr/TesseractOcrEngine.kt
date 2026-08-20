@@ -81,12 +81,31 @@ class TesseractOcrEngine(private val context: Context) {
             val dst = File(tessdata, f.name)
             if (!dst.exists() || dst.length() != f.length()) f.copyTo(dst, overwrite = true)
         }
+        // Скачанные языковые паки (jpn/kor/chi_sim/ukr/deu/fra/spa из
+        // tessdata_fast) лежат в ocr_models/tessdata — линкуем их тоже.
+        runCatching {
+            context.getExternalFilesDir(null)
+                ?.let { File(File(it, "ocr_models"), "tessdata") }
+                ?.listFiles { f -> f.extension == "traineddata" && f.length() > 0 }
+                ?.forEach { f ->
+                    val dst = File(tessdata, f.name)
+                    if (!dst.exists() || dst.length() != f.length()) f.copyTo(dst, overwrite = true)
+                }
+        }
+        // Языки без установленных файлов выбрасываются из строки init —
+        // иначе Tesseract падает целиком.
+        val available = tessdata.listFiles()?.mapTo(HashSet()) { it.nameWithoutExtension }.orEmpty()
+
+        val effLangs = wantLangs.split('+')
+            .filter { it in available }
+            .joinToString("+")
+            .ifBlank { "eng+rus" }
 
         runCatching {
             TessBaseAPI().apply {
                 // OEM_LSTM_ONLY: только нейросетевой распознаватель — быстрее
                 // и точнее устаревшего legacy-движка на текстах манги.
-                if (!init(root.absolutePath, wantLangs, TessBaseAPI.OEM_LSTM_ONLY)) {
+                if (!init(root.absolutePath, effLangs, TessBaseAPI.OEM_LSTM_ONLY)) {
                     recycle()
                     error("Tesseract init failed for langs=$wantLangs")
                 }

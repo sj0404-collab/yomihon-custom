@@ -55,6 +55,8 @@ object AiAgent {
         val text: String,
         val toolResults: List<ToolResult>,
         val images: List<File>,
+        val reasoning: String? = null,
+        val model: String = "",
     )
 
     private val sourceManager: SourceManager by lazy { Injekt.get() }
@@ -97,15 +99,18 @@ object AiAgent {
             append(userText)
         }
 
-        var answer = AiAssistant.chat(prompt, SYSTEM_PROMPT, maxTokens = 900)
+        var reply = AiAssistant.chatFull(prompt, SYSTEM_PROMPT, maxTokens = 900)
             ?: return@withContext AgentReply(
-                "Нет ответа от AI-провайдера (сеть/лимиты). Попробуйте ещё раз или смените модель в настройках озвучки.",
+                "Нет ответа от AI-провайдера (сеть/лимиты). Попробуйте ещё раз или смените модель кнопкой над чатом.",
                 emptyList(), emptyList(),
             )
+        var answer = reply.content
+        var reasoning = reply.reasoning
+        var usedModel = reply.model
 
         // До 2 раундов инструментов, чтобы не зациклиться
         repeat(2) {
-            val calls = parseToolCalls(answer!!)
+            val calls = parseToolCalls(answer)
             if (calls.isEmpty()) return@repeat
             val outputs = calls.map { call ->
                 val r = runCatching { execute(context, call) }
@@ -116,16 +121,23 @@ object AiAgent {
             }
             val followUp = "Результаты инструментов:\n" + outputs.joinToString("\n---\n") +
                 "\n\nТеперь дай финальный ответ пользователю (без @tool, если всё сделано)."
-            answer = AiAssistant.chat(
+            val next = AiAssistant.chatFull(
                 prompt + "\n\n(твои вызовы выполнены)\n" + followUp,
                 SYSTEM_PROMPT,
                 maxTokens = 900,
-            ) ?: outputs.joinToString("\n")
+            )
+            if (next != null) {
+                answer = next.content
+                if (next.reasoning != null) reasoning = next.reasoning
+                usedModel = next.model
+            } else {
+                answer = outputs.joinToString("\n")
+            }
         }
 
-        val cleanText = answer!!.lines().filterNot { it.trimStart().startsWith("@tool") }
+        val cleanText = answer.lines().filterNot { it.trimStart().startsWith("@tool") }
             .joinToString("\n").trim().ifBlank { "Готово. Результаты — ниже и в workspace." }
-        AgentReply(cleanText, results, images)
+        AgentReply(cleanText, results, images, reasoning = reasoning, model = usedModel)
     }
 
     private fun parseToolCalls(text: String): List<ToolCall> =

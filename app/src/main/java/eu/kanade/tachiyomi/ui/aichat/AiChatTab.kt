@@ -7,6 +7,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +108,8 @@ data object AiChatTab : Tab {
         val text: String,
         val images: List<File> = emptyList(),
         val toolLog: String = "",
+        val reasoning: String? = null,
+        val model: String = "",
     )
 
     // Держим историю в памяти процесса: вкладку можно покидать и возвращаться
@@ -185,6 +191,8 @@ data object AiChatTab : Tab {
                             reply.text,
                             images = reply.images,
                             toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
+                            reasoning = reply.reasoning,
+                            model = reply.model,
                         ),
                     )
                     busy = false
@@ -192,16 +200,25 @@ data object AiChatTab : Tab {
             }
         }
 
-        Column(modifier = Modifier.fillMaxSize().imePadding()) {
-            // Верхние чипы: Чат / Workspace / выбор нескольких
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .imePadding(),
+        ) {
+            // Верхние чипы: Чат / Workspace / настройки / выбор нескольких.
+            // Ряд горизонтально скроллится, чтобы чипы не уезжали за экран.
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Чат") })
                 FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Workspace") })
                 FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("⚙") })
                 if (tab == 0) {
+                    ModelChip()
                     FilterChip(
                         selected = selectMode,
                         onClick = {
@@ -247,6 +264,63 @@ data object AiChatTab : Tab {
                 )
                 1 -> WorkspaceBody(modifier = Modifier.weight(1f))
                 else -> SettingsBody(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+
+    /**
+     * Чип текущей модели над чатом: тап — выпадающий список всех моделей
+     * (Zen без ключа + OpenRouter :free при ключе) с переключением на лету,
+     * плюс тумблеры «Автосмена» и «Размышления».
+     */
+    @Composable
+    private fun ModelChip() {
+        val prefs = remember { Injekt.get<OcrPreferences>() }
+        val zenModelPref = remember { prefs.zenModel() }
+        val zenModel by zenModelPref.changes()
+            .collectAsState(initial = zenModelPref.get())
+        val autoRotatePref = remember { prefs.aiAutoRotate() }
+        val autoRotate by autoRotatePref.changes()
+            .collectAsState(initial = autoRotatePref.get())
+        val showReasoningPref = remember { prefs.aiShowReasoning() }
+        val showReasoning by showReasoningPref.changes()
+            .collectAsState(initial = showReasoningPref.get())
+        var open by remember { mutableStateOf(false) }
+
+        androidx.compose.foundation.layout.Box {
+            FilterChip(
+                selected = false,
+                onClick = { open = true },
+                label = { Text("🧠 " + zenModel.removeSuffix("-free").take(18)) },
+            )
+            androidx.compose.material3.DropdownMenu(
+                expanded = open,
+                onDismissRequest = { open = false },
+            ) {
+                eu.kanade.tachiyomi.data.ai.AiAssistant.ZEN_MODELS.forEach { m ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(m) },
+                        leadingIcon = {
+                            androidx.compose.material3.RadioButton(
+                                selected = zenModel == m,
+                                onClick = null,
+                            )
+                        },
+                        onClick = {
+                            zenModelPref.set(m)
+                            open = false
+                        },
+                    )
+                }
+                androidx.compose.material3.HorizontalDivider()
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(if (autoRotate) "✓ Автосмена при лимите" else "Автосмена при лимите") },
+                    onClick = { autoRotatePref.set(!autoRotate) },
+                )
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(if (showReasoning) "✓ Показывать размышления" else "Показывать размышления") },
+                    onClick = { showReasoningPref.set(!showReasoning) },
+                )
             }
         }
     }
@@ -438,10 +512,25 @@ data object AiChatTab : Tab {
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(
-                    if (isUser) "Вы" else "Агент",
+                    if (isUser) "Вы" else "Агент" + (if (m.model.isNotBlank()) " • ${m.model}" else ""),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Размышления reasoning-модели (если включено в меню модели)
+                if (!isUser && m.reasoning != null) {
+                    val prefs = remember { Injekt.get<OcrPreferences>() }
+                    val show by prefs.aiShowReasoning().changes()
+                        .collectAsState(initial = prefs.aiShowReasoning().get())
+                    if (show) {
+                        var expanded by remember { mutableStateOf(false) }
+                        Text(
+                            if (expanded) "🤔 ${m.reasoning}" else "🤔 Размышления… (нажмите)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { expanded = !expanded },
+                        )
+                    }
+                }
                 if (m.text.isNotBlank()) {
                     Text(m.text, style = MaterialTheme.typography.bodyMedium)
                 }
