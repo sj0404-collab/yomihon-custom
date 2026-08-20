@@ -90,7 +90,7 @@ object HomeScreen : Screen() {
     /** Видимые вкладки: «AI» можно скрыть в её же настройках (агент тогда
      *  доступен из внешнего браузера через встроенный сервер). */
     @Composable
-    private fun visibleTabs(): List<cafe.adriel.voyager.navigator.tab.Tab> {
+    private fun visibleTabs(): List<eu.kanade.presentation.util.Tab> {
         val prefs = remember { Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
         val aiVisible by prefs.aiTabVisible().collectAsState()
         return if (aiVisible) TABS else TABS.filter { it !is eu.kanade.tachiyomi.ui.aichat.AiChatTab }

@@ -246,7 +246,7 @@ object AiAgent {
     private fun listExtensions(): String {
         val sources = sourceManager.getAll().filterIsInstance<CatalogueSource>()
         if (sources.isEmpty()) return "Расширения не установлены"
-        val disabled = sourcePrefs.disabledSources().get()
+        val disabled = sourcePrefs.disabledSources.get()
         return sources.take(60).joinToString("\n") { s ->
             val domain = (s as? HttpSource)?.baseUrl ?: "локальный"
             val state = if (s.id.toString() in disabled) "СКРЫТ" else "виден"
@@ -257,7 +257,7 @@ object AiAgent {
     /** Скрыть/показать источники по подстроке имени, языка или домена. */
     private fun filterExtensions(hide: String, show: String): String {
         val sources = sourceManager.getAll().filterIsInstance<CatalogueSource>()
-        val pref = sourcePrefs.disabledSources()
+        val pref = sourcePrefs.disabledSources
         val current = pref.get().toMutableSet()
         val log = StringBuilder()
         fun matches(s: CatalogueSource, q: String): Boolean {
@@ -284,7 +284,7 @@ object AiAgent {
      */
     private suspend fun findManga(title: String): String {
         if (title.isBlank()) return "ОШИБКА: пустое название"
-        val disabled = sourcePrefs.disabledSources().get()
+        val disabled = sourcePrefs.disabledSources.get()
         val sources = sourceManager.getAll().filterIsInstance<CatalogueSource>()
             .filter { it.id.toString() !in disabled }
             .take(8)

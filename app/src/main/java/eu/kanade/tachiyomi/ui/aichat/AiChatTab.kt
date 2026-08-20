@@ -57,7 +57,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.tab.Tab
+import eu.kanade.presentation.util.Tab
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.tachiyomi.data.ai.AiAgent
 import eu.kanade.tachiyomi.data.ai.AiWorkspace
@@ -65,6 +65,9 @@ import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.toast
+import mihon.domain.ocr.service.OcrPreferences
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,8 +162,9 @@ data object AiChatTab : Tab {
                 val attInfo = if (atts.isEmpty()) {
                     null
                 } else {
-                    atts.joinToString("\n") { f ->
-                        when {
+                    val parts = mutableListOf<String>()
+                    for (f in atts) {
+                        parts += when {
                             isImage(f) -> {
                                 val ocr = AiAgent.ocrAttachment(f)
                                 "Картинка ${f.name}: " + (ocr?.let { "распознанный текст: ${it.take(600)}" }
@@ -171,6 +175,7 @@ data object AiChatTab : Tab {
                             else -> "Бинарный файл ${f.name} (${f.length() / 1024} КБ) — сохранён в workspace/inbox"
                         }
                     }
+                    parts.joinToString("\n")
                 }
                 val reply = AiAgent.run(context, text.ifBlank { "Опиши вложения" }, attInfo, history.map { it.role to it.text })
                 withContext(Dispatchers.Main) {
@@ -249,7 +254,7 @@ data object AiChatTab : Tab {
     @Composable
     private fun SettingsBody(modifier: Modifier = Modifier) {
         val context = LocalContext.current
-        val prefs = remember { uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
+        val prefs = remember { Injekt.get<OcrPreferences>() }
         val tabVisiblePref = remember { prefs.aiTabVisible() }
         val serverPref = remember { prefs.aiHttpServer() }
         var serverOn by remember { mutableStateOf(eu.kanade.tachiyomi.data.ai.AiHttpServer.isRunning) }
