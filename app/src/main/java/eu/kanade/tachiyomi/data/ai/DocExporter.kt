@@ -20,7 +20,7 @@ import java.util.zip.ZipOutputStream
  * • PDF — системный android.graphics.pdf.PdfDocument: текст с переносами
  *   (StaticLayout) и картинки, многостраничный A4.
  * • DOCX — это zip с OOXML-файлами; собирается вручную (ZipOutputStream):
- *   [Content_Types].xml + document.xml + relationships + media/*.jpg.
+ *   [Content_Types].xml + document.xml + relationships + media/…jpg.
  *   Открывается Word/WPS/Google Docs — проверенная минимальная структура.
  *
  * Правило (по требованию пользователя): текст без картинок -> и PDF и DOCX
