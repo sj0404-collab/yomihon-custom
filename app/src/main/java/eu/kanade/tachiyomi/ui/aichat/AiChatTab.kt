@@ -184,63 +184,83 @@ data object AiChatTab : Tab {
                     }
                     parts.joinToString("\n")
                 }
-                // Роутинг бэкенда: online (Zen/OpenRouter, полный агент с
-                // инструментами) | local (LLM на телефоне, офлайн) |
-                // runner (полу-онлайн, GitHub-ранер, GGUF)
+                // Роутинг бэкенда. ВАЖНО (жалоба пользователя «почему для
+                // локальной АИ недоступны инструменты»): агентский цикл с
+                // @tool-инструментами теперь ОБЩИЙ — инструменты исполняет
+                // само приложение, а модель (онлайн/локальная/ранер) только
+                // пишет текст. Поэтому у локальной модели ЕСТЬ файлы,
+                // картинки, проверка сайтов и всё остальное.
                 val prefsBk = Injekt.get<OcrPreferences>()
-                when (prefsBk.aiBackend().get()) {
-                    "local" -> {
-                        val modelId = prefsBk.localLlmModel().get()
-                        val model = eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.firstOrNull { it.id == modelId }
-                        val effText = text.ifBlank { "Опиши вложения" } +
-                            (attInfo?.let { "\n\nВложения:\n$it" } ?: "")
-                        val answer = if (model != null && eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, model)) {
-                            eu.kanade.tachiyomi.data.ai.LocalLlm.chat(context, model, effText)
-                        } else null
-                        withContext(Dispatchers.Main) {
-                            push(
-                                Msg(
-                                    "ai",
-                                    answer ?: "Локальная модель не готова: скачайте и протестируйте её во вкладке ⚙ → Локальные LLM",
-                                    model = model?.name ?: "local",
-                                ),
-                            )
-                            busy = false
+                val backendKey = prefsBk.aiBackend().get()
+                val chatFn: (suspend (String, String) -> eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply?)? =
+                    when (backendKey) {
+                        "local" -> {
+                            val modelId = prefsBk.localLlmModel().get()
+                            val model = eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.firstOrNull { it.id == modelId }
+                            if (model != null && eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, model)) {
+                                { p, sys ->
+                                    eu.kanade.tachiyomi.data.ai.LocalLlm
+                                        .chat(context, model, "$sys\n\n$p")
+                                        ?.let {
+                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, model.name)
+                                        }
+                                }
+                            } else {
+                                null // не готова — ниже честное сообщение
+                            }
                         }
-                    }
-                    "runner" -> {
-                        val sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
-                        val session = sessions.firstOrNull()
-                        val effText = text.ifBlank { "Опиши вложения" } +
-                            (attInfo?.let { "\n\nВложения:\n$it" } ?: "")
-                        val answer = session?.let { eu.kanade.tachiyomi.data.ai.RunnerLlm.chat(context, it, effText) }
-                        withContext(Dispatchers.Main) {
-                            push(
-                                Msg(
-                                    "ai",
-                                    answer ?: "Нет живой ранер-сессии: запустите её во вкладке ⚙ → Полу-онлайн LLM",
-                                    model = session?.model ?: "runner",
-                                ),
-                            )
-                            busy = false
+                        "runner" -> {
+                            val session = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context).firstOrNull()
+                            if (session?.url != null) {
+                                { p, sys ->
+                                    eu.kanade.tachiyomi.data.ai.RunnerLlm
+                                        .chat(context, session, "$sys\n\n$p")
+                                        ?.let {
+                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, session.model)
+                                        }
+                                }
+                            } else {
+                                null
+                            }
                         }
+                        else -> { p, sys -> eu.kanade.tachiyomi.data.ai.AiAssistant.chatFull(p, sys, maxTokens = 900) }
                     }
-                    else -> {
-                        val reply = AiAgent.run(context, text.ifBlank { "Опиши вложения" }, attInfo, history.map { it.role to it.text })
-                        withContext(Dispatchers.Main) {
-                            push(
-                                Msg(
-                                    "ai",
-                                    reply.text,
-                                    images = reply.images,
-                                    toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
-                                    reasoning = reply.reasoning,
-                                    model = reply.model,
-                                ),
-                            )
-                            busy = false
-                        }
+                if (chatFn == null) {
+                    withContext(Dispatchers.Main) {
+                        push(
+                            Msg(
+                                "ai",
+                                if (backendKey == "local") {
+                                    "Локальная модель не готова: скачайте её в ⚙ → Локальные LLM и прогоните «Тест»"
+                                } else {
+                                    "Нет живой ранер-сессии: запустите её в ⚙ → Полу-онлайн LLM"
+                                },
+                                model = backendKey,
+                            ),
+                        )
+                        busy = false
                     }
+                    return@launch
+                }
+                val reply = AiAgent.run(
+                    context,
+                    text.ifBlank { "Опиши вложения" },
+                    attInfo,
+                    history.map { it.role to it.text },
+                    chatFn = chatFn,
+                )
+                withContext(Dispatchers.Main) {
+                    push(
+                        Msg(
+                            "ai",
+                            reply.text,
+                            images = reply.images,
+                            toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
+                            reasoning = reply.reasoning,
+                            model = reply.model,
+                        ),
+                    )
+                    busy = false
                 }
             }
         }
@@ -528,41 +548,52 @@ data object AiChatTab : Tab {
                             "fail" -> Text("❌ Тест провален", style = MaterialTheme.typography.bodySmall)
                             "testing" -> Text("⏳ Тестирование…", style = MaterialTheme.typography.bodySmall)
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // НАСТОЯЩИЕ КНОПКИ вместо чипов (по скриншоту: чипы
+                        // выглядели как текст, «Удалить» сплющивалась в
+                        // вертикальный столбик). FlowRow переносит кнопки на
+                        // следующую строку вместо сжатия.
+                        var busyAction by remember(m.id) { mutableStateOf(false) }
+                        androidx.compose.foundation.layout.FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             when {
                                 prog != null -> {}
-                                !installed -> FilterChip(
-                                    selected = false,
-                                    enabled = fits,
+                                !installed -> androidx.compose.material3.FilledTonalButton(
+                                    enabled = fits && !busyAction,
                                     onClick = {
+                                        busyAction = true
                                         scope.launch(Dispatchers.IO) {
                                             eu.kanade.tachiyomi.data.ai.LocalLlm.download(context, m)
+                                            withContext(Dispatchers.Main) { busyAction = false }
                                         }
                                     },
-                                    label = { Text("Скачать") },
-                                )
+                                ) { Text("⬇ Скачать") }
                                 else -> {
-                                    FilterChip(
-                                        selected = false,
+                                    androidx.compose.material3.FilledTonalButton(
+                                        enabled = !busyAction,
                                         onClick = {
+                                            busyAction = true
+                                            probeMessage = "${m.name}: тест запущен, первая загрузка модели " +
+                                                "в память может занять до минуты…"
                                             scope.launch(Dispatchers.IO) {
                                                 val (ok, msg) = eu.kanade.tachiyomi.data.ai.LocalLlm.probe(context, m)
                                                 withContext(Dispatchers.Main) {
                                                     probeMessage = "${m.name}: $msg"
                                                     if (ok) localModelPref.set(m.id)
+                                                    busyAction = false
                                                 }
                                             }
                                         },
-                                        label = { Text("Тест") },
-                                    )
-                                    FilterChip(
-                                        selected = localModelId == m.id,
+                                    ) { Text("▶ Тест") }
+                                    androidx.compose.material3.Button(
+                                        enabled = !busyAction,
                                         onClick = { localModelPref.set(m.id) },
-                                        label = { Text(if (localModelId == m.id) "✓ Активна" else "Выбрать") },
-                                    )
-                                    FilterChip(
-                                        selected = false,
+                                    ) { Text(if (localModelId == m.id) "✓ Активна" else "Выбрать") }
+                                    androidx.compose.material3.OutlinedButton(
+                                        enabled = !busyAction,
                                         onClick = {
+                                            busyAction = true
+                                            context.toast("Упаковка в tar.xz началась (займёт минуты)…")
                                             scope.launch(Dispatchers.IO) {
                                                 val f = eu.kanade.tachiyomi.data.ai.LocalLlm.exportTarXz(context, m)
                                                 withContext(Dispatchers.Main) {
@@ -571,16 +602,18 @@ data object AiChatTab : Tab {
                                                             "Экспорт: ${f.name} (${f.length() / 1048576} МБ, было ${m.sizeMb} МБ)"
                                                         } else "Экспорт не удался",
                                                     )
+                                                    busyAction = false
                                                 }
                                             }
                                         },
-                                        label = { Text("→ tar.xz") },
-                                    )
-                                    FilterChip(
-                                        selected = false,
-                                        onClick = { eu.kanade.tachiyomi.data.ai.LocalLlm.delete(context, m) },
-                                        label = { Text("Удалить") },
-                                    )
+                                    ) { Text("→ tar.xz") }
+                                    androidx.compose.material3.OutlinedButton(
+                                        enabled = !busyAction,
+                                        onClick = {
+                                            eu.kanade.tachiyomi.data.ai.LocalLlm.delete(context, m)
+                                            if (localModelId == m.id) localModelPref.set("")
+                                        },
+                                    ) { Text("🗑 Удалить") }
                                 }
                             }
                         }

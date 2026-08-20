@@ -87,12 +87,25 @@ object AiAgent {
      * модель → выполнение @tool-вызовов → второй запрос модели с
      * результатами → финальный ответ.
      */
+    /**
+     * Функция чата бэкенда: (prompt, systemPrompt) -> ChatReply?.
+     * Позволяет гонять ОДИН И ТОТ ЖЕ агентский цикл с инструментами через
+     * ЛЮБОЙ бэкенд: онлайн (Zen/OpenRouter), ЛОКАЛЬНУЮ модель на телефоне
+     * (LocalLlm) и полу-онлайн ранер (RunnerLlm). Инструменты (@tool)
+     * исполняются самим приложением — модели достаточно уметь писать текст.
+     */
+    private val onlineChat: suspend (String, String) -> AiAssistant.ChatReply? = { p, sys ->
+        AiAssistant.chatFull(p, sys, maxTokens = 900)
+    }
+
     suspend fun run(
         context: Context,
         userText: String,
         attachmentsInfo: String? = null,
         history: List<Pair<String, String>> = emptyList(), // role to content
+        chatFn: (suspend (String, String) -> AiAssistant.ChatReply?)? = null,
     ): AgentReply = withContext(Dispatchers.IO) {
+        val chat = chatFn ?: onlineChat
         val results = mutableListOf<ToolResult>()
         val images = mutableListOf<File>()
 
@@ -105,9 +118,9 @@ object AiAgent {
             append(userText)
         }
 
-        var reply = AiAssistant.chatFull(prompt, SYSTEM_PROMPT, maxTokens = 900)
+        var reply = chat(prompt, SYSTEM_PROMPT)
             ?: return@withContext AgentReply(
-                "Нет ответа от AI-провайдера (сеть/лимиты). Попробуйте ещё раз или смените модель кнопкой над чатом.",
+                "Нет ответа от AI-бэкенда (сеть/лимиты/модель не готова). Попробуйте ещё раз или смените бэкенд в ⚙.",
                 emptyList(), emptyList(),
             )
         var answer = reply.content
@@ -127,10 +140,9 @@ object AiAgent {
             }
             val followUp = "Результаты инструментов:\n" + outputs.joinToString("\n---\n") +
                 "\n\nТеперь дай финальный ответ пользователю (без @tool, если всё сделано)."
-            val next = AiAssistant.chatFull(
+            val next = chat(
                 prompt + "\n\n(твои вызовы выполнены)\n" + followUp,
                 SYSTEM_PROMPT,
-                maxTokens = 900,
             )
             if (next != null) {
                 answer = next.content

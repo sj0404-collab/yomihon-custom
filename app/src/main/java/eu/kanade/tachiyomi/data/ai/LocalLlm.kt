@@ -124,8 +124,14 @@ object LocalLlm {
 
     fun fileOf(context: Context, m: Model): File = File(modelsDir(context), "${m.id}.task")
 
+    /**
+     * Установлена ли модель ЦЕЛИКОМ. Раньше порог был 50% размера — файл,
+     * побитый оборванной/параллельной загрузкой, считался «установленным»,
+     * движок на нём падал и тест проваливался (баг со скриншота).
+     * Теперь: не меньше 97% каталожного размера.
+     */
     fun isInstalled(context: Context, m: Model): Boolean =
-        fileOf(context, m).let { it.isFile && it.length() > m.sizeMb * 1024L * 512L }
+        fileOf(context, m).let { it.isFile && it.length() >= m.sizeMb * 1048576L * 97 / 100 }
 
     // ---- Прогресс скачивания (как у OCR-паков) ----
     private val _progress = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -139,9 +145,19 @@ object LocalLlm {
     private var engine: LlmInference? = null
     private var engineModelId: String? = null
 
+    /** Паки, которые уже качаются — повторные тапы игнорируются. */
+    private val activeDownloads = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     suspend fun download(context: Context, m: Model): Boolean = withContext(Dispatchers.IO) {
         val dst = fileOf(context, m)
         if (isInstalled(context, m)) return@withContext true
+        // ЗАЩИТА ОТ МУЛЬТИТАПА (баг со скриншота: «модель скачивается
+        // несколько раз, если нажать несколько раз»): второй и последующие
+        // вызовы для того же id просто выходят — качает только первый.
+        if (!activeDownloads.add(m.id)) return@withContext false
+        // Битый недокачанный файл (есть, но не прошёл isInstalled) — стираем,
+        // иначе движок инициализируется на мусоре
+        if (dst.isFile) dst.delete()
         val part = File(dst.parentFile, dst.name + ".part")
         var conn: HttpURLConnection? = null
         try {
@@ -160,11 +176,27 @@ object LocalLlm {
                         if (n < 0) break
                         out.write(buf, 0, n)
                         read += n
-                        _progress.value = _progress.value + (m.id to (read.toFloat() / total).coerceIn(0f, 1f))
+                        // Троттлинг: публикуем прогресс только при смене
+                        // процента — иначе UI рекомпозится на каждые 512КБ
+                        // и интерфейс лагает (жалоба пользователя).
+                        val frac = (read.toFloat() / total).coerceIn(0f, 1f)
+                        val prev = _progress.value[m.id] ?: -1f
+                        if ((frac * 100).toInt() != (prev * 100).toInt()) {
+                            _progress.value = _progress.value + (m.id to frac)
+                        }
                     }
                 }
             }
-            part.renameTo(dst)
+            // Валидация ПЕРЕД публикацией: недокачанный файл не переименовываем
+            if (part.length() < m.sizeMb * 1048576L * 97 / 100) {
+                logcat(LogPriority.WARN) {
+                    "LLM download incomplete: ${part.length()} of ~${m.sizeMb}MB for ${m.id}"
+                }
+                part.delete()
+                false
+            } else {
+                part.renameTo(dst)
+            }
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "LLM download failed: ${m.id}" }
             part.delete()
@@ -172,6 +204,7 @@ object LocalLlm {
         } finally {
             conn?.disconnect()
             _progress.value = _progress.value - m.id
+            activeDownloads.remove(m.id)
         }
     }
 
