@@ -76,6 +76,14 @@ object AiAgent {
             "@tool filter_ext {\"hide\":\"подстрока\",\"show\":\"подстрока\"} — скрыть/показать источники по имени/языку\n" +
             "@tool find_manga {\"title\":\"название\"} — найти мангу по включённым источникам, вернёт где реально открывается\n" +
             "@tool zip_workspace {} — упаковать workspace в zip\n" +
+            "ПЛАГИНЫ (самодельные инструменты, без ограничений по количеству):\n" +
+            "@tool plugin_create {\"name\":\"имя\",\"kind\":\"http|prompt\",\"description\":\"что делает\"," +
+            "\"template\":\"https://api...?q={query} ИЛИ текст-инструкция с {input}\"," +
+            "\"method\":\"GET\",\"body\":\"\"} — создать/починить инструмент; после создания вызывай его по имени\n" +
+            "@tool plugin_edit {\"name\":\"имя\",\"template\":\"новый шаблон\"} — исправить плагин (менять можно любое поле)\n" +
+            "@tool plugin_delete {\"name\":\"имя\"} — удалить плагин\n" +
+            "@tool plugin_list {} — список своих плагинов\n" +
+            "Если пользователь просит новый инструмент — СОЗДАЙ его через plugin_create и сразу проверь вызовом.\n" +
             "НЕЙРО-КНИГИ и НЕЙРО-КОМИКСЫ: пиши книгу по главам через append_file " +
             "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
             "Для комикса: сцены текстом в comic/сценарий.md + gen_image на каждый кадр.\n" +
@@ -129,10 +137,10 @@ object AiAgent {
 
         // До 2 раундов инструментов, чтобы не зациклиться
         repeat(2) {
-            val calls = parseToolCalls(answer)
+            val calls = parseToolCalls(context, answer)
             if (calls.isEmpty()) return@repeat
             val outputs = calls.map { call ->
-                val r = runCatching { execute(context, call) }
+                val r = runCatching { execute(context, call, chat) }
                     .getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
                 if (r.fileProduced != null && r.name == "gen_image") images += r.fileProduced
                 results += r
@@ -153,23 +161,91 @@ object AiAgent {
             }
         }
 
-        val cleanText = answer.lines().filterNot { it.trimStart().startsWith("@tool") }
+        val toolLines = parseToolCalls(context, answer).map { it.name }.toSet()
+        val cleanText = answer.lines().filterNot { line ->
+            val t = line.trim().trim('`').trim().removePrefix("@tool ").removePrefix("@").trim()
+            t.substringBefore(' ') in toolLines || line.trimStart().startsWith("@tool")
+        }
             .joinToString("\n").trim().ifBlank { "Готово. Результаты — ниже и в workspace." }
         AgentReply(cleanText, results, images, reasoning = reasoning, model = usedModel)
     }
 
-    private fun parseToolCalls(text: String): List<ToolCall> =
-        text.lines().mapNotNull { line ->
-            val t = line.trim()
-            if (!t.startsWith("@tool ")) return@mapNotNull null
-            val rest = t.removePrefix("@tool ").trim()
-            val space = rest.indexOf(' ')
-            val name = if (space > 0) rest.substring(0, space) else rest
-            val json = if (space > 0) rest.substring(space + 1).trim() else "{}"
-            runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }.getOrNull()
+    /** Имена всех известных инструментов — для «мягкого» синтаксиса без @tool. */
+    private fun knownToolNames(context: Context): Set<String> =
+        setOf(
+            "write_file", "edit_file", "append_file", "read_file", "gen_image",
+            "check_site", "list_ext", "filter_ext", "find_manga", "zip_workspace",
+            "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
+        ) + AiPlugins.list(context).map { it.name }
+
+    /**
+     * Разбор вызовов инструментов. Модели (особенно бесплатные) пишут вызов
+     * как попало — поддерживаем все варианты (баг со скриншота: «@list_ext {}»
+     * без слова @tool уходил в чат сырой строкой, инструмент не выполнялся):
+     *  • @tool list_ext {}      — канонический;
+     *  • @list_ext {}           — без слова tool;
+     *  • list_ext {}            — вообще без @, если имя известно;
+     *  • `@tool list_ext {}`    — в бэктиках/код-блоке.
+     */
+    private fun parseToolCalls(context: Context, text: String): List<ToolCall> {
+        val known = knownToolNames(context)
+        return text.lines().mapNotNull { raw ->
+            var t = raw.trim().trim('`').trim()
+            if (t.isEmpty()) return@mapNotNull null
+            if (t.startsWith("@tool ")) t = t.removePrefix("@tool ").trim()
+            else if (t.startsWith("@")) t = t.removePrefix("@").trim()
+            val space = t.indexOf(' ')
+            val name = (if (space > 0) t.substring(0, space) else t).trim()
+            if (name !in known) return@mapNotNull null
+            val json = if (space > 0) t.substring(space + 1).trim() else "{}"
+            runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }
+                .getOrElse { ToolCall(name, JSONObject()) } // кривой json -> без аргументов
+        }
+    }
+
+    private suspend fun execute(
+        context: Context,
+        call: ToolCall,
+        chatFn: suspend (String, String) -> AiAssistant.ChatReply?,
+    ): ToolResult = when (call.name) {
+        "plugin_create", "plugin_edit" -> {
+            val name = call.args.optString("name")
+            val existing = AiPlugins.get(context, name)
+            if (call.name == "plugin_edit" && existing == null) {
+                ToolResult(call.name, "Плагин «$name» не найден — сначала plugin_create")
+            } else {
+                val p = AiPlugins.Plugin(
+                    name = name,
+                    kind = call.args.optString("kind").ifBlank { existing?.kind ?: "prompt" },
+                    description = call.args.optString("description").ifBlank { existing?.description.orEmpty() },
+                    template = call.args.optString("template").ifBlank { existing?.template.orEmpty() },
+                    method = call.args.optString("method").ifBlank { existing?.method ?: "GET" },
+                    body = call.args.optString("body").ifBlank { existing?.body.orEmpty() },
+                    headers = existing?.headers ?: emptyMap(),
+                )
+                if (p.template.isBlank()) {
+                    ToolResult(call.name, "ОШИБКА: пустой template")
+                } else if (AiPlugins.save(context, p)) {
+                    ToolResult(call.name, "Плагин «${p.name}» (${p.kind}) сохранён. Вызывай: @tool ${p.name} {\"query\":\"...\"} или {\"input\":\"...\"}")
+                } else {
+                    ToolResult(call.name, "ОШИБКА: имя занято встроенным инструментом или некорректно")
+                }
+            }
         }
 
-    private suspend fun execute(context: Context, call: ToolCall): ToolResult = when (call.name) {
+        "plugin_delete" -> {
+            val name = call.args.optString("name")
+            ToolResult("plugin_delete", if (AiPlugins.delete(context, name)) "Плагин «$name» удалён" else "Плагин «$name» не найден")
+        }
+
+        "plugin_list" -> {
+            val ps = AiPlugins.list(context)
+            ToolResult(
+                "plugin_list",
+                if (ps.isEmpty()) "Плагинов нет" else ps.joinToString("\n") { "• ${it.name} (${it.kind}) — ${it.description.take(80)}" },
+            )
+        }
+
         "write_file" -> {
             val name = call.args.optString("name").ifBlank { "note_${System.currentTimeMillis() / 1000}.txt" }
             val content = call.args.optString("content")
@@ -262,7 +338,15 @@ object AiAgent {
             ToolResult("zip_workspace", "Архив: ${AiWorkspace.relPath(context, f)} (${f.length() / 1024} КБ)", f)
         }
 
-        else -> ToolResult(call.name, "Неизвестный инструмент")
+        else -> {
+            // Самодельный плагин? Исполняем его (http или prompt через текущий бэкенд)
+            val plugin = AiPlugins.get(context, call.name)
+            if (plugin != null) {
+                ToolResult(call.name, AiPlugins.execute(context, plugin, call.args, chatFn))
+            } else {
+                ToolResult(call.name, "Неизвестный инструмент")
+            }
+        }
     }
 
     // ---- Реализации инструментов ----

@@ -205,8 +205,12 @@ object AiAssistant {
             // Размышления reasoning-моделей: Zen отдаёт их в «reasoning»
             // (nemotron) или «reasoning_content» (hy3) — проверено живыми
             // запросами. Показываются в AI-чате при включённой опции.
+            // org.json.optString возвращает ЛИТЕРАЛ "null", когда поле есть,
+            // но равно JSON null — из-за этого в чате показывалось «🤔 null»
+            // (баг со скриншота пользователя). Отфильтровываем.
             val reasoning = message?.let { m ->
-                m.optString("reasoning").ifBlank { m.optString("reasoning_content") }
+                m.optString("reasoning").takeIf { it.isNotBlank() && it != "null" }
+                    ?: m.optString("reasoning_content").takeIf { it.isNotBlank() && it != "null" }
             }?.trim()?.ifBlank { null }
             addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
             answer?.let { ChatReply(it, reasoning, model) }

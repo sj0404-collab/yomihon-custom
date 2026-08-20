@@ -282,6 +282,7 @@ data object AiChatTab : Tab {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Чат") })
                 FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Workspace") })
                 FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("⚙") })
+                FilterChip(selected = tab == 3, onClick = { tab = 3 }, label = { Text("🔌 Плагины") })
                 if (tab == 0) {
                     ModelChip()
                     FilterChip(
@@ -391,6 +392,7 @@ data object AiChatTab : Tab {
                     modifier = Modifier.weight(1f),
                 )
                 1 -> WorkspaceBody(modifier = Modifier.weight(1f))
+                3 -> PluginsBody(modifier = Modifier.weight(1f))
                 else -> SettingsBody(modifier = Modifier.weight(1f))
             }
         }
@@ -951,6 +953,134 @@ data object AiChatTab : Tab {
                     )
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun PluginsBody(modifier: Modifier = Modifier) {
+        val context = LocalContext.current
+        var refresh by remember { mutableStateOf(0) }
+        val plugins = remember(refresh) { eu.kanade.tachiyomi.data.ai.AiPlugins.list(context) }
+        var editName by remember { mutableStateOf("") }
+        var editKind by remember { mutableStateOf("prompt") }
+        var editDesc by remember { mutableStateOf("") }
+        var editTemplate by remember { mutableStateOf("") }
+
+        Column(
+            modifier = modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Плагины разработчика", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Самодельные инструменты агента — без ограничений по количеству. " +
+                    "Создаются здесь или прямо в чате: «сделай инструмент, который …» — " +
+                    "агент вызовет plugin_create и сразу проверит. Хранятся в workspace/plugins.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (plugins.isEmpty()) {
+                Text("Плагинов пока нет.", style = MaterialTheme.typography.bodyMedium)
+            }
+            plugins.forEach { p ->
+                androidx.compose.material3.Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                        Text(
+                            "🔌 ${p.name} • ${if (p.kind == "http") "HTTP-запрос" else "Промпт-макрос"}",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        if (p.description.isNotBlank()) {
+                            Text(p.description, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            p.template.take(160),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        androidx.compose.foundation.layout.FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            androidx.compose.material3.OutlinedButton(onClick = {
+                                editName = p.name
+                                editKind = p.kind
+                                editDesc = p.description
+                                editTemplate = p.template
+                            }) { Text("✏ Править") }
+                            androidx.compose.material3.OutlinedButton(onClick = {
+                                context.copyToClipboard("plugin", "@tool ${p.name} {\"input\":\"\"}")
+                            }) { Text("📋 Вызов") }
+                            androidx.compose.material3.OutlinedButton(onClick = {
+                                eu.kanade.tachiyomi.data.ai.AiPlugins.delete(context, p.name)
+                                refresh++
+                            }) { Text("🗑 Удалить") }
+                        }
+                    }
+                }
+            }
+
+            Text("Создать / править вручную", style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(
+                value = editName,
+                onValueChange = { editName = it },
+                label = { Text("Имя (латиницей, без пробелов)") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 1,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = editKind == "prompt",
+                    onClick = { editKind = "prompt" },
+                    label = { Text("Промпт-макрос") },
+                )
+                FilterChip(
+                    selected = editKind == "http",
+                    onClick = { editKind = "http" },
+                    label = { Text("HTTP-запрос") },
+                )
+            }
+            OutlinedTextField(
+                value = editDesc,
+                onValueChange = { editDesc = it },
+                label = { Text("Описание") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 2,
+            )
+            OutlinedTextField(
+                value = editTemplate,
+                onValueChange = { editTemplate = it },
+                label = {
+                    Text(
+                        if (editKind == "http") "URL с {query} и т.п." else "Инструкция с {input}",
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 5,
+            )
+            androidx.compose.material3.Button(
+                onClick = {
+                    val ok = eu.kanade.tachiyomi.data.ai.AiPlugins.save(
+                        context,
+                        eu.kanade.tachiyomi.data.ai.AiPlugins.Plugin(
+                            name = editName,
+                            kind = editKind,
+                            description = editDesc,
+                            template = editTemplate,
+                        ),
+                    )
+                    context.toast(if (ok) "Плагин сохранён" else "Ошибка: имя/шаблон некорректны")
+                    if (ok) {
+                        editName = ""; editDesc = ""; editTemplate = ""
+                        refresh++
+                    }
+                },
+                enabled = editName.isNotBlank() && editTemplate.isNotBlank(),
+            ) { Text("💾 Сохранить плагин") }
+            Spacer(Modifier.height(24.dp))
         }
     }
 
