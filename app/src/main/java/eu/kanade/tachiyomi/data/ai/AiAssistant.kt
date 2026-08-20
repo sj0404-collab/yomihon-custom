@@ -102,7 +102,13 @@ object AiAssistant {
     }
 
     /** Полный ответ модели: текст, «размышления» (reasoning), реальная модель. */
-    data class ChatReply(val content: String, val reasoning: String?, val model: String)
+    data class ChatReply(
+        val content: String,
+        val reasoning: String?,
+        val model: String,
+        /** Токены запроса+ответа (usage.total_tokens; 0 если провайдер не отдал). */
+        val tokens: Int = 0,
+    )
 
     /**
      * Один chat-запрос выбранному провайдеру. null при любой ошибке —
@@ -198,9 +204,11 @@ object AiAssistant {
                 logcat(LogPriority.WARN) { "AI assistant HTTP $code ($model): ${text.take(160)}" }
                 return null
             }
-            val message = JSONObject(text)
+            val root = JSONObject(text)
+            val message = root
                 .optJSONArray("choices")?.optJSONObject(0)
                 ?.optJSONObject("message")
+            val tokens = root.optJSONObject("usage")?.optInt("total_tokens", 0) ?: 0
             val answer = message?.optString("content")?.trim()?.ifBlank { null }
             // Размышления reasoning-моделей: Zen отдаёт их в «reasoning»
             // (nemotron) или «reasoning_content» (hy3) — проверено живыми
@@ -213,7 +221,7 @@ object AiAssistant {
                     ?: m.optString("reasoning_content").takeIf { it.isNotBlank() && it != "null" }
             }?.trim()?.ifBlank { null }
             addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
-            answer?.let { ChatReply(it, reasoning, model) }
+            answer?.let { ChatReply(it, reasoning, model, tokens) }
         } catch (e: Exception) {
             addLog(LogEntry(startedAt, model, userPrompt.take(200), "ОШИБКА: ${e.message?.take(120)}", System.currentTimeMillis() - startedAt))
             logcat(LogPriority.WARN, e) { "AI assistant call failed ($model)" }

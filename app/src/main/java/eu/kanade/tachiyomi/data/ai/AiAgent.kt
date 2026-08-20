@@ -49,7 +49,19 @@ import java.net.URLEncoder
 object AiAgent {
 
     data class ToolCall(val name: String, val args: JSONObject)
-    data class ToolResult(val name: String, val output: String, val fileProduced: File? = null)
+    data class ToolResult(
+        val name: String,
+        val output: String,
+        val fileProduced: File? = null,
+        /** Аргументы вызова (для показа в карточке). */
+        val args: String = "",
+        /** Раунд агентского цикла (1, 2, …). */
+        val round: Int = 0,
+        /** Время исполнения инструмента, мс. */
+        val tookMs: Long = 0,
+        /** ok | error — статус TODO-списка. */
+        val status: String = "ok",
+    )
 
     data class AgentReply(
         val text: String,
@@ -57,6 +69,12 @@ object AiAgent {
         val images: List<File>,
         val reasoning: String? = null,
         val model: String = "",
+        /** Сколько токенов съели все запросы этого хода. */
+        val tokens: Int = 0,
+        /** Полное время хода, мс. */
+        val tookMs: Long = 0,
+        /** Число раундов инструментов. */
+        val rounds: Int = 0,
     )
 
     private val sourceManager: SourceManager by lazy { Injekt.get() }
@@ -126,25 +144,38 @@ object AiAgent {
             append(userText)
         }
 
+        val turnStarted = System.currentTimeMillis()
+        var totalTokens = 0
+        var roundsDone = 0
+
         var reply = chat(prompt, SYSTEM_PROMPT)
             ?: return@withContext AgentReply(
                 "Нет ответа от AI-бэкенда (сеть/лимиты/модель не готова). Попробуйте ещё раз или смените бэкенд в ⚙.",
                 emptyList(), emptyList(),
             )
+        totalTokens += reply.tokens
         var answer = reply.content
         var reasoning = reply.reasoning
         var usedModel = reply.model
 
-        // До 2 раундов инструментов, чтобы не зациклиться
-        repeat(2) {
+        // До 3 раундов инструментов, чтобы не зациклиться
+        for (round in 1..3) {
             val calls = parseToolCalls(context, answer)
-            if (calls.isEmpty()) return@repeat
+            if (calls.isEmpty()) break
+            roundsDone = round
             val outputs = calls.map { call ->
+                val t0 = System.currentTimeMillis()
                 val r = runCatching { execute(context, call, chat) }
-                    .getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
-                if (r.fileProduced != null && r.name == "gen_image") images += r.fileProduced
-                results += r
-                "${r.name}: ${r.output.take(700)}"
+                    .getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}", status = "error") }
+                    .copy(
+                        args = call.args.toString().take(200),
+                        round = round,
+                        tookMs = System.currentTimeMillis() - t0,
+                    )
+                val finalR = if (r.output.startsWith("ОШИБКА")) r.copy(status = "error") else r
+                if (finalR.fileProduced != null && finalR.name == "gen_image") images += finalR.fileProduced
+                results += finalR
+                "${finalR.name}: ${finalR.output.take(700)}"
             }
             val followUp = "Результаты инструментов:\n" + outputs.joinToString("\n---\n") +
                 "\n\nТеперь дай финальный ответ пользователю (без @tool, если всё сделано)."
@@ -153,21 +184,25 @@ object AiAgent {
                 SYSTEM_PROMPT,
             )
             if (next != null) {
+                totalTokens += next.tokens
                 answer = next.content
                 if (next.reasoning != null) reasoning = next.reasoning
                 usedModel = next.model
             } else {
                 answer = outputs.joinToString("\n")
+                break
             }
         }
 
-        val toolLines = parseToolCalls(context, answer).map { it.name }.toSet()
-        val cleanText = answer.lines().filterNot { line ->
-            val t = line.trim().trim('`').trim().removePrefix("@tool ").removePrefix("@").trim()
-            t.substringBefore(' ') in toolLines || line.trimStart().startsWith("@tool")
-        }
-            .joinToString("\n").trim().ifBlank { "Готово. Результаты — ниже и в workspace." }
-        AgentReply(cleanText, results, images, reasoning = reasoning, model = usedModel)
+        val cleanText = stripToolSyntax(context, answer)
+            .ifBlank { "Готово. Результаты — в карточках инструментов ниже и в workspace." }
+        AgentReply(
+            cleanText, results, images,
+            reasoning = reasoning, model = usedModel,
+            tokens = totalTokens,
+            tookMs = System.currentTimeMillis() - turnStarted,
+            rounds = roundsDone,
+        )
     }
 
     /** Имена всех известных инструментов — для «мягкого» синтаксиса без @tool. */
@@ -180,27 +215,64 @@ object AiAgent {
 
     /**
      * Разбор вызовов инструментов. Модели (особенно бесплатные) пишут вызов
-     * как попало — поддерживаем все варианты (баг со скриншота: «@list_ext {}»
-     * без слова @tool уходил в чат сырой строкой, инструмент не выполнялся):
+     * как попало — поддерживаем все варианты (баги со скриншотов):
      *  • @tool list_ext {}      — канонический;
      *  • @list_ext {}           — без слова tool;
      *  • list_ext {}            — вообще без @, если имя известно;
-     *  • `@tool list_ext {}`    — в бэктиках/код-блоке.
+     *  • `@tool list_ext {}`    — в бэктиках/код-блоке;
+     *  • <tool_call>имя<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>
+     *    — XML-стиль, которым laguna пишет вызовы (второй скриншот).
      */
     private fun parseToolCalls(context: Context, text: String): List<ToolCall> {
         val known = knownToolNames(context)
-        return text.lines().mapNotNull { raw ->
+        val out = mutableListOf<ToolCall>()
+
+        // --- XML-стиль: <tool_call>name<arg_key>k</arg_key><arg_value>v</arg_value>…</tool_call>
+        val xmlRe = Regex("<tool_call>(.*?)</tool_call>", RegexOption.DOT_MATCHES_ALL)
+        val argRe = Regex("<arg_key>(.*?)</arg_key>\\s*<arg_value>(.*?)</arg_value>", RegexOption.DOT_MATCHES_ALL)
+        for (m in xmlRe.findAll(text)) {
+            val inner = m.groupValues[1]
+            val name = inner.substringBefore("<arg_key>").trim()
+                .removePrefix("@tool").removePrefix("@").trim()
+            if (name !in known) continue
+            val args = JSONObject()
+            for (am in argRe.findAll(inner)) {
+                args.put(am.groupValues[1].trim(), am.groupValues[2].trim())
+            }
+            out += ToolCall(name, args)
+        }
+
+        // --- Строчные стили
+        for (raw in text.lines()) {
             var t = raw.trim().trim('`').trim()
-            if (t.isEmpty()) return@mapNotNull null
+            if (t.isEmpty() || t.contains("<tool_call>")) continue
             if (t.startsWith("@tool ")) t = t.removePrefix("@tool ").trim()
             else if (t.startsWith("@")) t = t.removePrefix("@").trim()
             val space = t.indexOf(' ')
             val name = (if (space > 0) t.substring(0, space) else t).trim()
-            if (name !in known) return@mapNotNull null
+            if (name !in known) continue
             val json = if (space > 0) t.substring(space + 1).trim() else "{}"
-            runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }
+            out += runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }
                 .getOrElse { ToolCall(name, JSONObject()) } // кривой json -> без аргументов
         }
+        return out
+    }
+
+    /** Убирает из видимого текста все формы tool-вызовов (строчные и XML). */
+    fun stripToolSyntax(context: Context, text: String): String {
+        val known = knownToolNames(context)
+        var cleaned = text.replace(
+            Regex("<tool_call>.*?</tool_call>", RegexOption.DOT_MATCHES_ALL),
+            "",
+        )
+        cleaned = cleaned.lines().filterNot { line ->
+            val t = line.trim().trim('`').trim()
+                .removePrefix("@tool ").removePrefix("@").trim()
+            t.substringBefore(' ') in known && (
+                line.trimStart().startsWith("@") || t.contains("{") || t.substringBefore(' ') == t
+                )
+        }.joinToString("\n")
+        return cleaned.trim()
     }
 
     private suspend fun execute(

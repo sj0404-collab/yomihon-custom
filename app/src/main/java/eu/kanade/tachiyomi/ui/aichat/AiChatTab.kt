@@ -104,13 +104,27 @@ data object AiChatTab : Tab {
             icon = rememberVectorPainter(Icons.Outlined.SmartToy),
         )
 
+    private data class ToolCard(
+        val name: String,
+        val args: String,
+        val output: String,
+        val round: Int,
+        val tookMs: Long,
+        val status: String, // ok | error
+    )
+
     private data class Msg(
         val role: String, // user | ai
         val text: String,
         val images: List<File> = emptyList(),
         val toolLog: String = "",
+        val toolCards: List<ToolCard> = emptyList(),
         val reasoning: String? = null,
         val model: String = "",
+        val tokens: Int = 0,
+        val tookMs: Long = 0,
+        val rounds: Int = 0,
+        val time: Long = System.currentTimeMillis(),
     )
 
     // Держим историю в памяти процесса: вкладку можно покидать и возвращаться
@@ -255,9 +269,14 @@ data object AiChatTab : Tab {
                             "ai",
                             reply.text,
                             images = reply.images,
-                            toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
+                            toolCards = reply.toolResults.map {
+                                ToolCard(it.name, it.args, it.output, it.round, it.tookMs, it.status)
+                            },
                             reasoning = reply.reasoning,
                             model = reply.model,
+                            tokens = reply.tokens,
+                            tookMs = reply.tookMs,
+                            rounds = reply.rounds,
                         ),
                     )
                     busy = false
@@ -859,8 +878,21 @@ data object AiChatTab : Tab {
                 .clickable(enabled = selectMode) { onToggleSelect(index) },
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
+                // Шапка: кто • модель • время • метрики хода
+                val clock = remember(m.time) {
+                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                        .format(java.util.Date(m.time))
+                }
+                val meta = buildString {
+                    append(if (isUser) "Вы" else "Агент")
+                    if (m.model.isNotBlank()) append(" • ").append(m.model)
+                    append(" • ").append(clock)
+                    if (!isUser && m.tookMs > 0) append(" • ").append("%.1fс".format(m.tookMs / 1000f))
+                    if (!isUser && m.tokens > 0) append(" • ").append(m.tokens).append(" ткн")
+                    if (!isUser && m.rounds > 0) append(" • ").append(m.rounds).append(" раунд(а)")
+                }
                 Text(
-                    if (isUser) "Вы" else "Агент" + (if (m.model.isNotBlank()) " • ${m.model}" else ""),
+                    meta,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -888,6 +920,72 @@ data object AiChatTab : Tab {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                // TODO-список хода: карточки инструментов по раундам,
+                // сворачиваемые (по требованию пользователя — не текст в
+                // сообщении, а отдельные структурные блоки)
+                if (m.toolCards.isNotEmpty()) {
+                    var toolsExpanded by remember(index) { mutableStateOf(false) }
+                    val okCount = m.toolCards.count { it.status == "ok" }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Column(Modifier.padding(8.dp)) {
+                            Text(
+                                (if (toolsExpanded) "▼" else "▶") +
+                                    " Инструменты: $okCount/${m.toolCards.size} ✓" +
+                                    (if (m.toolCards.any { it.status == "error" }) " • есть ошибки" else ""),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.clickable { toolsExpanded = !toolsExpanded },
+                            )
+                            if (toolsExpanded) {
+                                var lastRound = 0
+                                m.toolCards.forEach { c ->
+                                    if (c.round != lastRound) {
+                                        lastRound = c.round
+                                        Text(
+                                            "— Раунд ${c.round} —",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 4.dp),
+                                        )
+                                    }
+                                    var cardOpen by remember(index, c.name, c.round) { mutableStateOf(false) }
+                                    Column(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable { cardOpen = !cardOpen }
+                                            .padding(vertical = 2.dp),
+                                    ) {
+                                        Text(
+                                            (if (c.status == "ok") "✅" else "❌") +
+                                                " ${c.name} • ${c.tookMs}мс" +
+                                                (if (cardOpen) "" else " (развернуть)"),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        if (cardOpen) {
+                                            if (c.args.isNotBlank() && c.args != "{}") {
+                                                Text(
+                                                    "аргументы: ${c.args}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            Text(
+                                                c.output.take(600),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 m.images.forEach { img ->
                     ImageThumb(img)
