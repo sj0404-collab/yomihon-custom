@@ -125,6 +125,17 @@ class OcrPreferences(
     // Встроенный HTTP-сервер агента (http://127.0.0.1:8765 и по Wi-Fi)
     fun aiHttpServer() = preferenceStore.getBoolean("pref_ai_http_server", false)
 
+    // GitHub PAT для полу-онлайн LLM-сессий (llm-runner.yml): нужен scope
+    // actions:write на репозиторий. Хранится только на устройстве.
+    fun githubPat() = preferenceStore.getString("pref_github_pat", "")
+
+    // Бэкенд AI-чата: online (Zen/OpenRouter) | local (LLM на телефоне) |
+    // runner (полу-онлайн, GitHub-ранер)
+    fun aiBackend() = preferenceStore.getString("pref_ai_backend", "online")
+
+    // Выбранная локальная модель (id из LocalLlm.CATALOG)
+    fun localLlmModel() = preferenceStore.getString("pref_local_llm_model", "")
+
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 

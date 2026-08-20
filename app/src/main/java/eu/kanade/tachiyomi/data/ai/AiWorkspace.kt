@@ -89,6 +89,26 @@ object AiWorkspace {
         return out
     }
 
+    /**
+     * Бэкап файла перед правкой (чтобы агент «не сломал» файл): копия в
+     * backups/<имя>.<timestamp>. Держим до 5 последних бэкапов на файл.
+     */
+    fun backup(context: Context, f: File): File? {
+        if (!f.isFile) return null
+        val dir = File(root(context), "backups").apply { mkdirs() }
+        val stamp = System.currentTimeMillis() / 1000
+        val dst = File(dir, "${f.name}.$stamp")
+        return runCatching {
+            f.copyTo(dst, overwrite = true)
+            // Ротация: не больше 5 бэкапов на файл
+            dir.listFiles { c -> c.name.startsWith(f.name + ".") }
+                ?.sortedByDescending { it.name }
+                ?.drop(5)
+                ?.forEach { it.delete() }
+            dst
+        }.getOrNull()
+    }
+
     fun delete(context: Context, rel: String): Boolean {
         val f = resolve(context, rel) ?: return false
         return f.deleteRecursively()

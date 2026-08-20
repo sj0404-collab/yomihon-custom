@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -183,19 +184,63 @@ data object AiChatTab : Tab {
                     }
                     parts.joinToString("\n")
                 }
-                val reply = AiAgent.run(context, text.ifBlank { "Опиши вложения" }, attInfo, history.map { it.role to it.text })
-                withContext(Dispatchers.Main) {
-                    push(
-                        Msg(
-                            "ai",
-                            reply.text,
-                            images = reply.images,
-                            toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
-                            reasoning = reply.reasoning,
-                            model = reply.model,
-                        ),
-                    )
-                    busy = false
+                // Роутинг бэкенда: online (Zen/OpenRouter, полный агент с
+                // инструментами) | local (LLM на телефоне, офлайн) |
+                // runner (полу-онлайн, GitHub-ранер, GGUF)
+                val prefsBk = Injekt.get<OcrPreferences>()
+                when (prefsBk.aiBackend().get()) {
+                    "local" -> {
+                        val modelId = prefsBk.localLlmModel().get()
+                        val model = eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.firstOrNull { it.id == modelId }
+                        val effText = text.ifBlank { "Опиши вложения" } +
+                            (attInfo?.let { "\n\nВложения:\n$it" } ?: "")
+                        val answer = if (model != null && eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, model)) {
+                            eu.kanade.tachiyomi.data.ai.LocalLlm.chat(context, model, effText)
+                        } else null
+                        withContext(Dispatchers.Main) {
+                            push(
+                                Msg(
+                                    "ai",
+                                    answer ?: "Локальная модель не готова: скачайте и протестируйте её во вкладке ⚙ → Локальные LLM",
+                                    model = model?.name ?: "local",
+                                ),
+                            )
+                            busy = false
+                        }
+                    }
+                    "runner" -> {
+                        val sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
+                        val session = sessions.firstOrNull()
+                        val effText = text.ifBlank { "Опиши вложения" } +
+                            (attInfo?.let { "\n\nВложения:\n$it" } ?: "")
+                        val answer = session?.let { eu.kanade.tachiyomi.data.ai.RunnerLlm.chat(context, it, effText) }
+                        withContext(Dispatchers.Main) {
+                            push(
+                                Msg(
+                                    "ai",
+                                    answer ?: "Нет живой ранер-сессии: запустите её во вкладке ⚙ → Полу-онлайн LLM",
+                                    model = session?.model ?: "runner",
+                                ),
+                            )
+                            busy = false
+                        }
+                    }
+                    else -> {
+                        val reply = AiAgent.run(context, text.ifBlank { "Опиши вложения" }, attInfo, history.map { it.role to it.text })
+                        withContext(Dispatchers.Main) {
+                            push(
+                                Msg(
+                                    "ai",
+                                    reply.text,
+                                    images = reply.images,
+                                    toolLog = reply.toolResults.joinToString("\n") { "🔧 ${it.name}: ${it.output.take(180)}" },
+                                    reasoning = reply.reasoning,
+                                    model = reply.model,
+                                ),
+                            )
+                            busy = false
+                        }
+                    }
                 }
             }
         }
@@ -239,6 +284,69 @@ data object AiChatTab : Tab {
                                 selectMode = false
                             },
                             label = { Text("Копировать ${selected.value.size}") },
+                        )
+                        // Отправить выделенные сообщения повторно — одним документом
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val textAll = selected.value.sorted()
+                                    .mapNotNull { messages.getOrNull(it)?.text }
+                                    .joinToString("\n\n")
+                                input = textAll
+                                selected.value = emptySet()
+                                selectMode = false
+                            },
+                            label = { Text("↻ Повторно") },
+                        )
+                        // Экспорт: PDF всегда; DOCX — если есть картинка (или тоже всегда)
+                        val hasImage = selected.value.any { messages.getOrNull(it)?.images?.isNotEmpty() == true }
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    val items = selected.value.sorted().mapNotNull { idx ->
+                                        val m = messages.getOrNull(idx) ?: return@mapNotNull null
+                                        eu.kanade.tachiyomi.data.ai.DocExporter.Item(
+                                            title = if (m.role == "user") "Вы" else "Агент",
+                                            text = m.text,
+                                            imagePath = m.images.firstOrNull()?.absolutePath,
+                                        )
+                                    }
+                                    val f = eu.kanade.tachiyomi.data.ai.DocExporter.exportPdf(
+                                        context, items, "chat_${System.currentTimeMillis() / 1000}.pdf",
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        context.toast("PDF: ${f.name} (в Workspace/export)")
+                                        selected.value = emptySet()
+                                        selectMode = false
+                                    }
+                                }
+                            },
+                            label = { Text("📄 PDF") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    val items = selected.value.sorted().mapNotNull { idx ->
+                                        val m = messages.getOrNull(idx) ?: return@mapNotNull null
+                                        eu.kanade.tachiyomi.data.ai.DocExporter.Item(
+                                            title = if (m.role == "user") "Вы" else "Агент",
+                                            text = m.text,
+                                            imagePath = m.images.firstOrNull()?.absolutePath,
+                                        )
+                                    }
+                                    val f = eu.kanade.tachiyomi.data.ai.DocExporter.exportDocx(
+                                        context, items, "chat_${System.currentTimeMillis() / 1000}.docx",
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        context.toast("DOCX: ${f.name} (в Workspace/export)")
+                                        selected.value = emptySet()
+                                        selectMode = false
+                                    }
+                                }
+                            },
+                            label = { Text(if (hasImage) "📝 DOCX (с картинкой)" else "📝 DOCX") },
                         )
                     }
                 }
@@ -333,8 +441,213 @@ data object AiChatTab : Tab {
         val serverPref = remember { prefs.aiHttpServer() }
         var serverOn by remember { mutableStateOf(eu.kanade.tachiyomi.data.ai.AiHttpServer.isRunning) }
 
-        Column(modifier = modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val backendPref = remember { prefs.aiBackend() }
+        val backend by backendPref.changes().collectAsState(initial = backendPref.get())
+        val localModelPref = remember { prefs.localLlmModel() }
+        val localModelId by localModelPref.changes().collectAsState(initial = localModelPref.get())
+        val patPref = remember { prefs.githubPat() }
+        val pat by patPref.changes().collectAsState(initial = patPref.get())
+        val llmProgress by eu.kanade.tachiyomi.data.ai.LocalLlm.progress.collectAsState()
+        val probeState by eu.kanade.tachiyomi.data.ai.LocalLlm.probeState.collectAsState()
+        var probeMessage by remember { mutableStateOf("") }
+        var runnerStatus by remember { mutableStateOf("") }
+        var sessions by remember { mutableStateOf(eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)) }
+        val scope = rememberCoroutineScope()
+        val ramGb = remember { eu.kanade.tachiyomi.data.ai.LocalLlm.deviceRamGb(context) }
+
+        Column(
+            modifier = modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text("Настройки AI-агента", style = MaterialTheme.typography.titleMedium)
+
+            // ---- Бэкенд чата ----
+            Text("Бэкенд чата", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = backend == "online",
+                    onClick = { backendPref.set("online") },
+                    label = { Text("☁ Онлайн") },
+                )
+                FilterChip(
+                    selected = backend == "local",
+                    onClick = { backendPref.set("local") },
+                    label = { Text("📱 Локально") },
+                )
+                FilterChip(
+                    selected = backend == "runner",
+                    onClick = { backendPref.set("runner") },
+                    label = { Text("🖥 Ранер") },
+                )
+            }
+            Text(
+                when (backend) {
+                    "local" -> "Чат работает полностью офлайн на модели с телефона (инструменты агента недоступны)"
+                    "runner" -> "Чат идёт через GGUF-модель на GitHub-ранере (сессия до ~5.5 ч)"
+                    else -> "Полный агент: Zen/OpenRouter + инструменты (файлы, картинки, поиск манги)"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // ---- Локальные LLM (по ОЗУ, с тестом) ----
+            Text(
+                "Локальные LLM • у устройства $ramGb ГБ ОЗУ",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.forEach { m ->
+                val fits = m.tier.minRamGb <= ramGb
+                val installed = eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, m)
+                val prog = llmProgress[m.id]
+                val probed = probeState[m.id]
+                androidx.compose.material3.Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                        Text(
+                            "${m.name} • ${m.tier.label}" + if (!fits) " ⛔ не влезет в ОЗУ" else "",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            m.specs + " • ${m.sizeMb} МБ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (prog != null) {
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { prog },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            )
+                            Text("Загрузка ${(prog * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        }
+                        when (probed) {
+                            "ok" -> Text("✅ Тест пройден", style = MaterialTheme.typography.bodySmall)
+                            "fail" -> Text("❌ Тест провален", style = MaterialTheme.typography.bodySmall)
+                            "testing" -> Text("⏳ Тестирование…", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            when {
+                                prog != null -> {}
+                                !installed -> FilterChip(
+                                    selected = false,
+                                    enabled = fits,
+                                    onClick = {
+                                        scope.launch(Dispatchers.IO) {
+                                            eu.kanade.tachiyomi.data.ai.LocalLlm.download(context, m)
+                                        }
+                                    },
+                                    label = { Text("Скачать") },
+                                )
+                                else -> {
+                                    FilterChip(
+                                        selected = false,
+                                        onClick = {
+                                            scope.launch(Dispatchers.IO) {
+                                                val (ok, msg) = eu.kanade.tachiyomi.data.ai.LocalLlm.probe(context, m)
+                                                withContext(Dispatchers.Main) {
+                                                    probeMessage = "${m.name}: $msg"
+                                                    if (ok) localModelPref.set(m.id)
+                                                }
+                                            }
+                                        },
+                                        label = { Text("Тест") },
+                                    )
+                                    FilterChip(
+                                        selected = localModelId == m.id,
+                                        onClick = { localModelPref.set(m.id) },
+                                        label = { Text(if (localModelId == m.id) "✓ Активна" else "Выбрать") },
+                                    )
+                                    FilterChip(
+                                        selected = false,
+                                        onClick = {
+                                            scope.launch(Dispatchers.IO) {
+                                                val f = eu.kanade.tachiyomi.data.ai.LocalLlm.exportTarXz(context, m)
+                                                withContext(Dispatchers.Main) {
+                                                    context.toast(
+                                                        if (f != null) {
+                                                            "Экспорт: ${f.name} (${f.length() / 1048576} МБ, было ${m.sizeMb} МБ)"
+                                                        } else "Экспорт не удался",
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        label = { Text("→ tar.xz") },
+                                    )
+                                    FilterChip(
+                                        selected = false,
+                                        onClick = { eu.kanade.tachiyomi.data.ai.LocalLlm.delete(context, m) },
+                                        label = { Text("Удалить") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (probeMessage.isNotBlank()) {
+                Text(probeMessage, style = MaterialTheme.typography.bodySmall)
+            }
+
+            // ---- Полу-онлайн LLM (GitHub-ранер, GGUF) ----
+            Text("Полу-онлайн LLM (GitHub-ранер, GGUF)", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Модель скачивается в ранер GitHub Actions, телефон подключается к ней по токену. " +
+                    "Нужен PAT с правом actions:write на репозиторий.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = pat,
+                onValueChange = { patPref.set(it) },
+                label = { Text("GitHub PAT") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 1,
+            )
+            eu.kanade.tachiyomi.data.ai.RunnerLlm.GGUF_MODELS.forEach { (key, label) ->
+                FilterChip(
+                    selected = false,
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSession(context, key) { st ->
+                                runnerStatus = st
+                            }
+                            withContext(Dispatchers.Main) {
+                                if (s != null) {
+                                    sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
+                                    backendPref.set("runner")
+                                }
+                            }
+                        }
+                    },
+                    label = { Text("▶ $label") },
+                )
+            }
+            if (runnerStatus.isNotBlank()) {
+                Text(runnerStatus, style = MaterialTheme.typography.bodySmall)
+            }
+            if (sessions.isNotEmpty()) {
+                Text("Сессии (сохранены на телефоне):", style = MaterialTheme.typography.bodySmall)
+                sessions.forEach { s ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${s.model} • ${s.messages.size} сообщ. • ${s.id}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                eu.kanade.tachiyomi.data.ai.RunnerLlm.deleteSession(context, s)
+                                sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
+                            },
+                            label = { Text("✕") },
+                        )
+                    }
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Доступ из внешнего браузера", style = MaterialTheme.typography.bodyLarge)

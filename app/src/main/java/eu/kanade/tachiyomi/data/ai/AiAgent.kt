@@ -67,12 +67,18 @@ object AiAgent {
             "Отвечай кратко и по-русски. У тебя есть ИНСТРУМЕНТЫ. Чтобы вызвать инструмент, " +
             "напиши отдельной строкой: @tool имя {json-аргументы}. Доступные инструменты:\n" +
             "@tool write_file {\"name\":\"путь/файл.txt\",\"content\":\"текст\"} — сохранить файл в workspace\n" +
+            "@tool edit_file {\"name\":\"путь/файл.txt\",\"find\":\"что\",\"replace\":\"чем\"} — правка файла (бэкап создаётся автоматически)\n" +
+            "@tool append_file {\"name\":\"путь/файл.txt\",\"content\":\"текст\"} — дописать в конец (для длинных книг по главам, бэкап автоматически)\n" +
+            "@tool read_file {\"name\":\"путь/файл.txt\"} — прочитать файл workspace (для продолжения без потери контекста)\n" +
             "@tool gen_image {\"prompt\":\"описание на английском\"} — нарисовать картинку (Pollinations)\n" +
             "@tool check_site {\"url\":\"https://...\"} — проверить, работает ли сайт\n" +
             "@tool list_ext {} — список установленных расширений-источников с их доменами\n" +
             "@tool filter_ext {\"hide\":\"подстрока\",\"show\":\"подстрока\"} — скрыть/показать источники по имени/языку\n" +
             "@tool find_manga {\"title\":\"название\"} — найти мангу по включённым источникам, вернёт где реально открывается\n" +
             "@tool zip_workspace {} — упаковать workspace в zip\n" +
+            "НЕЙРО-КНИГИ и НЕЙРО-КОМИКСЫ: пиши книгу по главам через append_file " +
+            "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
+            "Для комикса: сцены текстом в comic/сценарий.md + gen_image на каждый кадр.\n" +
             "Можно несколько @tool в одном ответе. После строк @tool больше ничего не пиши — " +
             "результаты придут следующим сообщением, тогда и ответишь пользователю."
 
@@ -189,6 +195,54 @@ object AiAgent {
         "find_manga" -> {
             val title = call.args.optString("title")
             ToolResult("find_manga", findManga(title))
+        }
+
+        "edit_file" -> {
+            val name = call.args.optString("name")
+            val find = call.args.optString("find")
+            val replace = call.args.optString("replace")
+            val f = AiWorkspace.resolve(context, name)
+            when {
+                f == null || !f.isFile -> ToolResult("edit_file", "ОШИБКА: файл не найден: $name")
+                find.isBlank() -> ToolResult("edit_file", "ОШИБКА: пустой параметр find")
+                else -> {
+                    val original = f.readText()
+                    if (!original.contains(find)) {
+                        ToolResult("edit_file", "Текст «${find.take(60)}» не найден в $name — файл не тронут")
+                    } else {
+                        AiWorkspace.backup(context, f) // бэкап ДО правки
+                        f.writeText(original.replace(find, replace))
+                        ToolResult("edit_file", "Заменено в $name (бэкап в backups/)", f)
+                    }
+                }
+            }
+        }
+
+        "append_file" -> {
+            val name = call.args.optString("name")
+            val content = call.args.optString("content")
+            val f = AiWorkspace.resolve(context, name)
+            if (f == null) {
+                ToolResult("append_file", "ОШИБКА: некорректный путь")
+            } else {
+                if (f.isFile) AiWorkspace.backup(context, f)
+                f.parentFile?.mkdirs()
+                f.appendText(if (f.isFile && f.length() > 0) "\n$content" else content)
+                ToolResult("append_file", "Дописано в $name (теперь ${f.length()} байт)", f)
+            }
+        }
+
+        "read_file" -> {
+            val name = call.args.optString("name")
+            val f = AiWorkspace.resolve(context, name)
+            if (f?.isFile == true) {
+                val text = f.readText()
+                // Хвост файла важнее начала: продолжение книги пишется с конца
+                val slice = if (text.length > 3000) "…" + text.takeLast(3000) else text
+                ToolResult("read_file", "Содержимое $name (${f.length()} байт):\n$slice")
+            } else {
+                ToolResult("read_file", "Файл не найден: $name")
+            }
         }
 
         "zip_workspace" -> {

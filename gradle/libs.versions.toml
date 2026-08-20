@@ -53,6 +53,9 @@ kotlinx-serialization = "1.11.0"
 ktlint = "1.8.0"
 leakCanary = "2.14"
 litert = "2.1.6"
+mediapipeGenai = "0.10.35"
+commonsCompress = "1.27.1"
+xz = "1.10"
 logcat = "0.4"
 markdown = "0.43.0"
 material = "1.12.0"
@@ -160,6 +163,9 @@ leakCanary-core = { module = "com.squareup.leakcanary:leakcanary-android", versi
 leakCanary-plumber = { module = "com.squareup.leakcanary:plumber-android", version.ref = "leakCanary" }
 logcat = { module = "com.squareup.logcat:logcat", version.ref = "logcat" }
 litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
+mediapipe-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipeGenai" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
 markdown-coil = { module = "com.mikepenz:multiplatform-markdown-renderer-coil3", version.ref = "markdown" }
 markdown-core = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown" }
 material = { module = "com.google.android.material:material", version.ref = "material" }

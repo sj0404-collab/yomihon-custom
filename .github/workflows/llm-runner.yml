@@ -1,0 +1,94 @@
+name: LLM Runner
+
+# ПОЛУ-ОНЛАЙН LLM: GGUF-модель скачивается В РАНЕР GitHub Actions,
+# llama.cpp поднимает OpenAI-совместимый сервер, cloudflared открывает
+# публичный туннель. URL туннеля и одноразовый токен сессии публикуются
+# в артефакт "endpoint" — приложение забирает их по GitHub-токену и
+# подключается. Сессия живёт до 5.5 часов (лимит job — 6ч).
+#
+# Запуск: workflow_dispatch из приложения (POST /dispatches) с выбором модели.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "GGUF model key"
+        required: true
+        default: "qwen2.5-1.5b"
+        type: choice
+        options:
+          - qwen2.5-0.5b
+          - qwen2.5-1.5b
+          - llama3.2-1b
+          - gemma3-1b
+      session:
+        description: "Session id (random, from the app)"
+        required: true
+        type: string
+
+run-name: "LLM ${{ inputs.model }} (${{ inputs.session }})"
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Download llama.cpp server
+        run: |
+          set -e
+          URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            | python3 -c "import json,sys; r=json.load(sys.stdin); print([a['browser_download_url'] for a in r['assets'] if a['name'].endswith('bin-ubuntu-x64.tar.gz')][0])")
+          curl -sL "$URL" -o llama.tar.gz
+          mkdir llama && tar -xzf llama.tar.gz -C llama --strip-components=1
+          ls llama/bin/ | head
+
+      - name: Download GGUF model
+        run: |
+          set -e
+          case "${{ inputs.model }}" in
+            qwen2.5-0.5b) URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" ;;
+            qwen2.5-1.5b) URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf" ;;
+            llama3.2-1b)  URL="https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf" ;;
+            gemma3-1b)    URL="https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf" ;;
+          esac
+          curl -sL "$URL" -o model.gguf
+          ls -la model.gguf
+
+      - name: Start server + tunnel, publish endpoint
+        run: |
+          set -e
+          # Токен сессии: только приложение с этим токеном сможет говорить с сервером
+          API_KEY=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 32)
+          LD_LIBRARY_PATH=llama/bin ./llama/bin/llama-server -m model.gguf \
+            --host 127.0.0.1 --port 8080 --api-key "$API_KEY" \
+            -c 4096 --threads $(nproc) &
+          sleep 8
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          ./cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate > tunnel.log 2>&1 &
+          for i in $(seq 1 30); do
+            TUNNEL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+            [ -n "$TUNNEL" ] && break
+            sleep 2
+          done
+          [ -z "$TUNNEL" ] && { cat tunnel.log; exit 1; }
+          echo "{\"url\":\"$TUNNEL\",\"api_key\":\"$API_KEY\",\"model\":\"${{ inputs.model }}\",\"session\":\"${{ inputs.session }}\"}" > endpoint.json
+          cat endpoint.json
+          # Проверка: сервер отвечает через туннель
+          sleep 3
+          curl -s -m 20 "$TUNNEL/v1/models" -H "Authorization: Bearer $API_KEY" | head -c 300 || true
+
+      - name: Upload endpoint artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: endpoint-${{ inputs.session }}
+          path: endpoint.json
+          retention-days: 1
+
+      - name: Keep session alive
+        run: |
+          # Держим job до отмены из приложения или таймаута
+          while true; do
+            sleep 300
+            curl -s -m 10 http://127.0.0.1:8080/health > /dev/null || exit 0
+          done
