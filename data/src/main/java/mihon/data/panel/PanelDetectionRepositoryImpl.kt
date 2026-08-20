@@ -30,6 +30,13 @@ import kotlin.system.measureNanoTime
 
 class PanelDetectionRepositoryImpl(
     private val context: Context,
+    /**
+     * Фолбэк-путь к модели: если внешне (ocr_models/panel_detector.tflite)
+     * модель не установлена, app-слой достаёт yolo_seeneva.tflite из
+     * встроенного в APK tar.xz (OfflinePackManager) — детектор работает
+     * из коробки, без скачивания 6МБ.
+     */
+    private val embeddedModelProvider: (suspend () -> String?)? = null,
 ) : PanelDetectionRepository {
 
     private val environment by lazy { Environment.create() }
@@ -39,10 +46,20 @@ class PanelDetectionRepositoryImpl(
 
     private suspend fun getEngine(): YoloPanelDetectionEngine {
         return engineMutex.withLock {
-            engine ?: YoloPanelDetectionEngine(context, environment).also {
-                engine = it
+            engine ?: run {
+                val modelPath = mihon.data.ocr.OcrModelFiles.resolve(context, EXTERNAL_MODEL_PATH)
+                    ?: embeddedModelProvider?.invoke()
+                    ?: error(
+                        "Panel detector model not found: install externally " +
+                            "(ocr_models/panel_detector.tflite) or embedded pack failed",
+                    )
+                YoloPanelDetectionEngine(context, environment, modelPath).also { engine = it }
             }
         }
+    }
+
+    private companion object {
+        const val EXTERNAL_MODEL_PATH = "panel_detector/model.tflite"
     }
 
     override suspend fun detectPanels(
@@ -82,6 +99,7 @@ class PanelDetectionRepositoryImpl(
 private class YoloPanelDetectionEngine(
     private val context: Context,
     environment: Environment,
+    private val modelFilePath: String,
 ) : Closeable {
 
     private val compiledModel: CompiledModel
@@ -107,8 +125,7 @@ private class YoloPanelDetectionEngine(
     private val cacheMutex = Mutex()
 
     init {
-        val modelFile = mihon.data.ocr.OcrModelFiles.resolve(context, MODEL_PATH)
-            ?: error("Panel detector model is not installed externally (expected in ocr_models/panel_detector.tflite)")
+        val modelFile = modelFilePath
 
         val cpuThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
         val options = CompiledModel.Options(Accelerator.CPU).apply {
@@ -745,7 +762,6 @@ private class YoloPanelDetectionEngine(
     }
 
     companion object {
-        private const val MODEL_PATH = "panel_detector/model.tflite"
         private const val INPUT_SIZE = 640
         private const val DETECTION_STRIDE = 6
         private const val PREFERRED_OUTPUT_COUNT = 300

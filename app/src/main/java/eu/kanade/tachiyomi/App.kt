@@ -100,6 +100,17 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         GlobalExceptionHandler.initialize(applicationContext, CrashActivity::class.java)
 
+        // AI-агент из внешнего браузера: если сервер был включён — поднимаем
+        // при старте (лениво, в фоне; сбой не мешает запуску приложения)
+        Thread {
+            runCatching {
+                val ocrPrefs = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                if (ocrPrefs.aiHttpServer().get()) {
+                    eu.kanade.tachiyomi.data.ai.AiHttpServer.start(applicationContext)
+                }
+            }
+        }.apply { name = "ai-http-init"; priority = Thread.MIN_PRIORITY }.start()
+
         // TLS 1.3 support for Android < 10
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Security.insertProviderAt(Conscrypt.newProvider(), 1)

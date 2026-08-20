@@ -710,13 +710,8 @@ class ReaderActivity : BaseActivity() {
             Box(modifier = Modifier.fillMaxSize()) {
                 val isHttpSource = viewModel.getSource() is HttpSource
                 var showTtsDialog by remember { mutableStateOf(false) }
-                var showAiChat by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-                if (showAiChat) {
-                    eu.kanade.presentation.reader.AiChatDialog(
-                        pageContext = autoReadEngine.lastFrameText,
-                        onDismissRequest = { showAiChat = false },
-                    )
-                }
+                // AI-чат перенесён из читалки в отдельную вкладку «AI»
+                // нижней навигации (по требованию пользователя).
                 if (showTtsDialog) {
                     eu.kanade.presentation.reader.TtsSettingsDialog(
                         onDismissRequest = { showTtsDialog = false },
@@ -838,7 +833,7 @@ class ReaderActivity : BaseActivity() {
                         // Настройки озвучки — диалог прямо в читалке, никуда не уходим
                         showTtsDialog = true
                     },
-                    onOpenAiChat = { showAiChat = true },
+
                     onScanRegionChange = { region ->
                         uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().scanRegion().set(region)
                         toast("Область сканирования изменена")

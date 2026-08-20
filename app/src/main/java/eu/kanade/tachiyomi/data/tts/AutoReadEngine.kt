@@ -214,33 +214,37 @@ class AutoReadEngine(
                 // 3.5) Пол говорящих. Приоритет:
                 //  а) ВСТРОЕННЫЙ локальный AI (LocalSpeakerAi) — морфология
                 //     русского текста, работает без сети и без ключей;
-                //  б) Gemini Vision — только если включена опция И задан ключ
-                //     (уточняет по лицам то, что не смогла морфология).
-                // ===== КОНВЕЙЕР «ЧАТ → ГОЛОС» (по требованию пользователя) =====
-                // ШАГ 1: весь текст кадра уходит ассистенту ДО озвучки одним
-                // запросом вместе с репликами ПРОШЛОГО кадра. Модель сама:
-                //   • выбрасывает повторы прошлого кадра (перекрытие скролла),
-                //   • назначает пол каждой оставшейся реплике,
-                //   • возвращает очищенный от OCR-мусора текст.
-                // ШАГ 2: голос читает подготовленный список. Сканирования
-                // нового кадра НЕ будет, пока не проговорены все реплики —
-                // onPageFinished зовётся строго после последней (как и было).
-                // Фолбэк: сбой сети/протокола → локальная морфология,
-                // нечёткая история уже отфильтровала явные дубли.
-                var prepared: List<eu.kanade.tachiyomi.data.ai.AiAssistant.PreparedLine>? = null
+                //  б) AI-конвейер (prepareFrame) — ПАРАЛЛЕЛЬНО, без блокировки.
+                //
+                // БЫСТРОЕ АВТОЧТЕНИЕ (фикс замедления): раньше конвейер
+                // «чат → голос» БЛОКИРОВАЛ старт озвучки до 8 секунд на
+                // каждом кадре (ждали ответа модели). Теперь чтение стартует
+                // МГНОВЕННО с локальной морфологией, а ответ ассистента
+                // подхватывается на лету и применяется к ещё НЕ прочитанным
+                // репликам (пол, чистка, скип дублей). Дубли прошлых кадров
+                // и так режутся локальной нечёткой историей — заглушек нет,
+                // просто больше не ждём сеть.
+                val preparedRef = java.util.concurrent.atomic.AtomicReference<
+                    List<eu.kanade.tachiyomi.data.ai.AiAssistant.PreparedLine>?,
+                    >(null)
                 if (prefs.aiGenderVoices().get() && ordered.isNotEmpty()) {
-                    prepared = eu.kanade.tachiyomi.data.ai.AiAssistant.prepareFrame(
-                        newLines = ordered.map { it.text },
-                        prevLines = prevFrameLines,
-                    )
+                    val newLines = ordered.map { it.text }
+                    val prevSnapshot = prevFrameLines
+                    scope.launch {
+                        preparedRef.set(
+                            eu.kanade.tachiyomi.data.ai.AiAssistant.prepareFrame(
+                                newLines = newLines,
+                                prevLines = prevSnapshot,
+                            ),
+                        )
+                    }
                 }
                 prevFrameLines = ordered.map { it.text }
 
                 val localGenders = LocalSpeakerAi.guessGenders(ordered.map { it.text })
                 val genders = java.util.concurrent.atomic.AtomicReferenceArray<String?>(ordered.size)
                 for (i in ordered.indices) {
-                    // Пол: вердикт ассистента приоритетнее, морфология — фолбэк
-                    genders.set(i, prepared?.getOrNull(i)?.gender ?: localGenders[i])
+                    genders.set(i, localGenders[i])
                 }
                 aiRefine = null
                 // Gemini Vision как ещё один фоновый уточнитель — только с ключом
@@ -280,10 +284,12 @@ class AutoReadEngine(
                 for ((i, region) in ordered.withIndex()) {
                     if (job?.isActive != true) break
 
-                    // Ассистент пометил реплику как повтор прошлого кадра —
-                    // пропускаем БЕЗ озвучки (сразу помечается прочитанной)
-                    val prep = prepared?.getOrNull(i)
+                    // Ответ ассистента подхватывается на лету (если уже
+                    // пришёл): скип дублей, чистый текст, пол. Если ещё не
+                    // пришёл — читаем немедленно локальным конвейером.
+                    val prep = preparedRef.get()?.getOrNull(i)
                     if (prep != null && !prep.speak) continue
+                    if (prep?.gender != null && genders.get(i) == null) genders.set(i, prep.gender)
 
                     // Обновляем статусы: до i — прочитано, i — читается, после — предстоит
                     _frameRegions.value = ordered.mapIndexed { j, r ->
@@ -380,7 +386,7 @@ class AutoReadEngine(
                 TtsSpeaker.stop()
                 return
             }
-            delay(100)
+            delay(40) // быстрый опрос: между репликами нет лишней паузы
         }
     }
 

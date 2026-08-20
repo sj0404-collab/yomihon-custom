@@ -23,7 +23,6 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RecordVoiceOver
-import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -222,16 +221,8 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.DocumentScanner, contentDescription = "Порядок чтения")
                                     }
                                 }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("AI-чат по странице  ", style = MaterialTheme.typography.labelMedium)
-                                    SmallFloatingActionButton(onClick = {
-                                        beepAction()
-                                        menuOpen = false
-                                        onOpenAiChat()
-                                    }) {
-                                        Icon(Icons.Outlined.SmartToy, contentDescription = "AI-чат")
-                                    }
-                                }
+                                // AI-чат убран из читалки: теперь он —
+                                // отдельная вкладка «AI» в нижней навигации.
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Озвучка (TTS)  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {

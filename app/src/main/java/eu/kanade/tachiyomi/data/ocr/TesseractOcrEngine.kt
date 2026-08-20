@@ -84,12 +84,17 @@ class TesseractOcrEngine(private val context: Context) {
 
         runCatching {
             TessBaseAPI().apply {
-                if (!init(root.absolutePath, wantLangs)) {
+                // OEM_LSTM_ONLY: только нейросетевой распознаватель — быстрее
+                // и точнее устаревшего legacy-движка на текстах манги.
+                if (!init(root.absolutePath, wantLangs, TessBaseAPI.OEM_LSTM_ONLY)) {
                     recycle()
                     error("Tesseract init failed for langs=$wantLangs")
                 }
                 pageSegMode = psmOf(wantPsm)
                 setVariable("preserve_interword_spaces", "1")
+                // Не пытаться распознавать инвертированный текст вторым
+                // проходом — экономит до ~30% времени на кадр.
+                setVariable("tessedit_do_invert", "0")
             }
         }.onFailure {
             logcat(LogPriority.ERROR, it) { "Tesseract init failed" }

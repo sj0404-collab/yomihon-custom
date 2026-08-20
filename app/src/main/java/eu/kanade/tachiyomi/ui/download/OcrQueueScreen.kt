@@ -517,6 +517,21 @@ object OcrQueueScreen : Screen() {
                 InfoWidget(text = stringResource(MR.strings.zen_free_status_label))
             }
 
+            run {
+                val aiTabPref = remember { ocrPreferences.aiTabVisible() }
+                val aiTabVisible by aiTabPref.changes().collectAsState(initial = aiTabPref.get())
+                SwitchPreferenceWidget(
+                    checked = aiTabVisible,
+                    title = "Вкладка «AI» в нижней панели",
+                    subtitle = if (aiTabVisible) {
+                        "Встроенный AI-агент виден в навигации"
+                    } else {
+                        "Скрыта — агент доступен через внешний браузер (порт 8765)"
+                    },
+                    onCheckedChanged = aiTabPref::set,
+                )
+            }
+
             PreferenceGroupHeader(title = stringResource(MR.strings.pref_token_usage))
             InfoWidget(text = stringResource(MR.strings.token_indicator_label, tokenCount))
             SwitchPreferenceWidget(

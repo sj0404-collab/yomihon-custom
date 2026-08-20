@@ -117,6 +117,14 @@ class OcrPreferences(
     // Провайдер: zen (без ключа) | openrouter (нужен ключ)
     fun aiProvider() = preferenceStore.getString("pref_ai_provider", "zen")
 
+    // Вкладка «AI» в нижней навигации: показать/скрыть. Агент при скрытой
+    // вкладке остаётся доступен из внешнего браузера (порт 8765), если
+    // включён встроенный сервер.
+    fun aiTabVisible() = preferenceStore.getBoolean("pref_ai_tab_visible", true)
+
+    // Встроенный HTTP-сервер агента (http://127.0.0.1:8765 и по Wi-Fi)
+    fun aiHttpServer() = preferenceStore.getBoolean("pref_ai_http_server", false)
+
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 

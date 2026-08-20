@@ -81,10 +81,20 @@ object HomeScreen : Screen() {
         HistoryTab,
         BrowseTab,
         eu.kanade.tachiyomi.ui.webbrowser.BrowserTab,
+        eu.kanade.tachiyomi.ui.aichat.AiChatTab,
         // DictionaryTab скрыт из нижней навигации («в дальний ящик»):
         // словарь доступен из Ещё → Настройки → Словарь
         MoreTab,
     )
+
+    /** Видимые вкладки: «AI» можно скрыть в её же настройках (агент тогда
+     *  доступен из внешнего браузера через встроенный сервер). */
+    @Composable
+    private fun visibleTabs(): List<cafe.adriel.voyager.navigator.tab.Tab> {
+        val prefs = remember { Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
+        val aiVisible by prefs.aiTabVisible().collectAsState()
+        return if (aiVisible) TABS else TABS.filter { it !is eu.kanade.tachiyomi.ui.aichat.AiChatTab }
+    }
 
     @Composable
     override fun Content() {
@@ -97,11 +107,12 @@ object HomeScreen : Screen() {
         ) { tabNavigator ->
             // Provide usable navigator to content screen
             CompositionLocalProvider(LocalNavigator provides navigator) {
+                val tabsToShow = visibleTabs()
                 Scaffold(
                     startBar = {
                         if (isTabletUi()) {
                             NavigationRail {
-                                TABS.fastForEach {
+                                tabsToShow.fastForEach {
                                     NavigationRailItem(it)
                                 }
                             }
@@ -118,7 +129,7 @@ object HomeScreen : Screen() {
                                 exit = shrinkVertically(),
                             ) {
                                 NavigationBar {
-                                    TABS.fastForEach {
+                                    tabsToShow.fastForEach {
                                         NavigationBarItem(it)
                                     }
                                 }

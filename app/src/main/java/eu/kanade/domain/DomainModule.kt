@@ -319,6 +319,16 @@ class DomainModule : InjektModule {
         addSingletonFactory<PanelDetectionRepository> {
             PanelDetectionRepositoryImpl(
                 context = get<Application>(),
+                // Фолбэк: YOLO-модель из встроенного в APK tar.xz —
+                // детектор панелей/баллонов работает без скачивания
+                embeddedModelProvider = {
+                    val app = get<Application>()
+                    eu.kanade.tachiyomi.data.ocr.OfflinePackManager
+                        .activate(app, eu.kanade.tachiyomi.data.ocr.OfflinePackManager.PACK_YOLO)
+                        ?.listFiles()
+                        ?.firstOrNull { it.extension == "tflite" }
+                        ?.absolutePath
+                },
             )
         }
         addFactory { DetectPanels(get()) }
