@@ -1,5 +1,6 @@
 package eu.kanade.presentation.reader.appbars
 
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
@@ -19,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import mihon.domain.ocr.model.OcrModel
@@ -114,10 +116,21 @@ fun ReaderTopBar(
 
 @Composable
 private fun OcrModelQuickSwitcher() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { Injekt.get<OcrPreferences>() }
     val modelPref = remember { prefs.ocrModel() }
     val current by modelPref.changes().collectAsState(initial = modelPref.get())
     var open by remember { mutableStateOf(false) }
+    val progressMap by eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.progress.collectAsState()
+    // Ключ перерисовки статусов установки после скачивания/удаления
+    var refresh by remember { mutableStateOf(0) }
+
+    /** Пак моделей, который нужен движку (null = скачивать нечего). */
+    fun packOf(model: OcrModel): String? = when (model) {
+        OcrModel.FAST -> "manga_ocr_fast"
+        OcrModel.LEGACY -> "manga_ocr"
+        else -> null
+    }
 
     IconButton(onClick = { open = true }) {
         Icon(
@@ -136,14 +149,59 @@ private fun OcrModelQuickSwitcher() {
             OcrModel.OPENROUTER,
             OcrModel.GOOGLE,
         ).forEach { model ->
+            val pack = packOf(model)
+            val installed = remember(model, refresh) {
+                pack == null || eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack)
+            }
+            val downloading = pack != null && progressMap.containsKey(pack)
+            val subtitle = when {
+                downloading -> "загрузка ${(progressMap[pack]!! * 100).toInt()}%"
+                model == OcrModel.TESSERACT -> "офлайн • модели в APK"
+                pack != null && !installed -> "локальная • нажмите, чтобы скачать"
+                pack != null -> "локальная • скачана ✅"
+                model == OcrModel.OWOCR -> "внешний сервер OwOCR (ПК, WebSocket)"
+                model == OcrModel.OPENROUTER || model == OcrModel.GOOGLE -> "онлайн • нужен API-ключ"
+                else -> "онлайн • без ключа"
+            }
             DropdownMenuItem(
-                text = { Text(stringResource(model.titleRes)) },
+                text = {
+                    androidx.compose.foundation.layout.Column {
+                        Text(stringResource(model.titleRes))
+                        if (subtitle != null) {
+                            Text(
+                                subtitle,
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
                 leadingIcon = {
-                    RadioButton(selected = current == model, onClick = null)
+                    if (downloading) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            progress = { progressMap[pack]!! },
+                            modifier = Modifier.size(22.dp),
+                        )
+                    } else {
+                        RadioButton(selected = current == model, onClick = null)
+                    }
                 },
                 onClick = {
-                    modelPref.set(model)
-                    open = false
+                    when {
+                        downloading -> Unit // уже качается — ждём
+                        !installed && pack != null -> {
+                            // Локальной модели нет: запускаем скачивание,
+                            // по успеху движок включается автоматически
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, pack) { ok ->
+                                refresh++
+                                if (ok) modelPref.set(model)
+                            }
+                        }
+                        else -> {
+                            modelPref.set(model)
+                            open = false
+                        }
+                    }
                 },
             )
         }

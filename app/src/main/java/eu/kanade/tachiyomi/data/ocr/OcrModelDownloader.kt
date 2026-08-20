@@ -104,6 +104,31 @@ object OcrModelDownloader {
     private val downloadMutex = Mutex()
     private val activePacks = mutableSetOf<String>()
 
+    /**
+     * ЖИВОЙ ИНДИКАТОР загрузки (по требованию пользователя): pack -> прогресс.
+     *  0f..1f  — идёт загрузка (доля скачанных байт всех файлов пака);
+     *  null    — пак не качается (установлен или не тронут).
+     * UI подписывается на flow и рисует LinearProgressIndicator с процентами.
+     */
+    private val _progress = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Float>>(emptyMap())
+    val progress: kotlinx.coroutines.flow.StateFlow<Map<String, Float>> = _progress
+
+    private fun setProgress(pack: String, value: Float?) {
+        _progress.value = if (value == null) {
+            _progress.value - pack
+        } else {
+            _progress.value + (pack to value)
+        }
+    }
+
+    /** Суммарный размер установленных файлов пака в байтах (0 если нет). */
+    fun installedSize(context: Context, pack: String): Long {
+        val paths = PACK_ASSET_PATHS[pack] ?: return 0L
+        return paths.sumOf { p ->
+            OcrModelFiles.resolve(context, p)?.let { File(it).length() } ?: 0L
+        }
+    }
+
     fun isPackInstalled(context: Context, pack: String): Boolean {
         val paths = PACK_ASSET_PATHS[pack] ?: return false
         return OcrModelFiles.allInstalled(context, paths)
@@ -143,6 +168,7 @@ object OcrModelDownloader {
                 context.toast("Загрузка моделей началась (${files.size} файл(ов))…")
             }
 
+            setProgress(pack, 0f)
             val ok = try {
                 val baseDir = context.getExternalFilesDir(null)
                     ?.let { File(it, OcrModelFiles.MODELS_DIR) }
@@ -151,13 +177,24 @@ object OcrModelDownloader {
                 if (baseDir == null) {
                     false
                 } else {
-                    files.all { (url, name) -> downloadFile(url, File(baseDir, name)) }
+                    // Прогресс по файлам: каждый файл — своя доля пака,
+                    // внутри файла — по скачанным байтам (Content-Length).
+                    var done = 0
+                    files.all { (url, name) ->
+                        val fileIndex = done
+                        val r = downloadFile(url, File(baseDir, name)) { frac ->
+                            setProgress(pack, (fileIndex + frac) / files.size)
+                        }
+                        done++
+                        r
+                    }
                 }
             } catch (e: Throwable) {
                 logcat(LogPriority.ERROR, e) { "OCR model pack download failed: $pack" }
                 false
             } finally {
                 downloadMutex.withLock { activePacks.remove(pack) }
+                setProgress(pack, null)
             }
 
             withContext(Dispatchers.Main) {
@@ -171,8 +208,13 @@ object OcrModelDownloader {
         }
     }
 
-    private fun downloadFile(url: String, destination: File): Boolean {
+    private fun downloadFile(
+        url: String,
+        destination: File,
+        onProgress: (Float) -> Unit = {},
+    ): Boolean {
         if (destination.isFile && destination.length() > 0) {
+            onProgress(1f)
             return true
         }
 
@@ -189,11 +231,21 @@ object OcrModelDownloader {
                 logcat(LogPriority.WARN) { "Model download HTTP ${connection.responseCode} for $url" }
                 return false
             }
+            val total = connection.contentLengthLong.takeIf { it > 0 }
             connection.inputStream.use { input ->
                 part.outputStream().use { output ->
-                    input.copyTo(output, bufferSize = 256 * 1024)
+                    val buf = ByteArray(256 * 1024)
+                    var read = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                        read += n
+                        if (total != null) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
+                    }
                 }
             }
+            onProgress(1f)
             part.renameTo(destination)
         } catch (e: Throwable) {
             logcat(LogPriority.WARN, e) { "Model file download failed: $url" }

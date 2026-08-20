@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -217,6 +218,74 @@ object OcrQueueScreen : Screen() {
         }
     }
 
+    /**
+     * Строка модельного пака с ЖИВЫМ ИНДИКАТОРОМ (по требованию пользователя):
+     *  • не установлен — кнопка «Скачать» с размером;
+     *  • качается — LinearProgressIndicator с процентами (реальные байты);
+     *  • установлен — галочка, реальный размер на диске, кнопка «Удалить».
+     */
+    @Composable
+    private fun ModelPackRow(
+        pack: String,
+        title: String,
+        sizeHint: String,
+        installed: Boolean,
+        onInstalledChange: (Boolean) -> Unit,
+    ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val progressMap by eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.progress
+            .collectAsState()
+        val progress = progressMap[pack]
+        val downloading = progress != null
+
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        when {
+                            downloading -> "Загрузка… ${(progress!! * 100).toInt()}%"
+                            installed -> {
+                                val bytes = eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
+                                    .installedSize(context, pack)
+                                val mb = if (bytes > 0) "${bytes / 1048576} МБ на диске" else sizeHint
+                                "✅ Установлена • $mb"
+                            }
+                            else -> "$sizeHint • не установлена"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                when {
+                    downloading -> androidx.compose.material3.CircularProgressIndicator(
+                        progress = { progress!! },
+                        modifier = Modifier.padding(8.dp).size(28.dp),
+                    )
+                    installed -> androidx.compose.material3.TextButton(
+                        onClick = {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, pack)
+                            onInstalledChange(false)
+                        },
+                    ) { Text("Удалить") }
+                    else -> androidx.compose.material3.FilledTonalButton(
+                        onClick = {
+                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, pack) { ok ->
+                                onInstalledChange(ok)
+                            }
+                        },
+                    ) { Text("Скачать") }
+                }
+            }
+            if (downloading) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { progress!! },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
+            }
+        }
+    }
+
     // region Вкладка «Распознавание» (OCR + офлайн-модели + очередь)
 
     @Composable
@@ -389,24 +458,12 @@ object OcrQueueScreen : Screen() {
                 var installed by remember(pack) {
                     mutableStateOf(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack))
                 }
-                SwitchPreferenceWidget(
-                    checked = installed,
+                ModelPackRow(
+                    pack = pack,
                     title = label.substringBefore(" •"),
-                    subtitle = if (installed) {
-                        label.substringAfter("• ") + " • установлен"
-                    } else {
-                        label.substringAfter("• ") + " • включите для загрузки"
-                    },
-                    onCheckedChanged = { checked ->
-                        if (checked) {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, pack) { ok ->
-                                installed = ok
-                            }
-                        } else {
-                            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, pack)
-                            installed = false
-                        }
-                    },
+                    sizeHint = label.substringAfter("• "),
+                    installed = installed,
+                    onInstalledChange = { installed = it },
                 )
             }
             ListPreferenceWidget(
@@ -457,62 +514,26 @@ object OcrQueueScreen : Screen() {
                 text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
                     "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
             )
-            SwitchPreferenceWidget(
-                checked = isMangaOcrDown,
-                title = "Manga OCR",
-                subtitle = if (isMangaOcrDown) {
-                    "Точная, ~120 МБ • установлена"
-                } else {
-                    "Точная, ~120 МБ • включите для загрузки"
-                },
-                onCheckedChanged = { checked ->
-                    if (checked) {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr") { ok ->
-                            isMangaOcrDownPref.set(ok)
-                        }
-                    } else {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr")
-                        isMangaOcrDownPref.set(false)
-                    }
-                },
+            ModelPackRow(
+                pack = "manga_ocr",
+                title = "Manga OCR (Legacy) — точный, японский",
+                sizeHint = "~120 МБ",
+                installed = isMangaOcrDown,
+                onInstalledChange = { isMangaOcrDownPref.set(it) },
             )
-            SwitchPreferenceWidget(
-                checked = isFastOcrDown,
-                title = "Fast Manga OCR",
-                subtitle = if (isFastOcrDown) {
-                    "Быстрая, ~30 МБ • установлена"
-                } else {
-                    "Быстрая, ~30 МБ • включите для загрузки"
-                },
-                onCheckedChanged = { checked ->
-                    if (checked) {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "manga_ocr_fast") { ok ->
-                            isFastOcrDownPref.set(ok)
-                        }
-                    } else {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "manga_ocr_fast")
-                        isFastOcrDownPref.set(false)
-                    }
-                },
+            ModelPackRow(
+                pack = "manga_ocr_fast",
+                title = "Fast Manga OCR — быстрый, японский",
+                sizeHint = "~30 МБ",
+                installed = isFastOcrDown,
+                onInstalledChange = { isFastOcrDownPref.set(it) },
             )
-            SwitchPreferenceWidget(
-                checked = isPanelDetectorDown,
-                title = "Panel Detector",
-                subtitle = if (isPanelDetectorDown) {
-                    "YOLO, ~6 МБ • установлена"
-                } else {
-                    "YOLO, ~6 МБ • включите для загрузки"
-                },
-                onCheckedChanged = { checked ->
-                    if (checked) {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.downloadPack(context, "panel_detector") { ok ->
-                            isPanelDetectorDownPref.set(ok)
-                        }
-                    } else {
-                        eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.deletePack(context, "panel_detector")
-                        isPanelDetectorDownPref.set(false)
-                    }
-                },
+            ModelPackRow(
+                pack = "panel_detector",
+                title = "Panel Detector — YOLO-детектор панелей",
+                sizeHint = "~6 МБ",
+                installed = isPanelDetectorDown,
+                onInstalledChange = { isPanelDetectorDownPref.set(it) },
             )
             if (ocrModel == OcrModel.OWOCR) {
                 EditTextPreferenceWidget(
