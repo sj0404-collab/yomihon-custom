@@ -82,8 +82,20 @@ object OnnxTts {
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/sherpa-onnx-1.13.6.aar"
     const val RUNTIME_PACK_ID = "onnx_runtime"
 
+    /**
+     * ВНУТРЕННЯЯ память (filesDir), не external! External storage смонтирован
+     * noexec — System.load оттуда падает с «рантайм не загрузился»
+     * (баг со скриншота пользователя). Из filesDir загрузка разрешена.
+     */
     private fun runtimeDir(context: Context): File =
-        File(context.getExternalFilesDir(null), "onnx_runtime").apply { mkdirs() }
+        File(context.filesDir, "onnx_runtime").apply { mkdirs() }
+
+    /** Миграция: старые .so с external стираем (оттуда не загрузить). */
+    private fun cleanLegacyRuntime(context: Context) {
+        runCatching {
+            File(context.getExternalFilesDir(null), "onnx_runtime").deleteRecursively()
+        }
+    }
 
     fun isRuntimeInstalled(context: Context): Boolean =
         File(runtimeDir(context), "libsherpa-onnx-jni.so").length() > 1_000_000L
@@ -115,6 +127,7 @@ object OnnxTts {
      * ~30МБ, AAR удаляется). Прогресс: 0..0.85 загрузка, 0.85..1 распаковка.
      */
     suspend fun downloadRuntime(context: Context): Boolean = withContext(Dispatchers.IO) {
+        cleanLegacyRuntime(context)
         if (isRuntimeInstalled(context)) return@withContext true
         if (!activeDownloads.add(RUNTIME_PACK_ID)) return@withContext false
         val aar = File(context.cacheDir, "sherpa-onnx.aar")

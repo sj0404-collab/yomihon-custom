@@ -63,19 +63,51 @@ object TtsSpeaker {
 
     private fun prefs(): OcrPreferences = Injekt.get()
 
-    /** Ленивая инициализация системного движка. */
+    /** Пакет движка, которым инициализирован systemTts (для реинита при смене). */
+    private var systemEnginePkg: String? = null
+
+    /**
+     * Ленивая инициализация системного движка. Поддерживает ВЫБОР ДВИЖКА
+     * (по запросу пользователя — как в Zueira's Voice): Google TTS,
+     * RHVoice, Acapela и любой другой установленный. Пустая настройка =
+     * движок по умолчанию системы. При смене движка — переинициализация.
+     */
     private fun ensureSystem(context: Context, onReady: (TextToSpeech?) -> Unit) {
+        val wantEngine = prefs().systemTtsEngine().get().ifBlank { null }
+        if (systemTts != null && systemEnginePkg != wantEngine) {
+            // Пользователь сменил движок — пересоздаём
+            runCatching { systemTts?.shutdown() }
+            systemTts = null
+            systemReady = false
+        }
         systemTts?.let {
             if (systemReady) { onReady(it); return }
         }
         if (systemTts == null) {
-            systemTts = TextToSpeech(context.applicationContext) { status ->
+            systemEnginePkg = wantEngine
+            val listener = TextToSpeech.OnInitListener { status ->
                 systemReady = status == TextToSpeech.SUCCESS
                 onReady(if (systemReady) systemTts else null)
+            }
+            systemTts = if (wantEngine != null) {
+                TextToSpeech(context.applicationContext, listener, wantEngine)
+            } else {
+                TextToSpeech(context.applicationContext, listener)
             }
         } else {
             onReady(null)
         }
+    }
+
+    /** Установленные TTS-движки устройства: (пакет, читаемое имя). */
+    fun installedEngines(context: Context): List<Pair<String, String>> {
+        // Надёжный способ узнать список движков — временный TextToSpeech
+        val probe = runCatching { TextToSpeech(context.applicationContext) {} }.getOrNull()
+        val engines = runCatching {
+            probe?.engines?.map { it.name to it.label }
+        }.getOrNull().orEmpty()
+        runCatching { probe?.shutdown() }
+        return engines
     }
 
     /**

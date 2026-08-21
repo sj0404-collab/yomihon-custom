@@ -806,6 +806,24 @@ data object AiChatTab : Tab {
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
+                        if (s.terminalUrl != null) {
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    // Веб-терминал ранера (ttyd): живые логи
+                                    // llama-server + shell. Логин yomikai,
+                                    // пароль = api_key сессии (в буфер).
+                                    context.copyToClipboard("terminal", "yomikai:${s.apiKey}")
+                                    context.toast("Логин:пароль скопированы (yomikai:ключ)")
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(s.terminalUrl)),
+                                        )
+                                    }
+                                },
+                                label = { Text("🖥 Терминал") },
+                            )
+                        }
                         FilterChip(
                             selected = false,
                             onClick = {

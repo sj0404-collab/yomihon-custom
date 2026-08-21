@@ -37,6 +37,8 @@ object RunnerLlm {
         val model: String,
         var url: String? = null,
         var apiKey: String? = null,
+        /** Веб-терминал ранера (ttyd): живые логи llama-server + shell. */
+        var terminalUrl: String? = null,
         val messages: MutableList<Pair<String, String>> = mutableListOf(), // role -> content
         var createdAt: Long = System.currentTimeMillis(),
     )
@@ -74,6 +76,7 @@ object RunnerLlm {
     private fun toJson(s: Session) = JSONObject()
         .put("id", s.id).put("model", s.model).put("url", s.url ?: "")
         .put("apiKey", s.apiKey ?: "").put("createdAt", s.createdAt)
+        .put("terminalUrl", s.terminalUrl ?: "")
         .put(
             "messages",
             JSONArray().apply {
@@ -86,6 +89,7 @@ object RunnerLlm {
         model = j.getString("model"),
         url = j.optString("url").ifBlank { null },
         apiKey = j.optString("apiKey").ifBlank { null },
+        terminalUrl = j.optString("terminalUrl").ifBlank { null },
         createdAt = j.optLong("createdAt"),
         messages = mutableListOf<Pair<String, String>>().apply {
             val arr = j.optJSONArray("messages") ?: JSONArray()
@@ -149,15 +153,19 @@ object RunnerLlm {
             return@withContext null
         }
 
-        // Ожидание артефакта endpoint-<session>: модель качается в ранер 2-5 мин
+        // Ожидание артефакта endpoint-<session>: модель качается в ранер 2-5 мин.
+        // ЛОГИ ЗАПУСКА (по запросу пользователя): опрашиваем реальный статус
+        // шага workflow и показываем, что именно сейчас происходит.
         onStatus("Ранер скачивает модель (2-5 мин)…")
         val deadline = System.currentTimeMillis() + 8 * 60_000L
         while (System.currentTimeMillis() < deadline) {
             delay(15_000)
+            fetchRunStep(token, session.id)?.let { onStatus(it) }
             val endpoint = fetchEndpointArtifact(token, session.id)
             if (endpoint != null) {
                 session.url = endpoint.first
                 session.apiKey = endpoint.second
+                session.terminalUrl = endpoint.third.ifBlank { null }
                 saveSession(context, session)
                 onStatus("Сессия готова: ${endpoint.first}")
                 return@withContext session
@@ -168,8 +176,52 @@ object RunnerLlm {
         null
     }
 
+    /** Живой статус запуска: имя выполняемого шага джобы llm-runner. */
+    private fun fetchRunStep(token: String, sessionId: String): String? {
+        return runCatching {
+            val runsConn = URL(
+                "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/runs?per_page=5",
+            ).openConnection() as HttpURLConnection
+            runsConn.setRequestProperty("Authorization", "token $token")
+            val body = runsConn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            runsConn.disconnect()
+            val runs = JSONObject(body).getJSONArray("workflow_runs")
+            var runId = -1L
+            for (i in 0 until runs.length()) {
+                val r = runs.getJSONObject(i)
+                if (r.optString("display_title").contains(sessionId)) {
+                    runId = r.getLong("id")
+                    break
+                }
+            }
+            if (runId < 0) return "Ранер в очереди GitHub…"
+            val jobsConn = URL("https://api.github.com/repos/$REPO/actions/runs/$runId/jobs")
+                .openConnection() as HttpURLConnection
+            jobsConn.setRequestProperty("Authorization", "token $token")
+            val jbody = jobsConn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            jobsConn.disconnect()
+            val jobs = JSONObject(jbody).getJSONArray("jobs")
+            if (jobs.length() == 0) return "Ранер стартует…"
+            val job = jobs.getJSONObject(0)
+            if (job.optString("status") == "queued") return "Ранер в очереди…"
+            val steps = job.optJSONArray("steps") ?: return "Ранер работает…"
+            for (i in 0 until steps.length()) {
+                val st = steps.getJSONObject(i)
+                if (st.optString("status") == "in_progress") {
+                    return "▶ " + when (st.optString("name")) {
+                        "Download llama.cpp server" -> "Скачивается llama.cpp…"
+                        "Download GGUF model" -> "Скачивается модель в ранер…"
+                        "Start server, terminal and tunnels" -> "Запуск сервера и туннелей…"
+                        else -> st.optString("name")
+                    }
+                }
+            }
+            "Ранер работает…"
+        }.getOrNull()
+    }
+
     /** Ищет артефакт endpoint-<session>, скачивает zip и достаёт endpoint.json. */
-    private fun fetchEndpointArtifact(token: String, sessionId: String): Pair<String, String>? {
+    private fun fetchEndpointArtifact(token: String, sessionId: String): Triple<String, String, String>? {
         return runCatching {
             val listConn = URL("https://api.github.com/repos/$REPO/actions/artifacts?per_page=20")
                 .openConnection() as HttpURLConnection
@@ -203,7 +255,7 @@ object RunnerLlm {
                 }
             }
             val j = JSONObject(json ?: return null)
-            j.getString("url") to j.getString("api_key")
+            Triple(j.getString("url"), j.getString("api_key"), j.optString("terminal"))
         }.getOrNull()
     }
 

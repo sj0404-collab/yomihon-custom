@@ -898,6 +898,35 @@ object OcrQueueScreen : Screen() {
             }
 
             if (voiceEngine == TtsSpeaker.ENGINE_SYSTEM) {
+                PreferenceGroupHeader(title = "TTS-движок системы")
+                // Выбор движка (как в Zueira's Voice): Google / RHVoice /
+                // Acapela / любой установленный. Список — РЕАЛЬНЫЙ, из
+                // TextToSpeech.engines устройства.
+                run {
+                    val enginePkgPref = remember { ocrPreferences.systemTtsEngine() }
+                    val enginePkg by enginePkgPref.changes().collectAsState(initial = enginePkgPref.get())
+                    val engines = remember { TtsSpeaker.installedEngines(context) }
+                    if (engines.isEmpty()) {
+                        InfoWidget(text = "TTS-движки не найдены. Установите Speech Services by Google или RHVoice.")
+                    } else {
+                        ListPreferenceWidget(
+                            value = enginePkg,
+                            title = "Движок синтеза",
+                            subtitle = engines.firstOrNull { it.first == enginePkg }?.second
+                                ?: "Системный по умолчанию",
+                            icon = null,
+                            entries = buildMap {
+                                put("", "Системный по умолчанию")
+                                engines.forEach { (pkg, label) -> put(pkg, label) }
+                            },
+                            onValueChange = { enginePkgPref.set(it) },
+                        )
+                        InfoWidget(
+                            text = "После смены движка список голосов ниже обновится при следующем " +
+                                "открытии экрана. Голоса RHVoice/Acapela появятся в общем списке.",
+                        )
+                    }
+                }
                 PreferenceGroupHeader(title = "Голоса устройства")
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp),

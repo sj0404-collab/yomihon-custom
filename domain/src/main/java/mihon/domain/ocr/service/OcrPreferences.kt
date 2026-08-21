@@ -139,6 +139,11 @@ class OcrPreferences(
     // ONNX-голос по умолчанию (id из OnnxTts.CATALOG)
     fun onnxVoice() = preferenceStore.getString("pref_onnx_voice", "irina")
 
+    // Пакет системного TTS-движка: "" = движок по умолчанию системы.
+    // Примеры: com.google.android.tts, com.github.olga_yakovleva.rhvoice.android,
+    // com.acapelagroup.android.tts — любой установленный на устройстве.
+    fun systemTtsEngine() = preferenceStore.getString("pref_system_tts_engine", "")
+
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 
