@@ -103,6 +103,9 @@ object AiAgent {
             "@tool plugin_edit {\"name\":\"имя\",\"template\":\"новый шаблон\"} — исправить плагин (менять можно любое поле)\n" +
             "@tool plugin_delete {\"name\":\"имя\"} — удалить плагин\n" +
             "@tool plugin_list {} — список своих плагинов\n" +
+            "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
+            "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
+            "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
             "Если пользователь просит новый инструмент — СОЗДАЙ его через plugin_create и сразу проверь вызовом.\n" +
             "НЕЙРО-КНИГИ и НЕЙРО-КОМИКСЫ: пиши книгу по главам через append_file " +
             "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
@@ -221,6 +224,7 @@ object AiAgent {
             "write_file", "edit_file", "append_file", "read_file", "gen_image",
             "check_site", "list_ext", "filter_ext", "find_manga", "zip_workspace",
             "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
+            "runner_chat", "runner_start", "github_api",
         ) + AiPlugins.list(context).map { it.name }
 
     /**
@@ -290,6 +294,67 @@ object AiAgent {
         call: ToolCall,
         chatFn: suspend (String, String) -> AiAssistant.ChatReply?,
     ): ToolResult = when (call.name) {
+        "runner_chat" -> {
+            val prefsR = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+            if (!prefsR.aiAllowRunner().get()) {
+                ToolResult("runner_chat", "ЗАПРЕЩЕНО настройками: включите «Доступ агента к ранеру» в ⚙ вкладки AI")
+            } else {
+                val text = call.args.optString("text")
+                val session = RunnerLlm.listSessions(context).firstOrNull { it.url != null }
+                when {
+                    text.isBlank() -> ToolResult("runner_chat", "ОШИБКА: пустой text")
+                    session == null -> ToolResult("runner_chat", "Нет живой ранер-сессии — запусти runner_start или вручную в ⚙")
+                    else -> {
+                        val answer = RunnerLlm.chat(context, session, text)
+                        ToolResult("runner_chat", answer ?: "Ранер не ответил (сессия могла умереть)")
+                    }
+                }
+            }
+        }
+
+        "runner_start" -> {
+            val prefsR = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+            if (!prefsR.aiAllowRunner().get()) {
+                ToolResult("runner_start", "ЗАПРЕЩЕНО настройками: включите «Доступ агента к ранеру» в ⚙ вкладки AI")
+            } else {
+                val model = call.args.optString("model").ifBlank { "qwen2.5-0.5b" }
+                val osArg = call.args.optString("os").ifBlank { "linux" }
+                var last = ""
+                val session = RunnerLlm.startSession(context, model, { st -> last = st }, osArg)
+                if (session != null) {
+                    ToolResult("runner_start", "Сессия запущена: ${session.model} @${session.os}, url=${session.url}")
+                } else {
+                    ToolResult("runner_start", "Не удалось запустить: $last")
+                }
+            }
+        }
+
+        "github_api" -> {
+            val prefsR = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+            if (!prefsR.aiAllowGithub().get()) {
+                ToolResult("github_api", "ЗАПРЕЩЕНО настройками: включите «Доступ агента к GitHub» в ⚙ вкладки AI")
+            } else {
+                val token = prefsR.githubPat().get()
+                val path = call.args.optString("path")
+                when {
+                    token.isBlank() -> ToolResult("github_api", "PAT не привязан: задайте его в ⚙ вкладки AI")
+                    !path.startsWith("/") -> ToolResult("github_api", "ОШИБКА: path должен начинаться с /")
+                    else -> runCatching {
+                        val conn = URL("https://api.github.com$path").openConnection() as HttpURLConnection
+                        conn.connectTimeout = 15_000
+                        conn.readTimeout = 30_000
+                        conn.setRequestProperty("Authorization", "token $token")
+                        conn.setRequestProperty("Accept", "application/vnd.github+json")
+                        val code = conn.responseCode
+                        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                            ?.use { it.readBytes().toString(Charsets.UTF_8) }.orEmpty()
+                        conn.disconnect()
+                        ToolResult("github_api", "HTTP $code:\n" + body.take(1200))
+                    }.getOrElse { ToolResult("github_api", "ОШИБКА: ${it.message?.take(120)}") }
+                }
+            }
+        }
+
         "plugin_create", "plugin_edit" -> {
             val name = call.args.optString("name")
             val existing = AiPlugins.get(context, name)

@@ -132,8 +132,30 @@ data object AiChatTab : Tab {
         val sourcePrompt: String = "",
     )
 
-    // Держим историю в памяти процесса: вкладку можно покидать и возвращаться
-    private val history = mutableListOf<Msg>()
+    // ===== ФИКС потери истории и «сброса модели» (жалоба пользователя) =====
+    // Раньше: messages жили в remember{} КОМПОЗИЦИИ, а ответ пушился через
+    // rememberCoroutineScope. Уход со вкладки (или сворачивание приложения)
+    // отменял scope и УБИВАЛ корутину с ответом — в истории оставался только
+    // текст пользователя, как будто агент и не отвечал. Теперь:
+    //  • история — StateFlow в object (живёт, пока жив процесс);
+    //  • отправка — в GlobalScope-подобном SupervisorJob скоупе объекта:
+    //    ответ ДОЙДЁТ и запишется, даже если вкладку покинули;
+    //  • busy — тоже в object: вернулся на вкладку — видно, что агент ещё думает.
+    private val chatScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO,
+    )
+    private val historyFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Msg>>(emptyList())
+    private val busyFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    private fun pushMsg(m: Msg) {
+        historyFlow.value = historyFlow.value + m
+    }
+
+    // Статус запуска ранера — тоже в object: переход по вкладкам или
+    // сворачивание приложения НЕ убивает запуск (жалоба пользователя
+    // «ранер отваливается при переходах»)
+    private val runnerStatusFlow = kotlinx.coroutines.flow.MutableStateFlow("")
+    private val runnerStartingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
 
     @Composable
     override fun Content() {
@@ -141,18 +163,13 @@ data object AiChatTab : Tab {
         val scope = rememberCoroutineScope()
 
         var tab by rememberSaveable { mutableStateOf(0) } // 0=чат, 1=workspace, 2=настройки
-        val messages = remember { history.toMutableStateList() }
+        val messages by historyFlow.collectAsState()
         var input by rememberSaveable { mutableStateOf("") }
-        var busy by remember { mutableStateOf(false) }
+        val busy by busyFlow.collectAsState()
         var selectMode by remember { mutableStateOf(false) }
         val selected = remember { mutableStateOf(setOf<Int>()) }
         val attachments = remember { mutableStateOf(listOf<File>()) }
         val listState = rememberLazyListState()
-
-        fun push(m: Msg) {
-            messages.add(m)
-            history.add(m)
-        }
 
         val pickFile = rememberLauncherForActivityResult(
             ActivityResultContracts.GetMultipleContents(),
@@ -180,9 +197,9 @@ data object AiChatTab : Tab {
             val atts = attachments.value
             attachments.value = emptyList()
             input = ""
-            push(Msg("user", text, images = atts.filter { isImage(it) }))
-            busy = true
-            scope.launch(Dispatchers.IO) {
+            pushMsg(Msg("user", text, images = atts.filter { isImage(it) }))
+            busyFlow.value = true
+            chatScope.launch {
                 // Готовим описание вложений для модели: картинки — через OCR,
                 // текстовые файлы — содержимое, бинарные — только метаданные.
                 val attInfo = if (atts.isEmpty()) {
@@ -246,7 +263,7 @@ data object AiChatTab : Tab {
                     }
                 if (chatFn == null) {
                     withContext(Dispatchers.Main) {
-                        push(
+                        pushMsg(
                             Msg(
                                 "ai",
                                 if (backendKey == "local") {
@@ -257,7 +274,7 @@ data object AiChatTab : Tab {
                                 model = backendKey,
                             ),
                         )
-                        busy = false
+                        busyFlow.value = false
                     }
                     return@launch
                 }
@@ -265,11 +282,11 @@ data object AiChatTab : Tab {
                     context,
                     text.ifBlank { "Опиши вложения" },
                     attInfo,
-                    history.map { it.role to it.text },
+                    historyFlow.value.map { it.role to it.text },
                     chatFn = chatFn,
                 )
                 withContext(Dispatchers.Main) {
-                    push(
+                    pushMsg(
                         Msg(
                             "ai",
                             reply.text,
@@ -286,7 +303,7 @@ data object AiChatTab : Tab {
                             sourcePrompt = text,
                         ),
                     )
-                    busy = false
+                    busyFlow.value = false
                 }
             }
         }
@@ -503,7 +520,7 @@ data object AiChatTab : Tab {
         val llmProgress by eu.kanade.tachiyomi.data.ai.LocalLlm.progress.collectAsState()
         val probeState by eu.kanade.tachiyomi.data.ai.LocalLlm.probeState.collectAsState()
         var probeMessage by remember { mutableStateOf("") }
-        var runnerStatus by remember { mutableStateOf("") }
+        val runnerStatus by runnerStatusFlow.collectAsState()
         var sessions by remember { mutableStateOf(eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)) }
         val scope = rememberCoroutineScope()
         val ramGb = remember { eu.kanade.tachiyomi.data.ai.LocalLlm.deviceRamGb(context) }
@@ -714,23 +731,75 @@ data object AiChatTab : Tab {
                 modifier = Modifier.fillMaxWidth(),
                 maxLines = 1,
             )
+            // ДОСТУП ЛЮБОЙ AI-МОДЕЛИ к ранеру и GitHub (по запросу
+            // пользователя — «с уточнением с настроек»): выключено по
+            // умолчанию, агент честно сообщает о запрете при попытке.
+            run {
+                val allowRunnerPref = remember { prefs.aiAllowRunner() }
+                val allowRunner by allowRunnerPref.changes().collectAsState(initial = allowRunnerPref.get())
+                val allowGithubPref = remember { prefs.aiAllowGithub() }
+                val allowGithub by allowGithubPref.changes().collectAsState(initial = allowGithubPref.get())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Доступ агента к ранеру", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Любая модель чата сможет запускать сессии (runner_start) и спрашивать LLM на ранере (runner_chat)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = allowRunner,
+                        onCheckedChange = allowRunnerPref::set,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Доступ агента к GitHub", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Инструмент github_api: GET-запросы привязанным токеном (статусы сборок, воркфлоу)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = allowGithub,
+                        onCheckedChange = allowGithubPref::set,
+                    )
+                }
+            }
             // Неотзывчивость кнопок (жалоба): FilterChip не давал никакого
             // фидбека до первого сетевого статуса (секунды). Теперь —
             // настоящие кнопки, мгновенный статус и блокировка на время
             // запуска (заодно защита от даблтапа).
-            var runnerStarting by remember { mutableStateOf(false) }
+            val runnerStarting by runnerStartingFlow.collectAsState()
+            // ОС ранера: linux (быстрее старт) или windows (по запросу)
+            var runnerOs by rememberSaveable { mutableStateOf("linux") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = runnerOs == "linux",
+                    onClick = { runnerOs = "linux" },
+                    label = { Text("🐧 Linux") },
+                )
+                FilterChip(
+                    selected = runnerOs == "windows",
+                    onClick = { runnerOs = "windows" },
+                    label = { Text("🪟 Windows") },
+                )
+            }
             eu.kanade.tachiyomi.data.ai.RunnerLlm.GGUF_MODELS.forEach { (key, label, sizeMb) ->
                 androidx.compose.material3.FilledTonalButton(
                     enabled = !runnerStarting,
                     onClick = {
-                        runnerStarting = true
-                        runnerStatus = "⏳ Запуск $label…" // мгновенный фидбек
-                        scope.launch(Dispatchers.IO) {
-                            val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSession(context, key) { st ->
-                                runnerStatus = st
-                            }
+                        runnerStartingFlow.value = true
+                        runnerStatusFlow.value = "⏳ Запуск $label…" // мгновенный фидбек
+                        val appCtx = context.applicationContext
+                        chatScope.launch {
+                            val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSession(appCtx, key, { st ->
+                                runnerStatusFlow.value = st
+                            }, runnerOs)
                             withContext(Dispatchers.Main) {
-                                runnerStarting = false
+                                runnerStartingFlow.value = false
                                 if (s != null) {
                                     sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
                                     backendPref.set("runner")
@@ -753,14 +822,15 @@ data object AiChatTab : Tab {
                 enabled = !runnerStarting && customGguf.trim().startsWith("http") && customGguf.contains(".gguf"),
                 onClick = {
                     val url = customGguf.trim()
-                    runnerStarting = true
-                    runnerStatus = "⏳ Запуск своей модели…"
-                    scope.launch(Dispatchers.IO) {
-                        val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSessionWithUrl(context, url) { st ->
-                            runnerStatus = st
-                        }
+                    runnerStartingFlow.value = true
+                    runnerStatusFlow.value = "⏳ Запуск своей модели…"
+                    val appCtx = context.applicationContext
+                    chatScope.launch {
+                        val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSessionWithUrl(appCtx, url, { st ->
+                            runnerStatusFlow.value = st
+                        }, runnerOs)
                         withContext(Dispatchers.Main) {
-                            runnerStarting = false
+                            runnerStartingFlow.value = false
                             if (s != null) {
                                 sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
                                 backendPref.set("runner")
@@ -770,7 +840,21 @@ data object AiChatTab : Tab {
                 },
             ) { Text("▶ Запустить свою модель в ранере") }
             if (runnerStatus.isNotBlank()) {
-                Text(runnerStatus, style = MaterialTheme.typography.bodySmall)
+                // «Время рывками» (жалоба): статус обновлялся раз в 15с.
+                // Теперь рядом ПЛАВНЫЙ секундомер — тикает каждую секунду.
+                var elapsed by remember { mutableStateOf(0L) }
+                LaunchedEffect(runnerStarting) {
+                    elapsed = 0
+                    while (runnerStarting) {
+                        kotlinx.coroutines.delay(1000)
+                        elapsed++
+                    }
+                }
+                Text(
+                    if (runnerStarting) "$runnerStatus • ${elapsed / 60}:${"%02d".format(elapsed % 60)}"
+                    else runnerStatus,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             if (sessions.isNotEmpty()) {
                 Text("Сессии (сохранены на телефоне):", style = MaterialTheme.typography.bodySmall)
@@ -810,18 +894,20 @@ data object AiChatTab : Tab {
                             FilterChip(
                                 selected = false,
                                 onClick = {
-                                    // Веб-терминал ранера (ttyd): живые логи
-                                    // llama-server + shell. Логин yomikai,
-                                    // пароль = api_key сессии (в буфер).
-                                    context.copyToClipboard("terminal", "yomikai:${s.apiKey}")
-                                    context.toast("Логин:пароль скопированы (yomikai:ключ)")
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(s.terminalUrl)),
-                                        )
-                                    }
+                                    // ВСТРОЕННОЕ окно терминала (по запросу
+                                    // пользователя): консоль ранера прямо в
+                                    // приложении, печатать/искать можно сразу.
+                                    // Авторизация подставляется автоматически.
+                                    context.startActivity(
+                                        RunnerTerminalActivity.newIntent(
+                                            context,
+                                            s.terminalUrl!!,
+                                            "yomikai",
+                                            s.apiKey.orEmpty(),
+                                        ),
+                                    )
                                 },
-                                label = { Text("🖥 Терминал") },
+                                label = { Text("🖥 Терминал (${s.os})") },
                             )
                         }
                         FilterChip(

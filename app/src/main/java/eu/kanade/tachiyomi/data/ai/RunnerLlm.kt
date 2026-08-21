@@ -39,6 +39,8 @@ object RunnerLlm {
         var apiKey: String? = null,
         /** Веб-терминал ранера (ttyd): живые логи llama-server + shell. */
         var terminalUrl: String? = null,
+        /** ОС ранера: linux | windows. */
+        var os: String = "linux",
         val messages: MutableList<Pair<String, String>> = mutableListOf(), // role -> content
         var createdAt: Long = System.currentTimeMillis(),
     )
@@ -77,6 +79,7 @@ object RunnerLlm {
         .put("id", s.id).put("model", s.model).put("url", s.url ?: "")
         .put("apiKey", s.apiKey ?: "").put("createdAt", s.createdAt)
         .put("terminalUrl", s.terminalUrl ?: "")
+        .put("os", s.os)
         .put(
             "messages",
             JSONArray().apply {
@@ -90,6 +93,7 @@ object RunnerLlm {
         url = j.optString("url").ifBlank { null },
         apiKey = j.optString("apiKey").ifBlank { null },
         terminalUrl = j.optString("terminalUrl").ifBlank { null },
+        os = j.optString("os").ifBlank { "linux" },
         createdAt = j.optLong("createdAt"),
         messages = mutableListOf<Pair<String, String>>().apply {
             val arr = j.optJSONArray("messages") ?: JSONArray()
@@ -109,13 +113,15 @@ object RunnerLlm {
         context: Context,
         modelKey: String,
         onStatus: (String) -> Unit,
-    ): Session? = startSessionInternal(context, modelKey, "", onStatus)
+        os: String = "linux",
+    ): Session? = startSessionInternal(context, modelKey, "", onStatus, os)
 
     private suspend fun startSessionInternal(
         context: Context,
         modelKey: String,
         customUrl: String,
         onStatus: (String) -> Unit,
+        os: String = "linux",
     ): Session? = withContext(Dispatchers.IO) {
         val token = prefs().githubPat().get()
         if (token.isBlank()) {
@@ -125,6 +131,7 @@ object RunnerLlm {
         val session = Session(
             id = "s" + System.currentTimeMillis().toString(36) + (1000..9999).random(),
             model = modelKey,
+            os = os,
         )
         onStatus("Запуск ранера…")
         val dispatched = runCatching {
@@ -141,7 +148,8 @@ object RunnerLlm {
                     JSONObject()
                         .put("model", modelKey)
                         .put("session", session.id)
-                        .put("custom_url", customUrl),
+                        .put("custom_url", customUrl)
+                        .put("os", os),
                 )
             conn.outputStream.use { it.write(body.toString().toByteArray()) }
             val ok = conn.responseCode in 200..299
@@ -349,5 +357,6 @@ object RunnerLlm {
         context: Context,
         ggufUrl: String,
         onStatus: (String) -> Unit,
-    ): Session? = startSessionInternal(context, "custom", ggufUrl, onStatus)
+        os: String = "linux",
+    ): Session? = startSessionInternal(context, "custom", ggufUrl, onStatus, os)
 }

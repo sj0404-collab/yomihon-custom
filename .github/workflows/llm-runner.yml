@@ -3,12 +3,13 @@ name: LLM Runner
 # ПОЛУ-ОНЛАЙН LLM: GGUF-модель скачивается В РАНЕР GitHub Actions,
 # llama.cpp поднимает OpenAI-совместимый сервер, cloudflared открывает
 # публичный туннель. URL туннеля и одноразовый токен сессии публикуются
-# в артефакт "endpoint" — приложение забирает их по GitHub-токену и
-# подключается. Сессия живёт до 5.5 часов (лимит job — 6ч).
+# в артефакт "endpoint" — приложение забирает их по GitHub-токену.
 #
-# Дополнительно (по запросу пользователя): ВЕБ-ТЕРМИНАЛ ранера (ttyd) во
-# втором туннеле — живые логи llama-server и shell прямо из браузера
-# (аналог VNC/RDP для консоли, т.к. GUI на ранере нет).
+# По запросу пользователя:
+#  • ВЫБОР ОС ранера: linux (ubuntu) или windows — «открыть его ранер сам,
+#    будь то линукс либо виндовс»;
+#  • веб-терминал ttyd в отдельном туннеле: живая консоль ранера из
+#    браузера/приложения — печатать команды, искать, смотреть логи.
 
 on:
   workflow_dispatch:
@@ -33,11 +34,20 @@ on:
         required: false
         default: ""
         type: string
+      os:
+        description: "Runner OS"
+        required: false
+        default: "linux"
+        type: choice
+        options:
+          - linux
+          - windows
 
-run-name: "LLM ${{ inputs.model }} (${{ inputs.session }})"
+run-name: "LLM ${{ inputs.model }} @${{ inputs.os }} (${{ inputs.session }})"
 
 jobs:
-  serve:
+  serve-linux:
+    if: inputs.os == 'linux'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
@@ -49,13 +59,11 @@ jobs:
           echo "llama.cpp: $URL"
           curl -sL "$URL" -o llama.tar.gz
           mkdir llama && tar -xzf llama.tar.gz -C llama --strip-components=1
-          # Структура релизов менялась (раньше bin/, теперь корень) — ищем бинарь
           SERVER=$(find llama -name llama-server -type f | head -1)
-          [ -z "$SERVER" ] && { echo "llama-server not found in archive:"; find llama -maxdepth 2 | head -30; exit 1; }
+          [ -z "$SERVER" ] && { echo "llama-server not found:"; find llama -maxdepth 2 | head -30; exit 1; }
           echo "SERVER_BIN=$SERVER" >> "$GITHUB_ENV"
           echo "SERVER_DIR=$(dirname "$SERVER")" >> "$GITHUB_ENV"
           chmod +x "$SERVER"
-          echo "found: $SERVER"
 
       - name: Download GGUF model
         run: |
@@ -70,18 +78,15 @@ jobs:
           [ -z "$URL" ] && { echo "no model url"; exit 1; }
           echo "Downloading: $URL"
           curl -sL "$URL" -o model.gguf
-          SIZE_MB=$(( $(stat -c%s model.gguf) / 1048576 ))
-          echo "Model downloaded: ${SIZE_MB} MB"
+          echo "Model downloaded: $(( $(stat -c%s model.gguf) / 1048576 )) MB"
 
       - name: Start server, terminal and tunnels
         run: |
           set -e
           API_KEY=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 32)
-          # llama-server с логом в файл (виден в веб-терминале и в шаге логов)
           LD_LIBRARY_PATH="$SERVER_DIR" "$SERVER_BIN" -m model.gguf \
             --host 127.0.0.1 --port 8080 --api-key "$API_KEY" \
             -c 4096 --threads $(nproc) > llama.log 2>&1 &
-          # ЖДЁМ реальной готовности сервера (загрузка модели в память)
           for i in $(seq 1 60); do
             curl -s -m 3 http://127.0.0.1:8080/health | grep -q '"ok"\|"status"' && break
             sleep 2
@@ -89,11 +94,9 @@ jobs:
           curl -s -m 5 http://127.0.0.1:8080/health || { echo "=== llama.log ==="; tail -50 llama.log; exit 1; }
           echo "llama-server is up"
 
-          # Веб-терминал ttyd (просмотр логов и shell из браузера)
           curl -sL https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 -o ttyd
           chmod +x ttyd
-          TERM_CRED="yomikai:$API_KEY"
-          ./ttyd -p 7681 -c "$TERM_CRED" -W bash -c "tail -f llama.log & exec bash" > ttyd.log 2>&1 &
+          ./ttyd -p 7681 -c "yomikai:$API_KEY" -W bash > ttyd.log 2>&1 &
 
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
@@ -106,9 +109,8 @@ jobs:
             sleep 2
           done
           [ -z "$TUNNEL" ] && { cat tunnel.log; exit 1; }
-          echo "{\"url\":\"$TUNNEL\",\"api_key\":\"$API_KEY\",\"model\":\"${{ inputs.model }}\",\"session\":\"${{ inputs.session }}\",\"terminal\":\"${TERMURL:-}\",\"terminal_user\":\"yomikai\"}" > endpoint.json
+          echo "{\"url\":\"$TUNNEL\",\"api_key\":\"$API_KEY\",\"model\":\"${{ inputs.model }}\",\"session\":\"${{ inputs.session }}\",\"terminal\":\"${TERMURL:-}\",\"terminal_user\":\"yomikai\",\"os\":\"linux\"}" > endpoint.json
           cat endpoint.json
-          # Проверка через туннель
           sleep 3
           curl -s -m 20 "$TUNNEL/v1/models" -H "Authorization: Bearer $API_KEY" | head -c 300 || true
 
@@ -124,6 +126,87 @@ jobs:
           while true; do
             sleep 300
             curl -s -m 10 http://127.0.0.1:8080/health > /dev/null || { echo "server died"; tail -30 llama.log; exit 0; }
-            echo "--- alive $(date -u +%H:%M:%S) --- last llama.log lines:"
+            echo "--- alive $(date -u +%H:%M:%S) ---"
             tail -3 llama.log || true
+          done
+
+  serve-windows:
+    if: inputs.os == 'windows'
+    runs-on: windows-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download llama.cpp server (Windows)
+        run: |
+          set -e
+          URL=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            | python3 -c "import json,sys; r=json.load(sys.stdin); print([a['browser_download_url'] for a in r['assets'] if a['name'].endswith('bin-win-cpu-x64.zip')][0])")
+          echo "llama.cpp: $URL"
+          curl -sL "$URL" -o llama.zip
+          mkdir llama && cd llama && unzip -q ../llama.zip
+          SERVER=$(find . -name llama-server.exe | head -1)
+          [ -z "$SERVER" ] && { echo "llama-server.exe not found:"; find . -maxdepth 2 | head -30; exit 1; }
+          echo "SERVER_BIN=$(pwd)/${SERVER#./}" >> "$GITHUB_ENV"
+
+      - name: Download GGUF model
+        run: |
+          set -e
+          case "${{ inputs.model }}" in
+            qwen2.5-0.5b) URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf" ;;
+            qwen2.5-1.5b) URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf" ;;
+            llama3.2-1b)  URL="https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf" ;;
+            gemma3-1b)    URL="https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf" ;;
+            custom)       URL="${{ inputs.custom_url }}" ;;
+          esac
+          [ -z "$URL" ] && { echo "no model url"; exit 1; }
+          curl -sL "$URL" -o model.gguf
+          echo "Model downloaded: $(( $(stat -c%s model.gguf) / 1048576 )) MB"
+
+      - name: Start server, terminal and tunnels (Windows)
+        run: |
+          set -e
+          API_KEY=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 32)
+          "$SERVER_BIN" -m model.gguf --host 127.0.0.1 --port 8080 \
+            --api-key "$API_KEY" -c 4096 > llama.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s -m 3 http://127.0.0.1:8080/health | grep -q '"ok"\|"status"' && break
+            sleep 2
+          done
+          curl -s -m 5 http://127.0.0.1:8080/health || { echo "=== llama.log ==="; tail -50 llama.log; exit 1; }
+          echo "llama-server is up (Windows)"
+
+          # ttyd Windows: даёт cmd.exe в браузере
+          curl -sL https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.win32.exe -o ttyd.exe
+          ./ttyd.exe -p 7681 -c "yomikai:$API_KEY" -W cmd > ttyd.log 2>&1 &
+
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe -o cloudflared.exe
+          ./cloudflared.exe tunnel --url http://127.0.0.1:8080 --no-autoupdate > tunnel.log 2>&1 &
+          ./cloudflared.exe tunnel --url http://127.0.0.1:7681 --no-autoupdate > tunnel2.log 2>&1 &
+          for i in $(seq 1 40); do
+            TUNNEL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 || true)
+            TERMURL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel2.log | head -1 || true)
+            [ -n "$TUNNEL" ] && [ -n "$TERMURL" ] && break
+            sleep 2
+          done
+          [ -z "$TUNNEL" ] && { cat tunnel.log; exit 1; }
+          echo "{\"url\":\"$TUNNEL\",\"api_key\":\"$API_KEY\",\"model\":\"${{ inputs.model }}\",\"session\":\"${{ inputs.session }}\",\"terminal\":\"${TERMURL:-}\",\"terminal_user\":\"yomikai\",\"os\":\"windows\"}" > endpoint.json
+          cat endpoint.json
+          sleep 3
+          curl -s -m 20 "$TUNNEL/v1/models" -H "Authorization: Bearer $API_KEY" | head -c 300 || true
+
+      - name: Upload endpoint artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: endpoint-${{ inputs.session }}
+          path: endpoint.json
+          retention-days: 1
+
+      - name: Keep session alive
+        run: |
+          while true; do
+            sleep 300
+            curl -s -m 10 http://127.0.0.1:8080/health > /dev/null || { echo "server died"; tail -30 llama.log; exit 0; }
+            echo "--- alive $(date -u +%H:%M:%S) ---"
           done

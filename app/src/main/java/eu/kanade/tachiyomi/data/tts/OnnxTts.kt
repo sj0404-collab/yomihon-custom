@@ -345,6 +345,35 @@ object OnnxTts {
     }
 
     /**
+     * ЖИВАЯ ПРОСОДИЯ (по запросу пользователя: «интонации, тона, тембры,
+     * эмоции»): у VITS/Piper управляемые параметры — скорость и вариативность.
+     * Раньше все фразы синтезировались монотонно с одной скоростью. Теперь:
+     *  • вопрос «?»  — медленнее на 8% (вопросительная интонация читается
+     *    отчётливее) ;
+     *  • восклицание «!» — быстрее на 10% (энергичнее);
+     *  • многоточие «…» — медленнее на 15% (задумчиво);
+     *  • КАПС (крик) — быстрее на 15%;
+     *  • обычные фразы — лёгкая случайная вариация ±3%, чтобы серия реплик
+     *    не звучала конвейером.
+     * Плюс паузы между предложениями добавляет TtsSpeaker (тишина в WAV не
+     * нужна — плеер сам делает паузу между файлами).
+     */
+    fun prosodySpeed(sentence: String, base: Float): Float {
+        val t = sentence.trim()
+        val letters = t.count { it.isLetter() }
+        val upper = t.count { it.isUpperCase() }
+        val isShout = letters >= 4 && upper.toFloat() / letters > 0.7f
+        val mod = when {
+            isShout -> 1.15f
+            t.endsWith("?") || t.endsWith("?!") -> 0.92f
+            t.endsWith("!") -> 1.10f
+            t.endsWith("…") || t.endsWith("...") -> 0.85f
+            else -> 1f + (kotlin.random.Random.nextFloat() - 0.5f) * 0.06f
+        }
+        return (base * mod).coerceIn(0.5f, 2f)
+    }
+
+    /**
      * Синтез в WAV-файл. Возвращает файл или null (движок недоступен/ошибка).
      */
     suspend fun synthesizeToFile(context: Context, v: Voice, text: String, speed: Float = 1f): File? =

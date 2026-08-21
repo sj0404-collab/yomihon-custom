@@ -144,6 +144,16 @@ class OcrPreferences(
     // com.acapelagroup.android.tts — любой установленный на устройстве.
     fun systemTtsEngine() = preferenceStore.getString("pref_system_tts_engine", "")
 
+    // Разрешение агенту (любой модели) пользоваться ранером: запускать
+    // сессии и говорить с моделью на нём. Выключено по умолчанию —
+    // включается в настройках вкладки AI (⚙), как просил пользователь
+    // («с уточнением с настроек»).
+    fun aiAllowRunner() = preferenceStore.getBoolean("pref_ai_allow_runner", false)
+
+    // Разрешение агенту обращаться к GitHub API привязанным PAT-токеном
+    // (список воркфлоу, статусы, диспатч). Тоже opt-in.
+    fun aiAllowGithub() = preferenceStore.getBoolean("pref_ai_allow_github", false)
+
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 

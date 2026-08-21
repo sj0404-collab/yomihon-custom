@@ -334,11 +334,23 @@ object TtsSpeaker {
                     ?: installed.firstOrNull { gender != null && it.gender == gender }
                     ?: installed.firstOrNull { it.id == preferredId }
                     ?: installed.first()
-                val speed = p.speechRate().get().coerceIn(0.5f, 2f)
+                val baseSpeed = p.speechRate().get().coerceIn(0.5f, 2f)
                 for (sentence in splitSentences(text)) {
                     if (currentJob?.isActive != true) break
-                    val wav = OnnxTts.synthesizeToFile(context, voice, sentence.trim(), speed) ?: continue
+                    val trimmed = sentence.trim()
+                    // Живая просодия: скорость зависит от знаков препинания
+                    // и капса — вопросы медленнее, крик быстрее, «…» задумчиво
+                    val speed = OnnxTts.prosodySpeed(trimmed, baseSpeed)
+                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed) ?: continue
                     playFileBlocking(wav)
+                    // Пауза между предложениями: 240мс после точки,
+                    // 400мс после !/? — дыхание, а не конвейер
+                    val pause = when {
+                        trimmed.endsWith("!") || trimmed.endsWith("?") -> 400L
+                        trimmed.endsWith("…") || trimmed.endsWith("...") -> 500L
+                        else -> 240L
+                    }
+                    kotlinx.coroutines.delay(pause)
                 }
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "ONNX TTS failed" }
