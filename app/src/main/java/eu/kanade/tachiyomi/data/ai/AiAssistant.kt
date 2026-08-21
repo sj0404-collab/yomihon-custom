@@ -129,12 +129,23 @@ object AiAssistant {
             val key = p.openrouterApiKey().get()
             if (provider == PROVIDER_OPENROUTER && key.isNotBlank()) {
                 val model = p.openrouterFreeModel().get().ifBlank { OPENROUTER_FREE_FALLBACK.first() }
-                val reply = chatRaw(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    model, key, userPrompt, systemPrompt, maxTokens,
-                )
+                // Временные сбои сети/прокси ретраим на той же модели,
+                // прежде чем считать OpenRouter «упавшим»
+                var reply: ChatReply? = null
+                for (delayMs in longArrayOf(0, 1_200, 2_500)) {
+                    if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                    when (val res = chatRawOutcome(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        model, key, userPrompt, systemPrompt, maxTokens,
+                    )) {
+                        is Outcome.Ok -> { reply = res.reply }
+                        Outcome.Transient -> continue // сбой сети → ещё попытка
+                        else -> {} // лимит/фатально — ретраи не помогут
+                    }
+                    break
+                }
                 if (reply != null || !p.aiAutoRotate().get()) return@withContext reply
-                // Автосмена: OpenRouter упал → пробуем Zen
+                // Автосмена: OpenRouter реально недоступен → пробуем Zen
                 return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
             }
             if (provider == PROVIDER_OPENROUTER) {
@@ -149,31 +160,71 @@ object AiAssistant {
      * ротация почти всегда находит живую модель. Тумблер «Автосмена моделей»
      * (pref_ai_auto_rotate) ограничивает попытки одной выбранной моделью.
      */
-    private fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): ChatReply? {
+    /**
+     * Zen с ПРАВИЛЬНОЙ ротацией (фикс по жалобе пользователя):
+     *  • настоящий rate limit (429/FreeUsageLimit) → сразу СЛЕДУЮЩАЯ модель;
+     *  • временный сбой (таймаут/5xx/обрыв прокси) → до 2 ретраев ТОЙ ЖЕ
+     *    модели с паузой 1.2с/2.5с — рабочая модель не бросается из-за
+     *    моргнувшей сети;
+     *  • фатальная ошибка → следующая модель.
+     */
+    private suspend fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): ChatReply? {
         val preferred = prefs().zenModel().get().ifBlank { ZEN_MODELS.first() }
         val order = if (prefs().aiAutoRotate().get()) {
             listOf(preferred) + ZEN_MODELS.filter { it != preferred }
         } else {
             listOf(preferred)
         }
+        val retryDelaysMs = longArrayOf(1_200, 2_500)
         for (m in order) {
-            val answer = chatRaw(
-                "https://opencode.ai/zen/v1/chat/completions",
-                m, "", userPrompt, systemPrompt, maxTokens,
-            )
-            if (answer != null) return answer
+            var attempt = 0
+            while (true) {
+                when (val res = chatRawOutcome(
+                    "https://opencode.ai/zen/v1/chat/completions",
+                    m, "", userPrompt, systemPrompt, maxTokens,
+                )) {
+                    is Outcome.Ok -> return res.reply
+                    Outcome.RateLimited -> break // честный лимит → следующая модель
+                    Outcome.Fatal -> break
+                    Outcome.Transient -> {
+                        if (attempt >= retryDelaysMs.size) break // сеть лежит совсем → дальше
+                        kotlinx.coroutines.delay(retryDelaysMs[attempt])
+                        attempt++
+                    }
+                }
+            }
         }
         return null
     }
 
-    private fun chatRaw(
+    /**
+     * Исход одного запроса. Нужен, чтобы ротация вела себя ПРАВИЛЬНО
+     * (жалоба пользователя: «rate limit неверный — у одной модели
+     * правильный, у другой просто сбои сети/прокси, потом отвечает»):
+     *  • Ok            — ответ получен;
+     *  • RateLimited   — НАСТОЯЩИЙ лимит (HTTP 429 или FreeUsageLimitError
+     *                    в теле) → переключаться на следующую модель;
+     *  • Transient     — временный сбой (таймаут, 5xx, обрыв соединения,
+     *                    прокси) → ретраить ТУ ЖЕ модель с паузой, а не
+     *                    убегать с рабочей модели;
+     *  • Fatal         — постоянная ошибка модели (4xx кроме 429, кривой
+     *                    ответ) → следующая модель.
+     */
+    private sealed class Outcome {
+        data class Ok(val reply: ChatReply) : Outcome()
+        object RateLimited : Outcome()
+        object Transient : Outcome()
+        object Fatal : Outcome()
+    }
+
+    private fun chatRawOutcome(
         url: String,
         model: String,
         apiKey: String,
         userPrompt: String,
         systemPrompt: String?,
         maxTokens: Int = 500,
-    ): ChatReply? {
+    ): Outcome {
         val startedAt = System.currentTimeMillis()
         return try {
             val messages = JSONArray()
@@ -202,7 +253,23 @@ object AiAssistant {
             conn.disconnect()
             if (code !in 200..299) {
                 logcat(LogPriority.WARN) { "AI assistant HTTP $code ($model): ${text.take(160)}" }
-                return null
+                addLog(
+                    LogEntry(
+                        startedAt, model, userPrompt.take(200),
+                        "HTTP $code: ${text.take(120)}",
+                        System.currentTimeMillis() - startedAt,
+                    ),
+                )
+                // Классификация: настоящий лимит vs временный сбой vs фатально
+                val isLimit = code == 429 ||
+                    text.contains("FreeUsageLimit", ignoreCase = true) ||
+                    text.contains("rate_limit", ignoreCase = true) ||
+                    text.contains("quota", ignoreCase = true)
+                return when {
+                    isLimit -> Outcome.RateLimited
+                    code in 500..599 || code == 408 -> Outcome.Transient // 5xx/таймаут — прокси/сайт барахлит
+                    else -> Outcome.Fatal
+                }
             }
             val root = JSONObject(text)
             val message = root
@@ -221,11 +288,13 @@ object AiAssistant {
                     ?: m.optString("reasoning_content").takeIf { it.isNotBlank() && it != "null" }
             }?.trim()?.ifBlank { null }
             addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
-            answer?.let { ChatReply(it, reasoning, model, tokens) }
+            answer?.let { Outcome.Ok(ChatReply(it, reasoning, model, tokens)) } ?: Outcome.Fatal
         } catch (e: Exception) {
             addLog(LogEntry(startedAt, model, userPrompt.take(200), "ОШИБКА: ${e.message?.take(120)}", System.currentTimeMillis() - startedAt))
             logcat(LogPriority.WARN, e) { "AI assistant call failed ($model)" }
-            null
+            // Сетевые исключения (SocketTimeout, ConnectException, SSL,
+            // UnknownHost, обрыв прокси) — ВРЕМЕННЫЕ: модель не виновата
+            Outcome.Transient
         }
     }
 
