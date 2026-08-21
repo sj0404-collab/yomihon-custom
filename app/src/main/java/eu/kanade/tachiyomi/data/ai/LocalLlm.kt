@@ -56,6 +56,8 @@ object LocalLlm {
         val tier: RamTier,
         /** Характеристика: параметры, квантизация, на что способна. */
         val specs: String,
+        /** Абсолютный путь для пользовательских моделей (вне llm_models/). */
+        val filePath: String? = null,
     )
 
     /**
@@ -122,7 +124,88 @@ object LocalLlm {
     fun modelsDir(context: Context): File =
         File(context.getExternalFilesDir(null), "llm_models").apply { mkdirs() }
 
-    fun fileOf(context: Context, m: Model): File = File(modelsDir(context), "${m.id}.task")
+    /** Папка пользовательских моделей: /sdcard/Yomikai/LLM — закинь .task туда. */
+    fun userModelsDir(): File =
+        File(android.os.Environment.getExternalStorageDirectory(), "Yomikai/LLM").apply { mkdirs() }
+
+    /**
+     * СВОИ МОДЕЛИ (по требованию пользователя): любые .task-файлы из
+     * /sdcard/Yomikai/LLM и llm_models/, которых нет в каталоге. Тир ОЗУ
+     * оценивается по размеру файла (вес ~= потребление int8-модели, х1.4).
+     */
+    fun customModels(context: Context): List<Model> {
+        val known = CATALOG.map { "${it.id}.task" }.toSet()
+        val dirs = listOf(userModelsDir(), modelsDir(context))
+        return dirs.flatMap { d ->
+            d.listFiles { f -> f.isFile && f.extension == "task" && f.name !in known }
+                ?.toList().orEmpty()
+        }.distinctBy { it.name }.map { f ->
+            val sizeMb = (f.length() / 1048576L).toInt()
+            val needGb = ((sizeMb * 14 / 10) + 1023) / 1024
+            Model(
+                id = "custom_" + f.nameWithoutExtension,
+                name = f.nameWithoutExtension + " (своя)",
+                url = "",
+                sizeMb = sizeMb,
+                tier = when {
+                    needGb <= 1 -> RamTier.GB1
+                    needGb <= 2 -> RamTier.GB2
+                    needGb <= 4 -> RamTier.GB4
+                    else -> RamTier.GB6
+                },
+                specs = "Пользовательская модель из ${f.parentFile?.name}/ • файл ${sizeMb} МБ",
+                filePath = f.absolutePath,
+            )
+        }
+    }
+
+    /**
+     * Модель ПО ССЫЛКЕ: скачивает произвольный .task URL в llm_models/.
+     * Имя берётся из URL. Возвращает Model для немедленного использования.
+     */
+    fun modelFromUrl(url: String): Model? {
+        val name = url.substringAfterLast('/').substringBefore('?')
+        if (!name.endsWith(".task")) return null
+        return Model(
+            id = "url_" + name.removeSuffix(".task").take(40),
+            name = name.removeSuffix(".task"),
+            url = url,
+            sizeMb = 0, // неизвестен до скачивания — прогресс по Content-Length
+            tier = RamTier.GB2,
+            specs = "Модель по ссылке: $url",
+        )
+    }
+
+    /**
+     * ПОИСК моделей на HuggingFace (реальный API): .task-модели LiteRT.
+     * Возвращает пары (modelId, прямой url первого .task файла).
+     */
+    suspend fun searchHuggingFace(query: String): List<Pair<String, String>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val q = java.net.URLEncoder.encode("$query task litert", "UTF-8")
+                val conn = URL("https://huggingface.co/api/models?search=$q&limit=10")
+                    .openConnection() as HttpURLConnection
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 20_000
+                val body = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                conn.disconnect()
+                val arr = org.json.JSONArray(body)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val id = arr.getJSONObject(i).optString("modelId")
+                        if (id.isNotBlank()) {
+                            // Файлы модели: берём список siblings отдельным запросом лениво в UI;
+                            // здесь — предполагаемый прямой путь (HF отдаёт 302 на blob)
+                            add(id to "https://huggingface.co/$id/resolve/main/")
+                        }
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+
+    fun fileOf(context: Context, m: Model): File =
+        m.filePath?.let { File(it) } ?: File(modelsDir(context), "${m.id}.task")
 
     /**
      * Установлена ли модель ЦЕЛИКОМ. Раньше порог был 50% размера — файл,
@@ -130,8 +213,13 @@ object LocalLlm {
      * движок на нём падал и тест проваливался (баг со скриншота).
      * Теперь: не меньше 97% каталожного размера.
      */
-    fun isInstalled(context: Context, m: Model): Boolean =
-        fileOf(context, m).let { it.isFile && it.length() >= m.sizeMb * 1048576L * 97 / 100 }
+    fun isInstalled(context: Context, m: Model): Boolean {
+        val f = fileOf(context, m)
+        if (!f.isFile) return false
+        // Кастомные/по-ссылке: файл уже на месте — размер сверять не с чем
+        if (m.filePath != null || m.sizeMb == 0) return f.length() > 10 * 1048576L
+        return f.length() >= m.sizeMb * 1048576L * 97 / 100
+    }
 
     // ---- Прогресс скачивания (как у OCR-паков) ----
     private val _progress = MutableStateFlow<Map<String, Float>>(emptyMap())

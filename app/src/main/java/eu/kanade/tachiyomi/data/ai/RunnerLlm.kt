@@ -41,11 +41,12 @@ object RunnerLlm {
         var createdAt: Long = System.currentTimeMillis(),
     )
 
+    /** key -> (описание, ТОЧНЫЙ размер скачивания в ранер, МБ — проверено HEAD). */
     val GGUF_MODELS = listOf(
-        "qwen2.5-0.5b" to "Qwen2.5 0.5B (GGUF Q4) — самый быстрый старт",
-        "qwen2.5-1.5b" to "Qwen2.5 1.5B (GGUF Q4) — лучший русский",
-        "llama3.2-1b" to "Llama 3.2 1B (GGUF Q4) — английский",
-        "gemma3-1b" to "Gemma 3 1B (GGUF Q4) — компактная от Google",
+        Triple("qwen2.5-0.5b", "Qwen2.5 0.5B (GGUF Q4) — самый быстрый старт", 468),
+        Triple("qwen2.5-1.5b", "Qwen2.5 1.5B (GGUF Q4) — лучший русский", 1065),
+        Triple("llama3.2-1b", "Llama 3.2 1B (GGUF Q4) — английский", 770),
+        Triple("gemma3-1b", "Gemma 3 1B (GGUF Q4) — компактная от Google", 768),
     )
 
     private const val REPO = "sj0404-collab/yomihon-custom"
@@ -104,6 +105,13 @@ object RunnerLlm {
         context: Context,
         modelKey: String,
         onStatus: (String) -> Unit,
+    ): Session? = startSessionInternal(context, modelKey, "", onStatus)
+
+    private suspend fun startSessionInternal(
+        context: Context,
+        modelKey: String,
+        customUrl: String,
+        onStatus: (String) -> Unit,
     ): Session? = withContext(Dispatchers.IO) {
         val token = prefs().githubPat().get()
         if (token.isBlank()) {
@@ -126,7 +134,10 @@ object RunnerLlm {
                 .put("ref", "main")
                 .put(
                     "inputs",
-                    JSONObject().put("model", modelKey).put("session", session.id),
+                    JSONObject()
+                        .put("model", modelKey)
+                        .put("session", session.id)
+                        .put("custom_url", customUrl),
                 )
             conn.outputStream.use { it.write(body.toString().toByteArray()) }
             val ok = conn.responseCode in 200..299
@@ -248,4 +259,43 @@ object RunnerLlm {
             ok
         }.getOrDefault(false)
     }
+
+    /** Статус ранера для индикации в UI. */
+    data class RunnerStatus(
+        val alive: Boolean,
+        /** Аптайм сессии, мс (от createdAt). */
+        val uptimeMs: Long,
+        /** Осталось до 5.5-часового лимита job, мс. */
+        val remainingMs: Long,
+        /** Время последней проверки. */
+        val checkedAt: Long,
+    )
+
+    private const val SESSION_LIFETIME_MS = 330L * 60_000L // 5.5 часов
+
+    /**
+     * ИНДИКАЦИЯ РАНЕРА (по требованию пользователя): живой /health-пинг +
+     * аптайм + сколько осталось до конца сессии.
+     */
+    suspend fun status(session: Session): RunnerStatus {
+        val alive = isAlive(session)
+        val uptime = System.currentTimeMillis() - session.createdAt
+        return RunnerStatus(
+            alive = alive,
+            uptimeMs = uptime,
+            remainingMs = (SESSION_LIFETIME_MS - uptime).coerceAtLeast(0),
+            checkedAt = System.currentTimeMillis(),
+        )
+    }
+
+    /**
+     * Своя GGUF-модель ПО ССЫЛКЕ: воркфлоу принимает custom_url — ранер
+     * скачает её вместо каталожной. Размер неизвестен заранее — воркфлоу
+     * напишет его в лог, а стартовый статус покажет прогресс этапов.
+     */
+    suspend fun startSessionWithUrl(
+        context: Context,
+        ggufUrl: String,
+        onStatus: (String) -> Unit,
+    ): Session? = startSessionInternal(context, "custom", ggufUrl, onStatus)
 }

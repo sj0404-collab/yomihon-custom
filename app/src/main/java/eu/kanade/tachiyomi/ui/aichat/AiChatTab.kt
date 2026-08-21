@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Image as ImageIcon
 import androidx.compose.material.icons.outlined.LibraryAddCheck
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Stop
@@ -125,6 +126,9 @@ data object AiChatTab : Tab {
         val tookMs: Long = 0,
         val rounds: Int = 0,
         val time: Long = System.currentTimeMillis(),
+        val choices: List<String> = emptyList(),
+        /** Текст запроса пользователя, породившего этот ответ (для «Повторить»). */
+        val sourcePrompt: String = "",
     )
 
     // Держим историю в памяти процесса: вкладку можно покидать и возвращаться
@@ -277,6 +281,8 @@ data object AiChatTab : Tab {
                             tokens = reply.tokens,
                             tookMs = reply.tookMs,
                             rounds = reply.rounds,
+                            choices = reply.choices,
+                            sourcePrompt = text,
                         ),
                     )
                     busy = false
@@ -408,6 +414,11 @@ data object AiChatTab : Tab {
                     onRemoveAttachment = { f -> attachments.value = attachments.value - f },
                     onAttach = { pickFile.launch("*/*") },
                     onSend = ::send,
+                    onQuickSend = { quick ->
+                        // Кнопка-вариант или «повторить»: подставляем текст и шлём
+                        input = quick
+                        send()
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 1 -> WorkspaceBody(modifier = Modifier.weight(1f))
@@ -538,7 +549,49 @@ data object AiChatTab : Tab {
                 "Локальные LLM • у устройства $ramGb ГБ ОЗУ",
                 style = MaterialTheme.typography.titleSmall,
             )
-            eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.forEach { m ->
+            // Свои модели: /sdcard/Yomikai/LLM (закинь .task — появится тут)
+            var customRefresh by remember { mutableStateOf(0) }
+            val customModels = remember(customRefresh) {
+                eu.kanade.tachiyomi.data.ai.LocalLlm.customModels(context)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Свои модели: положите .task в /sdcard/Yomikai/LLM (найдено: ${customModels.size})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                androidx.compose.material3.TextButton(onClick = { customRefresh++ }) { Text("Обновить") }
+            }
+            // Модель по прямой ссылке (.task)
+            var customTaskUrl by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = customTaskUrl,
+                onValueChange = { customTaskUrl = it },
+                label = { Text("Скачать модель по ссылке (.task)") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 2,
+            )
+            androidx.compose.material3.FilledTonalButton(
+                enabled = customTaskUrl.trim().startsWith("http") && customTaskUrl.contains(".task"),
+                onClick = {
+                    val m = eu.kanade.tachiyomi.data.ai.LocalLlm.modelFromUrl(customTaskUrl.trim())
+                    if (m == null) {
+                        context.toast("Ссылка должна вести на .task файл")
+                    } else {
+                        context.toast("Скачивание ${m.name} началось")
+                        scope.launch(Dispatchers.IO) {
+                            val ok = eu.kanade.tachiyomi.data.ai.LocalLlm.download(context, m)
+                            withContext(Dispatchers.Main) {
+                                context.toast(if (ok) "Модель скачана: ${m.name}" else "Не удалось скачать")
+                                customRefresh++
+                            }
+                        }
+                    }
+                },
+            ) { Text("⬇ Скачать по ссылке") }
+
+            (eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG + customModels).forEach { m ->
                 val fits = m.tier.minRamGb <= ramGb
                 val installed = eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, m)
                 val prog = llmProgress[m.id]
@@ -660,7 +713,7 @@ data object AiChatTab : Tab {
                 modifier = Modifier.fillMaxWidth(),
                 maxLines = 1,
             )
-            eu.kanade.tachiyomi.data.ai.RunnerLlm.GGUF_MODELS.forEach { (key, label) ->
+            eu.kanade.tachiyomi.data.ai.RunnerLlm.GGUF_MODELS.forEach { (key, label, sizeMb) ->
                 FilterChip(
                     selected = false,
                     onClick = {
@@ -676,18 +729,69 @@ data object AiChatTab : Tab {
                             }
                         }
                     },
-                    label = { Text("▶ $label") },
+                    label = { Text("▶ $label • в ранер скачается $sizeMb МБ") },
                 )
             }
+            // Своя GGUF-модель по прямой ссылке
+            var customGguf by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = customGguf,
+                onValueChange = { customGguf = it },
+                label = { Text("Своя GGUF-модель: прямая ссылка (.gguf)") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 2,
+            )
+            androidx.compose.material3.FilledTonalButton(
+                enabled = customGguf.trim().startsWith("http") && customGguf.contains(".gguf"),
+                onClick = {
+                    val url = customGguf.trim()
+                    scope.launch(Dispatchers.IO) {
+                        val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSessionWithUrl(context, url) { st ->
+                            runnerStatus = st
+                        }
+                        withContext(Dispatchers.Main) {
+                            if (s != null) {
+                                sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
+                                backendPref.set("runner")
+                            }
+                        }
+                    }
+                },
+            ) { Text("▶ Запустить свою модель в ранере") }
             if (runnerStatus.isNotBlank()) {
                 Text(runnerStatus, style = MaterialTheme.typography.bodySmall)
             }
             if (sessions.isNotEmpty()) {
                 Text("Сессии (сохранены на телефоне):", style = MaterialTheme.typography.bodySmall)
+                // ИНДИКАЦИЯ РАНЕРА: живой /health-пинг каждые 30с, аптайм и
+                // остаток 5.5-часового лимита — видно, что ранер работает
+                var statuses by remember {
+                    mutableStateOf<Map<String, eu.kanade.tachiyomi.data.ai.RunnerLlm.RunnerStatus>>(emptyMap())
+                }
+                LaunchedEffect(sessions) {
+                    while (true) {
+                        val map = mutableMapOf<String, eu.kanade.tachiyomi.data.ai.RunnerLlm.RunnerStatus>()
+                        sessions.forEach { ses ->
+                            map[ses.id] = eu.kanade.tachiyomi.data.ai.RunnerLlm.status(ses)
+                        }
+                        statuses = map
+                        kotlinx.coroutines.delay(30_000)
+                    }
+                }
                 sessions.forEach { s ->
+                    val st = statuses[s.id]
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${s.model} • ${s.messages.size} сообщ. • ${s.id}",
+                            buildString {
+                                append(if (st?.alive == true) "🟢 " else if (st != null) "🔴 " else "⏳ ")
+                                append("${s.model} • ${s.messages.size} сообщ.")
+                                if (st != null && st.alive) {
+                                    append(" • аптайм ${st.uptimeMs / 60000}м")
+                                    append(" • осталось ~${st.remainingMs / 60000}м")
+                                } else if (st != null) {
+                                    append(" • НЕ ОТВЕЧАЕТ (ранер погас?)")
+                                }
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -774,6 +878,7 @@ data object AiChatTab : Tab {
         onRemoveAttachment: (File) -> Unit,
         onAttach: () -> Unit,
         onSend: () -> Unit,
+        onQuickSend: (String) -> Unit = {},
         modifier: Modifier = Modifier,
     ) {
         val context = LocalContext.current
@@ -806,6 +911,7 @@ data object AiChatTab : Tab {
                         selectMode = selectMode,
                         isSelected = idx in selected,
                         onToggleSelect = onToggleSelect,
+                        onQuickSend = onQuickSend,
                     )
                 }
                 if (busy) {
@@ -863,6 +969,7 @@ data object AiChatTab : Tab {
         selectMode: Boolean,
         isSelected: Boolean,
         onToggleSelect: (Int) -> Unit,
+        onQuickSend: (String) -> Unit = {},
     ) {
         val context = LocalContext.current
         val isUser = m.role == "user"
@@ -990,6 +1097,18 @@ data object AiChatTab : Tab {
                 m.images.forEach { img ->
                     ImageThumb(img)
                 }
+                // КНОПКИ-ВАРИАНТЫ от агента ([[...]]) — тап отправляет выбор
+                if (!isUser && m.choices.isNotEmpty()) {
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        m.choices.forEach { c ->
+                            androidx.compose.material3.FilledTonalButton(
+                                onClick = { onQuickSend(c) },
+                            ) { Text(c, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
                 // Кнопки: озвучить / стоп / копировать
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     IconButton(
@@ -1003,6 +1122,14 @@ data object AiChatTab : Tab {
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(Icons.Outlined.Stop, "Стоп", Modifier.size(18.dp))
+                    }
+                    if (!isUser && m.sourcePrompt.isNotBlank()) {
+                        IconButton(
+                            onClick = { onQuickSend(m.sourcePrompt) },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(Icons.Outlined.Refresh, "Повторить запрос", Modifier.size(18.dp))
+                        }
                     }
                     IconButton(
                         onClick = { context.copyToClipboard("AI", m.text) },

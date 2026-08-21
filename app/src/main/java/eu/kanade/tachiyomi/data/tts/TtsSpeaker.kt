@@ -46,6 +46,7 @@ object TtsSpeaker {
     const val ENGINE_SYSTEM = "system_tts"
     const val ENGINE_GOOGLE_WEB = "google_web"
     const val ENGINE_ELEVENLABS = "eleven_api"
+    const val ENGINE_ONNX = "onnx_tts"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentJob: Job? = null
@@ -113,6 +114,7 @@ object TtsSpeaker {
         when (prefs().voiceEngine().get()) {
             ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, spoken)
             ENGINE_ELEVENLABS -> speakElevenLabs(context, spoken)
+            ENGINE_ONNX -> speakOnnx(context, spoken, effectiveGender)
             else -> speakSystem(context, spoken, effectiveGender, slot)
         }
     }
@@ -266,6 +268,45 @@ object TtsSpeaker {
                 }
             }
             if (!queued) setSpeaking(false)
+        }
+    }
+
+    // endregion
+
+    // region ONNX (sherpa-onnx, нейроголоса офлайн)
+
+    /**
+     * ONNX-голос: женские реплики — голосом с gender=female (Ирина),
+     * мужские — male (Дмитрий/Руслан). Голос по умолчанию — из настройки
+     * pref_onnx_voice; при отсутствии установленного голоса — фолбэк на
+     * системный TTS (честно, без тишины).
+     */
+    private fun speakOnnx(context: Context, text: String, gender: String?) {
+        val p = prefs()
+        currentJob = scope.launch {
+            setSpeaking(true)
+            try {
+                val installed = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
+                if (!OnnxTts.isAvailable || installed.isEmpty()) {
+                    // Нет библиотеки или голосов — откат на системный движок
+                    withContext(Dispatchers.Main) { speakSystem(context, text, gender) }
+                    return@launch
+                }
+                val preferredId = p.onnxVoice().get()
+                val voice = installed.firstOrNull { gender != null && it.gender == gender }
+                    ?: installed.firstOrNull { it.id == preferredId }
+                    ?: installed.first()
+                val speed = p.speechRate().get().coerceIn(0.5f, 2f)
+                for (sentence in splitSentences(text)) {
+                    if (currentJob?.isActive != true) break
+                    val wav = OnnxTts.synthesizeToFile(context, voice, sentence.trim(), speed) ?: continue
+                    playFileBlocking(wav)
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "ONNX TTS failed" }
+            } finally {
+                setSpeaking(false)
+            }
         }
     }
 

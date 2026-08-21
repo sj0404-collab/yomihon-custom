@@ -68,6 +68,9 @@ import eu.kanade.tachiyomi.data.tts.VoiceHelper
 import eu.kanade.tachiyomi.data.tts.VoiceKind
 import eu.kanade.tachiyomi.databinding.DownloadListBinding
 import kotlinx.collections.immutable.toPersistentList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
 import mihon.domain.ocr.service.ScanRegion
@@ -654,6 +657,7 @@ object OcrQueueScreen : Screen() {
     @Composable
     private fun VoicesTab(ocrPreferences: OcrPreferences) {
         val context = androidx.compose.ui.platform.LocalContext.current
+        val scope2 = androidx.compose.runtime.rememberCoroutineScope()
 
         val voiceEnginePref = remember { ocrPreferences.voiceEngine() }
         val voiceEngine by voiceEnginePref.changes().collectAsState(initial = voiceEnginePref.get())
@@ -755,6 +759,7 @@ object OcrQueueScreen : Screen() {
                 icon = null,
                 entries = mapOf(
                     TtsSpeaker.ENGINE_SYSTEM to "📱 Системный TTS (офлайн + онлайн)",
+                    TtsSpeaker.ENGINE_ONNX to "🧠 ONNX-нейроголоса (офлайн, скачать один раз)",
                     TtsSpeaker.ENGINE_GOOGLE_WEB to "☁ Google Web (онлайн, без ключа)",
                     TtsSpeaker.ENGINE_ELEVENLABS to "☁ ElevenLabs (онлайн, по ключу)",
                 ),
@@ -776,6 +781,75 @@ object OcrQueueScreen : Screen() {
                 valueString = "×%.2f".format(speechPitch),
                 onChange = { speechPitchPref.set(it / 100f) },
             )
+
+            if (voiceEngine == TtsSpeaker.ENGINE_ONNX) {
+                PreferenceGroupHeader(title = "ONNX-нейроголоса (Piper, офлайн)")
+                InfoWidget(
+                    text = if (eu.kanade.tachiyomi.data.tts.OnnxTts.isAvailable) {
+                        "Нейросетевые голоса: живее системных, работают без сети. " +
+                            "Женские реплики читает женский голос, мужские — мужской."
+                    } else {
+                        "Библиотека sherpa-onnx не попала в эту сборку — движок недоступен. " +
+                            "Обновите приложение."
+                    },
+                )
+                val onnxProgress by eu.kanade.tachiyomi.data.tts.OnnxTts.progress.collectAsState()
+                val onnxVoicePref = remember { ocrPreferences.onnxVoice() }
+                val onnxVoice by onnxVoicePref.changes().collectAsState(initial = onnxVoicePref.get())
+                eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.forEach { v ->
+                    var installed by remember(v.id) {
+                        mutableStateOf(eu.kanade.tachiyomi.data.tts.OnnxTts.isInstalled(context, v))
+                    }
+                    val prog = onnxProgress[v.id]
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    (if (v.gender == "female") "♀ " else "♂ ") + v.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                Text(
+                                    when {
+                                        prog != null -> "Загрузка ${(prog * 100).toInt()}%"
+                                        installed -> "✅ Установлен • ${v.sizeMb} МБ"
+                                        else -> "${v.sizeMb} МБ • не установлен"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            when {
+                                prog != null -> androidx.compose.material3.CircularProgressIndicator(
+                                    progress = { prog },
+                                    modifier = Modifier.padding(8.dp).size(28.dp),
+                                )
+                                installed -> Row {
+                                    RadioButton(
+                                        selected = onnxVoice == v.id,
+                                        onClick = { onnxVoicePref.set(v.id) },
+                                    )
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        eu.kanade.tachiyomi.data.tts.OnnxTts.delete(context, v)
+                                        installed = false
+                                    }) { Text("Удалить") }
+                                }
+                                else -> androidx.compose.material3.FilledTonalButton(onClick = {
+                                    scope2.launch(Dispatchers.IO) {
+                                        val ok = eu.kanade.tachiyomi.data.tts.OnnxTts.download(context, v)
+                                        withContext(Dispatchers.Main) { installed = ok }
+                                    }
+                                }) { Text("Скачать") }
+                            }
+                        }
+                        if (prog != null) {
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { prog },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
 
             if (voiceEngine == TtsSpeaker.ENGINE_SYSTEM) {
                 PreferenceGroupHeader(title = "Голоса устройства")

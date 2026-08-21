@@ -42,6 +42,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
+      - name: Fetch sherpa-onnx AAR (ONNX TTS)
+        run: |
+          mkdir -p app/libs
+          curl -sL -o app/libs/sherpa-onnx.aar \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/sherpa-onnx-1.13.6.aar
+          ls -la app/libs/
+
       - name: Verify SQLDelight migrations
         run: ./gradlew verifySqlDelightMigration
 

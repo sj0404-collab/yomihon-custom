@@ -43,6 +43,19 @@ object OcrModelDownloader {
         // Скачиваются один раз, удаляются одной кнопкой; после установки язык
         // появляется в офлайн-движке (TesseractOcrEngine подключает их из
         // ocr_models/tessdata). eng+rus уже в APK — их качать не нужно.
+        // ---- ТОЧНЫЙ русский (tessdata_best): заметно точнее встроенного
+        // fast-пака на мелком тексте манги; медленнее ~1.5-2x. Кладётся в
+        // ocr_models/tessdata/rus.traineddata и ПЕРЕКРЫВАЕТ встроенный.
+        "tess_rus_best" to listOf(
+            "https://github.com/tesseract-ocr/tessdata_best/raw/main/rus.traineddata" to "tessdata/rus.traineddata",
+        ),
+        // Скрипт «вся кириллица» — рус/укр/срб/болг одним паком
+        "tess_cyrillic" to listOf(
+            tess("script/Cyrillic.traineddata") to "tessdata/Cyrillic.traineddata",
+        ),
+        "tess_ukr_best" to listOf(
+            "https://github.com/tesseract-ocr/tessdata_best/raw/main/ukr.traineddata" to "tessdata/ukr.traineddata",
+        ),
         "tess_jpn" to listOf(
             tess("jpn.traineddata") to "tessdata/jpn.traineddata",
             tess("jpn_vert.traineddata") to "tessdata/jpn_vert.traineddata",
@@ -72,6 +85,22 @@ object OcrModelDownloader {
         "manga_ocr" to listOf("ocr/encoder.tflite", "ocr/decoder.tflite", "ocr/embeddings.bin"),
         "manga_ocr_fast" to listOf("ocr_fast/encoder.tflite", "ocr_fast/decoder.tflite"),
         "panel_detector" to listOf("panel_detector/model.tflite"),
+        // ---- ТОЧНЫЙ русский (tessdata_best): заметно точнее встроенного
+        // fast-пака на мелком тексте манги; медленнее ~1.5-2x. Кладётся в
+        // ocr_models/tessdata/rus.traineddata и ПЕРЕКРЫВАЕТ встроенный.
+        "tess_rus_best" to listOf(
+            "https://github.com/tesseract-ocr/tessdata_best/raw/main/rus.traineddata" to "tessdata/rus.traineddata",
+        ),
+        // Скрипт «вся кириллица» — рус/укр/срб/болг одним паком
+        "tess_cyrillic" to listOf(
+            tess("script/Cyrillic.traineddata") to "tessdata/Cyrillic.traineddata",
+        ),
+        "tess_ukr_best" to listOf(
+            "https://github.com/tesseract-ocr/tessdata_best/raw/main/ukr.traineddata" to "tessdata/ukr.traineddata",
+        ),
+        "tess_rus_best" to listOf("tessdata/rus.traineddata"),
+        "tess_cyrillic" to listOf("tessdata/Cyrillic.traineddata"),
+        "tess_ukr_best" to listOf("tessdata/ukr.traineddata"),
         "tess_jpn" to listOf("tessdata/jpn.traineddata", "tessdata/jpn_vert.traineddata"),
         "tess_kor" to listOf("tessdata/kor.traineddata"),
         "tess_chi" to listOf("tessdata/chi_sim.traineddata"),
@@ -83,6 +112,9 @@ object OcrModelDownloader {
 
     /** Метаданные языковых паков Tesseract: pack -> (код языка, название, ~размер). */
     val TESS_LANG_PACKS: List<Triple<String, String, String>> = listOf(
+        Triple("tess_rus_best", "rus", "Русский ТОЧНЫЙ (tessdata_best) • 14 МБ"),
+        Triple("tess_cyrillic", "Cyrillic", "Вся кириллица (рус/укр/болг/срб) • 27 МБ"),
+        Triple("tess_ukr_best", "ukr", "Украинский точный (best) • 10 МБ"),
         Triple("tess_jpn", "jpn", "Японский (+вертикальный) • ~5 МБ"),
         Triple("tess_kor", "kor", "Корейский • ~2 МБ"),
         Triple("tess_chi", "chi_sim", "Китайский упрощённый • ~3 МБ"),

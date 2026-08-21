@@ -136,6 +136,9 @@ class OcrPreferences(
     // Выбранная локальная модель (id из LocalLlm.CATALOG)
     fun localLlmModel() = preferenceStore.getString("pref_local_llm_model", "")
 
+    // ONNX-голос по умолчанию (id из OnnxTts.CATALOG)
+    fun onnxVoice() = preferenceStore.getString("pref_onnx_voice", "irina")
+
     // Модель Zen (opencode.ai/zen, бесплатные *-free, работают без ключа)
     fun zenModel() = preferenceStore.getString("pref_zen_model", "mimo-v2.5-free")
 

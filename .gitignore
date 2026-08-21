@@ -35,3 +35,4 @@ data/src/main/assets/panel_detector/model.tflite
 *.dll
 *.lib
 *.pch
+app/libs/

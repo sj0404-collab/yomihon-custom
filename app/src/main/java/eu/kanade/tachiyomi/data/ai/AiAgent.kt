@@ -75,6 +75,8 @@ object AiAgent {
         val tookMs: Long = 0,
         /** Число раундов инструментов. */
         val rounds: Int = 0,
+        /** Кнопки-варианты для пользователя ([[...]] из ответа модели). */
+        val choices: List<String> = emptyList(),
     )
 
     private val sourceManager: SourceManager by lazy { Injekt.get() }
@@ -106,7 +108,10 @@ object AiAgent {
             "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
             "Для комикса: сцены текстом в comic/сценарий.md + gen_image на каждый кадр.\n" +
             "Можно несколько @tool в одном ответе. После строк @tool больше ничего не пиши — " +
-            "результаты придут следующим сообщением, тогда и ответишь пользователю."
+            "результаты придут следующим сообщением, тогда и ответишь пользователю.\n" +
+            "ВАРИАНТЫ ВЫБОРА: если уместно предложить пользователю выбор (что делать дальше, " +
+            "какой вариант взять), закончи ответ строками вида [[Текст варианта]] — по одной на строку, " +
+            "2-4 варианта. Они превратятся в кнопки под сообщением."
 
     /**
      * Один ход агента: prompt пользователя (+опц. текст из вложений) →
@@ -194,14 +199,19 @@ object AiAgent {
             }
         }
 
-        val cleanText = stripToolSyntax(context, answer)
-            .ifBlank { "Готово. Результаты — в карточках инструментов ниже и в workspace." }
+        var cleanText = stripToolSyntax(context, answer)
+        // Кнопки-варианты: [[Вариант]] по одной на строку в конце ответа
+        val choiceRe = Regex("\\[\\[(.{2,80}?)]]")
+        val choices = choiceRe.findAll(cleanText).map { it.groupValues[1].trim() }.take(4).toList()
+        if (choices.isNotEmpty()) cleanText = choiceRe.replace(cleanText, "").trim()
+        cleanText = cleanText.ifBlank { "Готово. Результаты — в карточках инструментов ниже и в workspace." }
         AgentReply(
             cleanText, results, images,
             reasoning = reasoning, model = usedModel,
             tokens = totalTokens,
             tookMs = System.currentTimeMillis() - turnStarted,
             rounds = roundsDone,
+            choices = choices,
         )
     }
 
