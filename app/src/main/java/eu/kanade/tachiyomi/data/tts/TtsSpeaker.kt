@@ -156,7 +156,9 @@ object TtsSpeaker {
             // 1) явный пресет пользователя для пола; 2) VoiceHelper.pick —
             // автоподбор по классификации имён (Svetlana/Dmitry/детские);
             // 3) общий голос; 4) язык ru-RU как последний рубеж.
-            val presetVoice = when (gender) {
+            // Совет локального JSON-помощника (правила пользователя/агента)
+            val advisorVoice = LocalVoiceAdvisor.recommend(text, gender).voiceName
+            val presetVoice = advisorVoice ?: when (gender) {
                 "female" -> p.voiceFemale().get()
                 "male" -> p.voiceMale().get()
                 else -> ""
@@ -287,13 +289,17 @@ object TtsSpeaker {
             setSpeaking(true)
             try {
                 val installed = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
-                if (!OnnxTts.isAvailable || installed.isEmpty()) {
+                if (!OnnxTts.isAvailable(context) || installed.isEmpty()) {
                     // Нет библиотеки или голосов — откат на системный движок
                     withContext(Dispatchers.Main) { speakSystem(context, text, gender) }
                     return@launch
                 }
+                // Локальный JSON-советник (voice_rules.json) важнее эвристик:
+                // «{имя} говорит голосом X» — задаётся пользователем или AI-агентом
+                val advice = LocalVoiceAdvisor.recommend(text, gender)
                 val preferredId = p.onnxVoice().get()
-                val voice = installed.firstOrNull { gender != null && it.gender == gender }
+                val voice = advice.onnxVoiceId?.let { id -> installed.firstOrNull { it.id == id } }
+                    ?: installed.firstOrNull { gender != null && it.gender == gender }
                     ?: installed.firstOrNull { it.id == preferredId }
                     ?: installed.first()
                 val speed = p.speechRate().get().coerceIn(0.5f, 2f)

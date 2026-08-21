@@ -148,6 +148,23 @@ object OcrModelDownloader {
         }
     }
 
+    /**
+     * Гарантирует наличие YOLO-детектора: если пак не установлен — качает
+     * его прямо сейчас (6МБ, suspend). Вернёт путь к .tflite или null.
+     * Используется авточтением как замена прежнему встроенному tar.xz
+     * (вынесен из APK ради веса — приложение похудело на 10.6МБ).
+     */
+    suspend fun ensurePanelDetector(context: Context): String? {
+        val path = OcrModelFiles.resolve(context, "panel_detector/model.tflite")
+        if (path != null) return path
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            downloadPack(context, "panel_detector") { ok ->
+                val p2 = if (ok) OcrModelFiles.resolve(context, "panel_detector/model.tflite") else null
+                if (cont.isActive) cont.resumeWith(Result.success(p2))
+            }
+        }
+    }
+
     fun isPackInstalled(context: Context, pack: String): Boolean {
         val paths = PACK_ASSET_PATHS[pack] ?: return false
         return OcrModelFiles.allInstalled(context, paths)

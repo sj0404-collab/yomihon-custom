@@ -73,10 +73,132 @@ object OnnxTts {
         return d.isDirectory && d.walkTopDown().any { it.extension == "onnx" }
     }
 
-    /** Есть ли нативная библиотека sherpa-onnx в сборке. */
-    val isAvailable: Boolean by lazy {
-        runCatching { Class.forName("com.k2fsa.sherpa.onnx.OfflineTts") }.isSuccess
+    // ---- СКАЧИВАЕМЫЙ НАТИВНЫЙ РАНТАЙМ (вынесен из APK ради веса -55МБ) ----
+    // Java-API вкомпилирован (238КБ), а .so-библиотеки качаются один раз:
+    // AAR с официального релиза -> извлекаются только .so нужного ABI
+    // (~30МБ arm64) -> System.load. Прогресс и тест — как у моделей.
+
+    private const val RUNTIME_AAR_URL =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/sherpa-onnx-1.13.6.aar"
+    const val RUNTIME_PACK_ID = "onnx_runtime"
+
+    private fun runtimeDir(context: Context): File =
+        File(context.getExternalFilesDir(null), "onnx_runtime").apply { mkdirs() }
+
+    fun isRuntimeInstalled(context: Context): Boolean =
+        File(runtimeDir(context), "libsherpa-onnx-jni.so").length() > 1_000_000L
+
+    @Volatile
+    private var runtimeLoaded = false
+
+    /** Загружает скачанные .so; после этого JNI-классы работоспособны. */
+    @Synchronized
+    private fun loadRuntime(context: Context): Boolean {
+        if (runtimeLoaded) return true
+        if (!isRuntimeInstalled(context)) return false
+        return runCatching {
+            val d = runtimeDir(context)
+            // Порядок важен: зависимости первыми
+            listOf("libonnxruntime.so", "libsherpa-onnx-c-api.so", "libsherpa-onnx-jni.so").forEach {
+                val f = File(d, it)
+                if (f.isFile) System.load(f.absolutePath)
+            }
+            runtimeLoaded = true
+            true
+        }.onFailure {
+            logcat(LogPriority.ERROR, it) { "sherpa-onnx runtime load failed" }
+        }.getOrDefault(false)
     }
+
+    /**
+     * Скачивает рантайм (AAR ~46МБ, из него извлекаются .so своего ABI
+     * ~30МБ, AAR удаляется). Прогресс: 0..0.85 загрузка, 0.85..1 распаковка.
+     */
+    suspend fun downloadRuntime(context: Context): Boolean = withContext(Dispatchers.IO) {
+        if (isRuntimeInstalled(context)) return@withContext true
+        if (!activeDownloads.add(RUNTIME_PACK_ID)) return@withContext false
+        val aar = File(context.cacheDir, "sherpa-onnx.aar")
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL(RUNTIME_AAR_URL).openConnection() as HttpURLConnection
+            conn.connectTimeout = 30_000
+            conn.readTimeout = 120_000
+            conn.instanceFollowRedirects = true
+            if (conn.responseCode !in 200..299) return@withContext false
+            val total = conn.contentLengthLong.takeIf { it > 0 } ?: (46L * 1048576)
+            conn.inputStream.use { input ->
+                aar.outputStream().use { out ->
+                    val buf = ByteArray(512 * 1024)
+                    var read = 0L
+                    var lastPct = -1
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        read += n
+                        val pct = (read * 85 / total).toInt()
+                        if (pct != lastPct) {
+                            lastPct = pct
+                            _progress.value = _progress.value + (RUNTIME_PACK_ID to pct / 100f)
+                        }
+                    }
+                }
+            }
+            // Извлечение .so только своего ABI
+            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            _progress.value = _progress.value + (RUNTIME_PACK_ID to 0.9f)
+            java.util.zip.ZipInputStream(aar.inputStream().buffered()).use { zis ->
+                var e = zis.nextEntry
+                while (e != null) {
+                    if (!e.isDirectory && e.name.startsWith("jni/$abi/") && e.name.endsWith(".so")) {
+                        val out = File(runtimeDir(context), File(e.name).name)
+                        out.outputStream().use { zis.copyTo(it) }
+                    }
+                    e = zis.nextEntry
+                }
+            }
+            _progress.value = _progress.value + (RUNTIME_PACK_ID to 1f)
+            aar.delete()
+            isRuntimeInstalled(context)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "ONNX runtime download failed" }
+            aar.delete()
+            false
+        } finally {
+            conn?.disconnect()
+            activeDownloads.remove(RUNTIME_PACK_ID)
+            _progress.value = _progress.value - RUNTIME_PACK_ID
+        }
+    }
+
+    fun deleteRuntime(context: Context) {
+        unload()
+        runtimeDir(context).deleteRecursively()
+        // runtimeLoaded остаётся true до перезапуска процесса — честно скажем
+    }
+
+    /**
+     * Тест рантайма+голоса: загрузка .so и probe-синтез короткой фразы.
+     * Возвращает (успех, сообщение).
+     */
+    suspend fun probe(context: Context, v: Voice): Pair<Boolean, String> = withContext(Dispatchers.Default) {
+        if (!isRuntimeInstalled(context)) return@withContext false to "Рантайм не скачан"
+        if (!loadRuntime(context)) return@withContext false to "Рантайм не загрузился (несовместимая архитектура?)"
+        if (!isInstalled(context, v)) return@withContext false to "Голос не установлен"
+        val started = System.currentTimeMillis()
+        val wav = synthesizeToFile(context, v, "Проверка голоса")
+        val took = System.currentTimeMillis() - started
+        if (wav != null) {
+            wav.delete()
+            true to "Тест пройден за ${took / 1000.0}с"
+        } else {
+            false to "Синтез не удался — смотрите логи"
+        }
+    }
+
+    /** Доступен ли движок: рантайм скачан И его удалось загрузить. */
+    fun isAvailable(context: Context): Boolean =
+        isRuntimeInstalled(context) && loadRuntime(context)
 
     private val _progress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val progress: StateFlow<Map<String, Float>> = _progress
@@ -108,13 +230,17 @@ object OnnxTts {
                         val pct = (read * 100 / total).toInt()
                         if (pct != lastPct) {
                             lastPct = pct
-                            _progress.value = _progress.value + (v.id to (pct / 100f).coerceIn(0f, 0.9f))
+                            _progress.value = _progress.value + (v.id to (pct / 100f * 0.85f).coerceIn(0f, 0.85f))
                         }
                     }
                 }
             }
-            // Распаковка tar.bz2 (commons-compress)
-            _progress.value = _progress.value + (v.id to 0.95f)
+            // Распаковка tar.bz2. Раньше индикатор «застревал на 95%»:
+            // bzip2-декомпрессия 64МБ на телефоне идёт десятки секунд без
+            // обновления. Теперь прогресс 0.86..1.0 тикает ПО БАЙТАМ
+            // распакованных файлов (у Piper-голосов ~66МБ внутри).
+            val approxUnpacked = 70L * 1048576
+            var unpacked = 0L
             BZip2CompressorInputStream(tarball.inputStream().buffered()).use { bz ->
                 TarArchiveInputStream(bz).use { tar ->
                     var entry = tar.nextEntry
@@ -123,7 +249,17 @@ object OnnxTts {
                             val out = File(dir(context), entry.name)
                             if (out.canonicalPath.startsWith(dir(context).canonicalPath)) {
                                 out.parentFile?.mkdirs()
-                                out.outputStream().use { tar.copyTo(it) }
+                                out.outputStream().use { os ->
+                                    val buf = ByteArray(512 * 1024)
+                                    while (true) {
+                                        val n = tar.read(buf)
+                                        if (n < 0) break
+                                        os.write(buf, 0, n)
+                                        unpacked += n
+                                        val frac = 0.86f + 0.14f * (unpacked.toFloat() / approxUnpacked).coerceAtMost(1f)
+                                        _progress.value = _progress.value + (v.id to frac)
+                                    }
+                                }
                             }
                         }
                         entry = tar.nextEntry
@@ -154,7 +290,7 @@ object OnnxTts {
 
     @Synchronized
     private fun ensureEngine(context: Context, v: Voice): Any? {
-        if (!isAvailable) return null
+        if (!loadRuntime(context)) return null
         if (engineVoiceId == v.id) return engine
         unload()
         return runCatching {

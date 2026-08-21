@@ -140,11 +140,11 @@ private fun OcrModelQuickSwitcher() {
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
         listOf(
+            // FAST/LEGACY скрыты: это японские manga-ocr модели,
+            // с русским текстом несовместимы (по фидбеку пользователя)
             OcrModel.ZEN_FREE,
             OcrModel.GLENS,
             OcrModel.TESSERACT,
-            OcrModel.FAST,
-            OcrModel.LEGACY,
             OcrModel.OWOCR,
             OcrModel.OPENROUTER,
             OcrModel.GOOGLE,

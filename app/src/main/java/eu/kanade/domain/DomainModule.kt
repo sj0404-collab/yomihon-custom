@@ -322,12 +322,10 @@ class DomainModule : InjektModule {
                 // Фолбэк: YOLO-модель из встроенного в APK tar.xz —
                 // детектор панелей/баллонов работает без скачивания
                 embeddedModelProvider = {
+                    // YOLO вынесен из APK (вес): при первом использовании
+                    // докачивается 6МБ пак panel_detector
                     val app = get<Application>()
-                    eu.kanade.tachiyomi.data.ocr.OfflinePackManager
-                        .activate(app, eu.kanade.tachiyomi.data.ocr.OfflinePackManager.PACK_YOLO)
-                        ?.listFiles()
-                        ?.firstOrNull { it.extension == "tflite" }
-                        ?.absolutePath
+                    eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.ensurePanelDetector(app)
                 },
             )
         }

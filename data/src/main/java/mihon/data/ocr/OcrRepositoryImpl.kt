@@ -130,7 +130,9 @@ class OcrRepositoryImpl(
     )
     private val offlineEngines = listOf(
         // Tesseract первым: всегда в APK, не требует скачивания
-        EngineType.TESSERACT, EngineType.FAST, EngineType.LEGACY,
+        // FAST/LEGACY исключены из фолбэков: японские manga-ocr модели
+        // на русском тексте выдают мусор (фидбек пользователя)
+        EngineType.TESSERACT,
     )
 
     private fun isNetworkAvailable(): Boolean {

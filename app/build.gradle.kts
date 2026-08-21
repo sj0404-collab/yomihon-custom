@@ -226,12 +226,10 @@ baselineProfile {
 dependencies {
     // Офлайн OCR: Tesseract (модели в assets/ocr_packs/*.tar.xz)
     implementation(libs.tesseract4android)
-    // ONNX-голоса: sherpa-onnx AAR скачивается CI-шагом в app/libs
-    // (в Maven Central его нет). Если файла нет — собираемся без него,
-    // код через реф лексию само-отключается.
-    if (file("libs/sherpa-onnx.aar").exists()) {
-        implementation(files("libs/sherpa-onnx.aar"))
-    }
+    // ONNX-голоса: только Java-API sherpa-onnx (238КБ, из classes.jar AAR).
+    // Нативные .so (55МБ!) НЕ в APK — качаются как дополнение в рантайме
+    // (OnnxTts.downloadRuntime) и грузятся через System.load.
+    implementation(files("libs/sherpa-onnx-classes.jar"))
     implementation(libs.mediapipe.genai)
     implementation(libs.commons.compress)
     implementation(libs.xz)

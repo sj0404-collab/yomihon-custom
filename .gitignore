@@ -36,3 +36,4 @@ data/src/main/assets/panel_detector/model.tflite
 *.lib
 *.pch
 app/libs/
+!app/libs/sherpa-onnx-classes.jar

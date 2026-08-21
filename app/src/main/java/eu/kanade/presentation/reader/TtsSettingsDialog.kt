@@ -157,6 +157,12 @@ fun TtsSettingsDialog(
                         modifier = Modifier.padding(end = 6.dp),
                     )
                     FilterChip(
+                        selected = engine == TtsSpeaker.ENGINE_ONNX,
+                        onClick = { engine = TtsSpeaker.ENGINE_ONNX },
+                        label = { Text("🧠 ONNX") },
+                        modifier = Modifier.padding(end = 6.dp),
+                    )
+                    FilterChip(
                         selected = engine == TtsSpeaker.ENGINE_GOOGLE_WEB,
                         onClick = { engine = TtsSpeaker.ENGINE_GOOGLE_WEB },
                         label = { Text("Веб") },
@@ -166,6 +172,26 @@ fun TtsSettingsDialog(
                         selected = engine == TtsSpeaker.ENGINE_ELEVENLABS,
                         onClick = { engine = TtsSpeaker.ENGINE_ELEVENLABS },
                         label = { Text("ElevenLabs") },
+                    )
+                }
+                if (engine == TtsSpeaker.ENGINE_ONNX) {
+                    val ctxOnnx = androidx.compose.ui.platform.LocalContext.current
+                    val onnxInstalled = remember {
+                        eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.filter {
+                            eu.kanade.tachiyomi.data.tts.OnnxTts.isInstalled(ctxOnnx, it)
+                        }
+                    }
+                    Text(
+                        if (!eu.kanade.tachiyomi.data.tts.OnnxTts.isRuntimeInstalled(ctxOnnx)) {
+                            "Рантайм не скачан: Ещё → Text Recognition → Голоса → ONNX"
+                        } else if (onnxInstalled.isEmpty()) {
+                            "Голоса не скачаны: Ещё → Text Recognition → Голоса → ONNX"
+                        } else {
+                            "Установлены: " + onnxInstalled.joinToString { it.name.substringBefore(" (") } +
+                                ". ♀ реплики — женским, ♂ — мужским автоматически."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 

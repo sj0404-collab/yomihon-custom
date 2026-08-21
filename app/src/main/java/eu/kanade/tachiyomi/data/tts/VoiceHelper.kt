@@ -186,3 +186,56 @@ object VoiceHelper {
         return pool[(offset + speakerSlot.coerceAtLeast(0)) % pool.size]
     }
 }
+
+/**
+ * ЛОКАЛЬНЫЙ AI-помощник выбора голосов (по запросу пользователя: «внутренний
+ * json АИ помогает с выбором голосов локально»). Никакой сети: правила в
+ * JSON-файле /sdcard/Yomikai/AI/voice_rules.json, который можно править
+ * руками или попросить AI-агента (write_file/edit_file). Формат:
+ * {
+ *   "rules": [
+ *     {"contains": "имя_персонажа", "voice": "имя-голоса-или-id"},
+ *     {"gender": "female", "engine": "onnx", "voice": "irina"}
+ *   ]
+ * }
+ * recommend() применяет правила к тексту реплики и полу говорящего.
+ */
+object LocalVoiceAdvisor {
+
+    data class Advice(val voiceName: String?, val onnxVoiceId: String?)
+
+    private fun rulesFile(): java.io.File =
+        java.io.File(
+            android.os.Environment.getExternalStorageDirectory(),
+            "Yomikai/AI/voice_rules.json",
+        )
+
+    fun recommend(text: String, gender: String?): Advice {
+        val f = rulesFile()
+        if (!f.isFile) return Advice(null, null)
+        return runCatching {
+            val root = org.json.JSONObject(f.readText())
+            val rules = root.optJSONArray("rules") ?: return Advice(null, null)
+            for (i in 0 until rules.length()) {
+                val r = rules.optJSONObject(i) ?: continue
+                val contains = r.optString("contains")
+                val g = r.optString("gender")
+                val matches =
+                    (contains.isNotBlank() && text.contains(contains, ignoreCase = true)) ||
+                        (contains.isBlank() && g.isNotBlank() && g == gender)
+                if (matches) {
+                    val voice = r.optString("voice")
+                    return if (r.optString("engine") == "onnx") {
+                        Advice(null, voice.ifBlank { null })
+                    } else {
+                        Advice(voice.ifBlank { null }, null)
+                    }
+                }
+            }
+            Advice(null, null)
+        }.getOrDefault(Advice(null, null))
+    }
+
+    /** Есть ли файл правил (для подсказки в UI). */
+    fun hasRules(): Boolean = rulesFile().isFile
+}

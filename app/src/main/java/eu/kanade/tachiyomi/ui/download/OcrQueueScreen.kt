@@ -386,8 +386,7 @@ object OcrQueueScreen : Screen() {
                 subtitle = stringResource(ocrModel.titleRes),
                 icon = null,
                 entries = mapOf(
-                    OcrModel.LEGACY to stringResource(OcrModel.LEGACY.titleRes),
-                    OcrModel.FAST to stringResource(OcrModel.FAST.titleRes),
+                    // LEGACY/FAST скрыты: японские manga-ocr, русский не умеют
                     OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
                     OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
                     OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
@@ -407,7 +406,7 @@ object OcrQueueScreen : Screen() {
                     title = "Фолбэк при сбое движка",
                     subtitle = when (fallbackPreset) {
                         "online" -> "Только онлайн: Lens → Zen → Gemini"
-                        "offline" -> "Только локальные: Tesseract → Fast → Legacy"
+                        "offline" -> "Только локальные: Tesseract (модели в APK)"
                         "single" -> "Без фолбэков — только выбранный движок"
                         else -> "Авто: при сети — онлайн, без сети — локальные"
                     },
@@ -517,20 +516,9 @@ object OcrQueueScreen : Screen() {
                 text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
                     "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
             )
-            ModelPackRow(
-                pack = "manga_ocr",
-                title = "Manga OCR (Legacy) — точный, японский",
-                sizeHint = "~120 МБ",
-                installed = isMangaOcrDown,
-                onInstalledChange = { isMangaOcrDownPref.set(it) },
-            )
-            ModelPackRow(
-                pack = "manga_ocr_fast",
-                title = "Fast Manga OCR — быстрый, японский",
-                sizeHint = "~30 МБ",
-                installed = isFastOcrDown,
-                onInstalledChange = { isFastOcrDownPref.set(it) },
-            )
+            // Manga OCR (Legacy) и Fast Manga OCR удалены из UI: это
+            // ЯПОНСКИЕ модели (bluolightning/manga-ocr), кириллицу не читают —
+            // пользователю с русской мангой они только мешали.
             ModelPackRow(
                 pack = "panel_detector",
                 title = "Panel Detector — YOLO-детектор панелей",
@@ -785,15 +773,54 @@ object OcrQueueScreen : Screen() {
             if (voiceEngine == TtsSpeaker.ENGINE_ONNX) {
                 PreferenceGroupHeader(title = "ONNX-нейроголоса (Piper, офлайн)")
                 InfoWidget(
-                    text = if (eu.kanade.tachiyomi.data.tts.OnnxTts.isAvailable) {
-                        "Нейросетевые голоса: живее системных, работают без сети. " +
-                            "Женские реплики читает женский голос, мужские — мужской."
-                    } else {
-                        "Библиотека sherpa-onnx не попала в эту сборку — движок недоступен. " +
-                            "Обновите приложение."
-                    },
+                    text = "Нейросетевые голоса: живее системных, работают без сети. " +
+                        "Женские реплики читает женский голос, мужские — мужской. " +
+                        "Сначала скачайте рантайм (~30 МБ), затем голос.",
                 )
                 val onnxProgress by eu.kanade.tachiyomi.data.tts.OnnxTts.progress.collectAsState()
+                // РАНТАЙМ как скачиваемое дополнение (вынесен из APK: -55МБ)
+                var runtimeInstalled by remember {
+                    mutableStateOf(eu.kanade.tachiyomi.data.tts.OnnxTts.isRuntimeInstalled(context))
+                }
+                val runtimeProg = onnxProgress[eu.kanade.tachiyomi.data.tts.OnnxTts.RUNTIME_PACK_ID]
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Рантайм sherpa-onnx", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                when {
+                                    runtimeProg != null -> "Загрузка ${(runtimeProg * 100).toInt()}%"
+                                    runtimeInstalled -> "✅ Установлен (~30 МБ)"
+                                    else -> "~30 МБ • нужен для работы нейроголосов"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        when {
+                            runtimeProg != null -> androidx.compose.material3.CircularProgressIndicator(
+                                progress = { runtimeProg },
+                                modifier = Modifier.padding(8.dp).size(28.dp),
+                            )
+                            runtimeInstalled -> androidx.compose.material3.TextButton(onClick = {
+                                eu.kanade.tachiyomi.data.tts.OnnxTts.deleteRuntime(context)
+                                runtimeInstalled = false
+                            }) { Text("Удалить") }
+                            else -> androidx.compose.material3.FilledTonalButton(onClick = {
+                                scope2.launch(Dispatchers.IO) {
+                                    val ok = eu.kanade.tachiyomi.data.tts.OnnxTts.downloadRuntime(context)
+                                    withContext(Dispatchers.Main) { runtimeInstalled = ok }
+                                }
+                            }) { Text("Скачать") }
+                        }
+                    }
+                    if (runtimeProg != null) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { runtimeProg },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                    }
+                }
                 val onnxVoicePref = remember { ocrPreferences.onnxVoice() }
                 val onnxVoice by onnxVoicePref.changes().collectAsState(initial = onnxVoicePref.get())
                 eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.forEach { v ->
@@ -828,6 +855,24 @@ object OcrQueueScreen : Screen() {
                                         selected = onnxVoice == v.id,
                                         onClick = { onnxVoicePref.set(v.id) },
                                     )
+                                    androidx.compose.material3.TextButton(
+                                        enabled = runtimeInstalled,
+                                        onClick = {
+                                            context.toast("Проба: синтез первой фразы (до 20с)…")
+                                            scope2.launch(Dispatchers.IO) {
+                                                val (ok, msg) = eu.kanade.tachiyomi.data.tts.OnnxTts.probe(context, v)
+                                                withContext(Dispatchers.Main) {
+                                                    context.toast("${v.name}: $msg")
+                                                    if (ok) {
+                                                        // Реальное воспроизведение пробы
+                                                        eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(
+                                                            context, "Привет! Так звучит голос ${v.name.substringBefore(" (")}.",
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    ) { Text("▶ Проба") }
                                     androidx.compose.material3.TextButton(onClick = {
                                         eu.kanade.tachiyomi.data.tts.OnnxTts.delete(context, v)
                                         installed = false

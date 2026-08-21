@@ -714,15 +714,23 @@ data object AiChatTab : Tab {
                 modifier = Modifier.fillMaxWidth(),
                 maxLines = 1,
             )
+            // Неотзывчивость кнопок (жалоба): FilterChip не давал никакого
+            // фидбека до первого сетевого статуса (секунды). Теперь —
+            // настоящие кнопки, мгновенный статус и блокировка на время
+            // запуска (заодно защита от даблтапа).
+            var runnerStarting by remember { mutableStateOf(false) }
             eu.kanade.tachiyomi.data.ai.RunnerLlm.GGUF_MODELS.forEach { (key, label, sizeMb) ->
-                FilterChip(
-                    selected = false,
+                androidx.compose.material3.FilledTonalButton(
+                    enabled = !runnerStarting,
                     onClick = {
+                        runnerStarting = true
+                        runnerStatus = "⏳ Запуск $label…" // мгновенный фидбек
                         scope.launch(Dispatchers.IO) {
                             val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSession(context, key) { st ->
                                 runnerStatus = st
                             }
                             withContext(Dispatchers.Main) {
+                                runnerStarting = false
                                 if (s != null) {
                                     sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
                                     backendPref.set("runner")
@@ -730,8 +738,7 @@ data object AiChatTab : Tab {
                             }
                         }
                     },
-                    label = { Text("▶ $label • в ранер скачается $sizeMb МБ") },
-                )
+                ) { Text("▶ $label • $sizeMb МБ") }
             }
             // Своя GGUF-модель по прямой ссылке
             var customGguf by remember { mutableStateOf("") }
@@ -743,14 +750,17 @@ data object AiChatTab : Tab {
                 maxLines = 2,
             )
             androidx.compose.material3.FilledTonalButton(
-                enabled = customGguf.trim().startsWith("http") && customGguf.contains(".gguf"),
+                enabled = !runnerStarting && customGguf.trim().startsWith("http") && customGguf.contains(".gguf"),
                 onClick = {
                     val url = customGguf.trim()
+                    runnerStarting = true
+                    runnerStatus = "⏳ Запуск своей модели…"
                     scope.launch(Dispatchers.IO) {
                         val s = eu.kanade.tachiyomi.data.ai.RunnerLlm.startSessionWithUrl(context, url) { st ->
                             runnerStatus = st
                         }
                         withContext(Dispatchers.Main) {
+                            runnerStarting = false
                             if (s != null) {
                                 sessions = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context)
                                 backendPref.set("runner")
