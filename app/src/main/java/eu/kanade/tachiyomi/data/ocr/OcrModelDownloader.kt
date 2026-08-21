@@ -85,19 +85,6 @@ object OcrModelDownloader {
         "manga_ocr" to listOf("ocr/encoder.tflite", "ocr/decoder.tflite", "ocr/embeddings.bin"),
         "manga_ocr_fast" to listOf("ocr_fast/encoder.tflite", "ocr_fast/decoder.tflite"),
         "panel_detector" to listOf("panel_detector/model.tflite"),
-        // ---- ТОЧНЫЙ русский (tessdata_best): заметно точнее встроенного
-        // fast-пака на мелком тексте манги; медленнее ~1.5-2x. Кладётся в
-        // ocr_models/tessdata/rus.traineddata и ПЕРЕКРЫВАЕТ встроенный.
-        "tess_rus_best" to listOf(
-            "https://github.com/tesseract-ocr/tessdata_best/raw/main/rus.traineddata" to "tessdata/rus.traineddata",
-        ),
-        // Скрипт «вся кириллица» — рус/укр/срб/болг одним паком
-        "tess_cyrillic" to listOf(
-            tess("script/Cyrillic.traineddata") to "tessdata/Cyrillic.traineddata",
-        ),
-        "tess_ukr_best" to listOf(
-            "https://github.com/tesseract-ocr/tessdata_best/raw/main/ukr.traineddata" to "tessdata/ukr.traineddata",
-        ),
         "tess_rus_best" to listOf("tessdata/rus.traineddata"),
         "tess_cyrillic" to listOf("tessdata/Cyrillic.traineddata"),
         "tess_ukr_best" to listOf("tessdata/ukr.traineddata"),
