@@ -28,15 +28,41 @@ enum class VoiceKind { FEMALE, MALE, TEEN, OTHER }
 object VoiceHelper {
     private val femaleHints = listOf(
         "female", "woman", "svetlana", "milena", "oksana", "irina", "jane", "ksenia",
-        "alena", "yelena", "elena", "anna", "maria", "natalia", "natalya", "tatyana",
-        "жен", "женск", "девуш",
+        "alena", "yelena", "elena", "anna", "arina", "maria", "natalia", "natalya",
+        "tatiana", "tatyana", "victoria", "lyubov", "marianna", "жен", "женск", "девуш",
     )
     private val maleHints = listOf(
         "male", "man", "dmitry", "dmitri", "ermil", "filipp", "zahar", "pavel",
-        "alexander", "maxim", "andrey", "ivan", "sergey", "муж",
+        "alexander", "aleksandr", "artemiy", "evgeniy", "mikhail", "vitaliy", "yuriy",
+        "timofey", "seva", "anatol", "volodymyr", "maxim", "andrey", "ivan", "sergey", "муж",
     )
-    private val teenHints = listOf("child", "kid", "teen", "young", "дет", "подрост")
+    private val teenHints = listOf("child", "kid", "teen", "young", "дет", "подрост", "umka")
     private val blacklist = listOf("locale", "default", "test")
+
+    /**
+     * Some OEM Android builds return an empty getVoices() set for RHVoice,
+     * even though setVoice(name) and synthesis work. RHVoice validates a
+     * manually constructed Voice by its name, so this catalog is used only as
+     * a last-resort probe and only installed/enabled names are retained.
+     */
+    private val rhVoiceCatalog = mapOf(
+        "ru" to listOf(
+            "Aleksandr", "Aleksandr-hq", "Anna", "Arina", "Artemiy", "Elena",
+            "Evgeniy-Rus", "Irina", "Mikhail", "Pavel", "Seva", "Tatiana",
+            "Timofey", "Umka", "Victoria", "Vitaliy", "Yuriy",
+        ),
+        "en" to listOf("Alan", "BDL", "CLB", "Evgeniy-Eng", "Lyubov", "SLT"),
+        "uk" to listOf("Anatol", "Marianna", "Natalia", "Volodymyr"),
+    )
+
+    private val languageAliases = mapOf(
+        "ru" to setOf("ru", "rus"),
+        "en" to setOf("en", "eng"),
+        "ja" to setOf("ja", "jpn"),
+        "ko" to setOf("ko", "kor"),
+        "zh" to setOf("zh", "zho", "chi"),
+        "uk" to setOf("uk", "ukr"),
+    )
 
     /**
      * Коды голосов Google Speech Services. Имя выглядит как
@@ -59,26 +85,113 @@ object VoiceHelper {
         "ama", "bma", "cma", "dma", "dmb", "ema", "fma", "gma", "hma", "smb",
     )
 
-    fun russianVoices(tts: TextToSpeech?): List<Voice> = voicesFor(tts, "ru")
+    fun russianVoices(tts: TextToSpeech?, enginePackage: String? = null): List<Voice> =
+        voicesFor(tts, "ru", enginePackage)
+
+    /** Ask a lazy TTS engine to load the requested language before getVoices(). */
+    fun prepareForLanguage(tts: TextToSpeech?, language: String): Int {
+        val engine = tts ?: return TextToSpeech.ERROR
+        val locale = localeFor(language)
+        runCatching { engine.isLanguageAvailable(locale) }
+        return runCatching { engine.setLanguage(locale) }.getOrDefault(TextToSpeech.ERROR)
+    }
 
     /**
-     * Голоса для языка [language] (ISO-639-1). Пустой список, если движок
-     * не отдал голоса.
+     * Голоса для языка [language] (ISO-639-1). Handles ISO-2/ISO-3 locale
+     * differences, lazy engines and an RHVoice-specific OEM fallback.
      */
-    fun voicesFor(tts: TextToSpeech?, language: String): List<Voice> {
+    fun voicesFor(
+        tts: TextToSpeech?,
+        language: String,
+        enginePackage: String? = null,
+    ): List<Voice> {
+        val engine = tts ?: return emptyList()
+        val packageName = enginePackage?.takeIf { it.isNotBlank() }
+            ?: runCatching { engine.defaultEngine }.getOrNull()
+        val isRhVoice = packageName.orEmpty().contains("rhvoice", ignoreCase = true)
         val all = try {
-            tts?.voices
+            engine.voices.orEmpty()
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "voices() failed" }
-            null
-        } ?: return emptyList()
-        val lang = language.lowercase(Locale.US)
-        return all.filter {
-            val tag = it.locale.toLanguageTag().lowercase(Locale.US)
-            val name = it.name.lowercase(Locale.US)
-            (it.locale.language.equals(lang, true) || tag.startsWith("$lang-")) &&
-                blacklist.none { b -> name == b }
+            emptySet()
+        }
+        val filtered = all.filter { voice ->
+            languageMatches(voice.locale, language) &&
+                blacklist.none { blocked -> voice.name.equals(blocked, true) }
         }.sortedBy { it.name }
+        if (isRhVoice) {
+            val direct = filtered.filterNot {
+                it.name.equals("Russian", true) || it.name.equals("English", true)
+            }
+            if (direct.size > 1) return direct
+            val probed = installedRhVoices(engine, language)
+            val merged = (direct + probed)
+                .distinctBy { it.name.lowercase(Locale.US) }
+                .sortedBy { it.name }
+            if (merged.isNotEmpty()) return merged
+        }
+        if (filtered.isNotEmpty()) return filtered
+
+        // Some engines expose only the currently loaded/default Voice while
+        // getVoices() is empty. Keep these as a generic one-voice fallback.
+        return buildList {
+            runCatching { engine.voice }.getOrNull()?.let(::add)
+            runCatching { engine.defaultVoice }.getOrNull()?.let(::add)
+        }.distinctBy { it.name }
+            .filter { languageMatches(it.locale, language) }
+            .sortedBy { it.name }
+    }
+
+    private fun localeFor(language: String): Locale = when (language.lowercase(Locale.US)) {
+        "ru" -> Locale("ru", "RU")
+        "en" -> Locale.US
+        "ja" -> Locale.JAPAN
+        "ko" -> Locale.KOREA
+        "zh" -> Locale.SIMPLIFIED_CHINESE
+        "uk" -> Locale("uk", "UA")
+        else -> Locale(language)
+    }
+
+    private fun languageMatches(locale: Locale, language: String): Boolean {
+        val requested = language.lowercase(Locale.US).substringBefore('-').substringBefore('_')
+        val accepted = languageAliases[requested] ?: setOf(requested)
+        val actual = buildSet {
+            add(locale.language.lowercase(Locale.US))
+            runCatching { locale.isO3Language.lowercase(Locale.US) }.getOrNull()?.let(::add)
+        }
+        return actual.any { it in accepted }
+    }
+
+    /**
+     * RHVoice's service accepts a Voice by exact name and returns ERROR for a
+     * missing/disabled pack. This lets us recover the installed subset on OEM
+     * firmware where Android loses the service's onGetVoices() response.
+     */
+    private fun installedRhVoices(tts: TextToSpeech, language: String): List<Voice> {
+        val lang = language.lowercase(Locale.US)
+        val names = rhVoiceCatalog[lang].orEmpty()
+        if (names.isEmpty()) return emptyList()
+        val original = runCatching { tts.voice }.getOrNull()
+        val locale = localeFor(lang)
+        val result = names.mapNotNull { name ->
+            val candidate = Voice(
+                name,
+                locale,
+                Voice.QUALITY_NORMAL,
+                Voice.LATENCY_NORMAL,
+                false,
+                emptySet(),
+            )
+            candidate.takeIf {
+                runCatching { tts.setVoice(candidate) == TextToSpeech.SUCCESS }.getOrDefault(false)
+            }
+        }
+        if (original != null) {
+            runCatching { tts.setVoice(original) }
+        } else {
+            runCatching { tts.setLanguage(locale) }
+        }
+        return result
     }
 
     /** Значащий сегмент имени Google-голоса: `ru-ru-x-dfc-local` -> `dfc`. */
@@ -122,11 +235,21 @@ object VoiceHelper {
      * достаётся первый нераспознанный, мужским — следующий. Так в сцене
      * звучат разные голоса, даже когда пол формально неизвестен.
      */
-    fun pick(tts: TextToSpeech?, kind: VoiceKind, exactName: String?): Voice? =
-        pickFor(tts, kind, exactName, "ru")
+    fun pick(
+        tts: TextToSpeech?,
+        kind: VoiceKind,
+        exactName: String?,
+        enginePackage: String? = null,
+    ): Voice? = pickFor(tts, kind, exactName, "ru", enginePackage)
 
-    fun pickFor(tts: TextToSpeech?, kind: VoiceKind, exactName: String?, language: String): Voice? {
-        val all = voicesFor(tts, language)
+    fun pickFor(
+        tts: TextToSpeech?,
+        kind: VoiceKind,
+        exactName: String?,
+        language: String,
+        enginePackage: String? = null,
+    ): Voice? {
+        val all = voicesFor(tts, language, enginePackage)
         if (all.isEmpty()) return null
         if (!exactName.isNullOrBlank()) all.find { it.name == exactName }?.let { return it }
 
@@ -164,8 +287,9 @@ object VoiceHelper {
         kind: VoiceKind,
         speakerSlot: Int,
         language: String = "ru",
+        enginePackage: String? = null,
     ): Voice? {
-        val all = voicesFor(tts, language)
+        val all = voicesFor(tts, language, enginePackage)
         if (all.isEmpty()) return null
         val ranked = all.sortedWith(compareBy({ it.isNetworkConnectionRequired }, { it.name }))
         val group = ranked.filter { classify(it) == kind }

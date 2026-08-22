@@ -669,20 +669,30 @@ object OcrQueueScreen : Screen() {
         val systemEnginePkgPref = remember { ocrPreferences.systemTtsEngine() }
         val systemEnginePkg by systemEnginePkgPref.changes().collectAsState(initial = systemEnginePkgPref.get())
 
-        // Живой probe системного TTS: реальные голоса именно выбранного
-        // движка (RHVoice, Google, Acapela и т. д.), а не движка Android
-        // по умолчанию. При смене пакета probe пересоздаётся сразу.
+        var langFilter by remember { mutableStateOf("ru") }
+        var assignMode by remember { mutableIntStateOf(0) } // 0=основной, 1=♀, 2=♂
+
+        // Живой probe выбранного TTS-движка. Некоторые OEM-прошивки вызывают
+        // OnInit до возврата конструктора, а RHVoice/Acapela могут публиковать
+        // голоса с задержкой. Поэтому callback переносится в main queue, после
+        // чего язык загружается явно и список опрашивается несколько раз.
         var probe by remember { mutableStateOf<TextToSpeech?>(null) }
         var probeReady by remember { mutableStateOf(false) }
+        var probeInitStatus by remember { mutableIntStateOf(Int.MIN_VALUE) }
+        var voiceRevision by remember { mutableIntStateOf(0) }
+        var voiceRefresh by remember { mutableIntStateOf(0) }
         DisposableEffect(systemEnginePkg) {
             probe = null
             probeReady = false
+            probeInitStatus = Int.MIN_VALUE
             var tts: TextToSpeech? = null
             var disposed = false
             val listener = TextToSpeech.OnInitListener { status ->
-                if (!disposed) {
-                    if (status == TextToSpeech.SUCCESS) probe = tts
-                    probeReady = true
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (!disposed) {
+                        probe = tts.takeIf { status == TextToSpeech.SUCCESS }
+                        probeInitStatus = status
+                    }
                 }
             }
             tts = if (systemEnginePkg.isBlank()) {
@@ -697,14 +707,26 @@ object OcrQueueScreen : Screen() {
                 runCatching { tts?.shutdown() }
             }
         }
-
-        var langFilter by remember { mutableStateOf("ru") }
-        var assignMode by remember { mutableIntStateOf(0) } // 0=основной, 1=♀, 2=♂
+        LaunchedEffect(probe, probeInitStatus, langFilter, systemEnginePkg, voiceRefresh) {
+            val activeProbe = probe
+            if (probeInitStatus != TextToSpeech.SUCCESS || activeProbe == null) {
+                probeReady = probeInitStatus != Int.MIN_VALUE
+                return@LaunchedEffect
+            }
+            probeReady = false
+            VoiceHelper.prepareForLanguage(activeProbe, langFilter)
+            for (attempt in 0 until 6) {
+                voiceRevision++
+                if (VoiceHelper.voicesFor(activeProbe, langFilter, systemEnginePkg).isNotEmpty()) break
+                kotlinx.coroutines.delay(250L + attempt * 150L)
+            }
+            probeReady = true
+        }
 
         // Реальный список голосов из системного движка, офлайн/онлайн раздельно
-        val allVoices = remember(probe, probeReady, langFilter) {
+        val allVoices = remember(probe, probeReady, langFilter, systemEnginePkg, voiceRevision) {
             runCatching {
-                VoiceHelper.voicesFor(probe, langFilter)
+                VoiceHelper.voicesFor(probe, langFilter, systemEnginePkg)
                     .sortedWith(
                         compareBy(
                             { it.isNetworkConnectionRequired }, // офлайн вверх
@@ -940,6 +962,12 @@ object OcrQueueScreen : Screen() {
                             text = "После смены движка список ниже обновится автоматически. " +
                                 "Голоса RHVoice/Acapela появятся в общем списке.",
                         )
+                        androidx.compose.material3.TextButton(
+                            onClick = { voiceRefresh++ },
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        ) {
+                            Text("↻ Перечитать голоса движка")
+                        }
                     }
                 }
                 PreferenceGroupHeader(title = "Голоса устройства")

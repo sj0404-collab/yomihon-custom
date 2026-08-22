@@ -186,12 +186,6 @@
             android:exported="false" />
 
         <activity
-            android:name=".ui.aichat.RunnerTerminalActivity"
-            android:configChanges="uiMode|orientation|screenSize|keyboard|keyboardHidden"
-            android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
-
-        <activity
             android:name=".extension.util.ExtensionInstallActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />

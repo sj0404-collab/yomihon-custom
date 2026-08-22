@@ -2,6 +2,9 @@ package eu.kanade.tachiyomi.ui.aichat
 
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.webkit.HttpAuthHandler
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -49,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -64,6 +68,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import eu.kanade.presentation.util.Tab
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.tachiyomi.data.ai.AiAgent
@@ -163,6 +168,9 @@ data object AiChatTab : Tab {
         val scope = rememberCoroutineScope()
 
         var tab by rememberSaveable { mutableStateOf(0) } // 0=чат, 1=workspace, 2=настройки
+        var terminalSession by remember {
+            mutableStateOf<eu.kanade.tachiyomi.data.ai.RunnerLlm.Session?>(null)
+        }
         val messages by historyFlow.collectAsState()
         var input by rememberSaveable { mutableStateOf("") }
         val busy by busyFlow.collectAsState()
@@ -326,6 +334,13 @@ data object AiChatTab : Tab {
                 FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Workspace") })
                 FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("⚙") })
                 FilterChip(selected = tab == 3, onClick = { tab = 3 }, label = { Text("🔌 Плагины") })
+                terminalSession?.let { session ->
+                    FilterChip(
+                        selected = tab == 4,
+                        onClick = { tab = 4 },
+                        label = { Text("🖥 Терминал ${session.os}") },
+                    )
+                }
                 if (tab == 0) {
                     ModelChip()
                     FilterChip(
@@ -440,8 +455,25 @@ data object AiChatTab : Tab {
                     modifier = Modifier.weight(1f),
                 )
                 1 -> WorkspaceBody(modifier = Modifier.weight(1f))
+                2 -> SettingsBody(
+                    modifier = Modifier.weight(1f),
+                    onOpenTerminal = { session ->
+                        terminalSession = session
+                        tab = 4
+                    },
+                )
                 3 -> PluginsBody(modifier = Modifier.weight(1f))
-                else -> SettingsBody(modifier = Modifier.weight(1f))
+                4 -> terminalSession?.let { session ->
+                    RunnerTerminalBody(
+                        session = session,
+                        modifier = Modifier.weight(1f),
+                        onClose = {
+                            terminalSession = null
+                            tab = 2
+                        },
+                    )
+                }
+                else -> Unit
             }
         }
     }
@@ -503,8 +535,88 @@ data object AiChatTab : Tab {
         }
     }
 
+    /** Embedded ttyd console: it is an AI sub-tab, not a full-screen Activity. */
     @Composable
-    private fun SettingsBody(modifier: Modifier = Modifier) {
+    @android.annotation.SuppressLint("SetJavaScriptEnabled")
+    private fun RunnerTerminalBody(
+        session: eu.kanade.tachiyomi.data.ai.RunnerLlm.Session,
+        modifier: Modifier = Modifier,
+        onClose: () -> Unit,
+    ) {
+        val context = LocalContext.current
+        val url = session.terminalUrl.orEmpty()
+        var loading by remember(session.id) { mutableStateOf(true) }
+        val webView = remember(session.id, url) {
+            WebView(context).apply {
+                setBackgroundColor(android.graphics.Color.BLACK)
+                isFocusable = true
+                isFocusableInTouchMode = true
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.loadWithOverviewMode = false
+                settings.useWideViewPort = false
+                settings.builtInZoomControls = false
+                settings.displayZoomControls = false
+                webViewClient = object : WebViewClient() {
+                    override fun onReceivedHttpAuthRequest(
+                        view: WebView?,
+                        handler: HttpAuthHandler,
+                        host: String?,
+                        realm: String?,
+                    ) {
+                        handler.proceed("yomikai", session.apiKey.orEmpty())
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        loading = false
+                        view?.requestFocus()
+                    }
+                }
+                if (url.isNotBlank()) loadUrl(url)
+            }
+        }
+        DisposableEffect(webView) {
+            onDispose {
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+                webView.stopLoading()
+                webView.destroy()
+            }
+        }
+
+        Column(modifier = modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "${if (session.os == "windows") "Windows" else "Linux"} • ${session.model}" +
+                        if (loading) " • подключение…" else " • терминал",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = {
+                        loading = true
+                        webView.reload()
+                    },
+                ) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Перезагрузить терминал")
+                }
+                androidx.compose.material3.TextButton(onClick = onClose) { Text("Закрыть") }
+            }
+            AndroidView(
+                factory = { webView },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+
+    @Composable
+    private fun SettingsBody(
+        modifier: Modifier = Modifier,
+        onOpenTerminal: (eu.kanade.tachiyomi.data.ai.RunnerLlm.Session) -> Unit,
+    ) {
         val context = LocalContext.current
         val prefs = remember { Injekt.get<OcrPreferences>() }
         val tabVisiblePref = remember { prefs.aiTabVisible() }
@@ -893,20 +1005,7 @@ data object AiChatTab : Tab {
                         if (s.terminalUrl != null) {
                             FilterChip(
                                 selected = false,
-                                onClick = {
-                                    // ВСТРОЕННОЕ окно терминала (по запросу
-                                    // пользователя): консоль ранера прямо в
-                                    // приложении, печатать/искать можно сразу.
-                                    // Авторизация подставляется автоматически.
-                                    context.startActivity(
-                                        RunnerTerminalActivity.newIntent(
-                                            context,
-                                            s.terminalUrl!!,
-                                            "yomikai",
-                                            s.apiKey.orEmpty(),
-                                        ),
-                                    )
-                                },
+                                onClick = { onOpenTerminal(s) },
                                 label = { Text("🖥 Терминал (${s.os})") },
                             )
                         }

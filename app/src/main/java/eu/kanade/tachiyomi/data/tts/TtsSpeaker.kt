@@ -205,19 +205,26 @@ object TtsSpeaker {
             // важнее автоподбора.
             val v: android.speech.tts.Voice? = when {
                 presetVoice.isNotBlank() && speakerSlot == 0 ->
-                    engine.voices?.find { it.name == presetVoice }
-                        ?: VoiceHelper.pick(engine, kind ?: VoiceKind.FEMALE, null)
+                    VoiceHelper.pick(
+                        engine,
+                        kind ?: VoiceKind.FEMALE,
+                        presetVoice,
+                        systemEnginePkg,
+                    )
                 kind != null && speakerSlot > 0 ->
-                    VoiceHelper.pickForSpeaker(engine, kind, speakerSlot)
-                        ?: VoiceHelper.pick(engine, kind, null)
-                kind != null -> VoiceHelper.pick(engine, kind, null)
+                    VoiceHelper.pickForSpeaker(
+                        engine,
+                        kind,
+                        speakerSlot,
+                        enginePackage = systemEnginePkg,
+                    ) ?: VoiceHelper.pick(engine, kind, null, systemEnginePkg)
+                kind != null -> VoiceHelper.pick(engine, kind, null, systemEnginePkg)
                 else -> {
                     val saved = p.voiceName().get()
                     // Автоподбор как в overlay-translator: если голос не выбран
                     // или его нет в системе — берём лучший русский женский
                     // (Svetlana и др.), затем любой русский.
-                    engine.voices?.find { saved.isNotBlank() && it.name == saved }
-                        ?: VoiceHelper.pick(engine, VoiceKind.FEMALE, null)
+                    VoiceHelper.pick(engine, VoiceKind.FEMALE, saved, systemEnginePkg)
                 }
             }
             if (v != null) {

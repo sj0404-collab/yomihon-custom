@@ -79,79 +79,113 @@ fun TtsSettingsDialog(
     var voices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var sysReady by remember { mutableStateOf(false) }
     val systemEnginePkg = remember { prefs.systemTtsEngine().get() }
+    var probe by remember { mutableStateOf<TextToSpeech?>(null) }
+    var probeInitStatus by remember { mutableStateOf(Int.MIN_VALUE) }
 
     DisposableEffect(systemEnginePkg) {
         voices = emptyList()
         sysReady = false
-        var probe: TextToSpeech? = null
+        probe = null
+        probeInitStatus = Int.MIN_VALUE
+        var tts: TextToSpeech? = null
         var disposed = false
         val listener = TextToSpeech.OnInitListener { status ->
-            if (disposed) return@OnInitListener
-            if (status == TextToSpeech.SUCCESS) {
-                // Группировка из overlay-translator: русские голоса,
-                // классифицированные по полу (Svetlana и др. — ♀,
-                // Dmitry и др. — ♂, детские — подростковые)
-                voices = runCatching {
-                    eu.kanade.tachiyomi.data.tts.VoiceHelper.russianVoices(probe)
-                        .sortedWith(
-                            compareBy(
-                                {
-                                    when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(it)) {
-                                        eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> 0
-                                        eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> 1
-                                        eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> 2
-                                        else -> 3
-                                    }
-                                },
-                                { it.isNetworkConnectionRequired },
-                                { it.name },
-                            ),
-                        )
-                        .map { v ->
-                            val kind = when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(v)) {
-                                eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> "♀ Женский"
-                                eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> "♂ Мужской"
-                                eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> "👦 Подросток"
-                                else -> "Другой"
-                            }
-                            val net = if (v.isNetworkConnectionRequired) "☁ сеть" else "📱 локальный"
-                            v.name to "$kind • $net • ${v.name.substringAfterLast(':')}"
-                        }
-                }.getOrDefault(emptyList())
-                // Автовыбор по умолчанию (как в overlay-translator): если
-                // голос не выбран или отсутствует в системе — подставляем
-                // лучший из группы (Svetlana для ♀, Dmitry для ♂).
-                runCatching {
-                    val names = voices.map { it.first }.toSet()
-                    if (selectedVoice.isBlank() || selectedVoice !in names) {
-                        eu.kanade.tachiyomi.data.tts.VoiceHelper
-                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE, null)
-                            ?.let { selectedVoice = it.name }
-                    }
-                    if (voiceFemale.isBlank() || voiceFemale !in names) {
-                        eu.kanade.tachiyomi.data.tts.VoiceHelper
-                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE, null)
-                            ?.let { voiceFemale = it.name }
-                    }
-                    if (voiceMale.isBlank() || voiceMale !in names) {
-                        eu.kanade.tachiyomi.data.tts.VoiceHelper
-                            .pick(probe, eu.kanade.tachiyomi.data.tts.VoiceKind.MALE, null)
-                            ?.let { voiceMale = it.name }
-                    }
+            // OEM implementations may invoke OnInit before the constructor
+            // assignment above completes. Posting also lets lazy engines bind.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (!disposed) {
+                    probe = tts.takeIf { status == TextToSpeech.SUCCESS }
+                    probeInitStatus = status
                 }
             }
-            sysReady = true
         }
-        probe = if (systemEnginePkg.isBlank()) {
+        tts = if (systemEnginePkg.isBlank()) {
             TextToSpeech(context.applicationContext, listener)
         } else {
             TextToSpeech(context.applicationContext, listener, systemEnginePkg)
         }
         onDispose {
             disposed = true
-            runCatching { probe?.stop() }
-            runCatching { probe?.shutdown() }
+            runCatching { tts?.stop() }
+            runCatching { tts?.shutdown() }
         }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(probe, probeInitStatus, systemEnginePkg) {
+        val activeProbe = probe
+        if (probeInitStatus != TextToSpeech.SUCCESS || activeProbe == null) {
+            sysReady = probeInitStatus != Int.MIN_VALUE
+            return@LaunchedEffect
+        }
+        sysReady = false
+        eu.kanade.tachiyomi.data.tts.VoiceHelper.prepareForLanguage(activeProbe, "ru")
+        var found = emptyList<android.speech.tts.Voice>()
+        for (attempt in 0 until 6) {
+            found = eu.kanade.tachiyomi.data.tts.VoiceHelper
+                .russianVoices(activeProbe, systemEnginePkg)
+            if (found.isNotEmpty()) break
+            kotlinx.coroutines.delay(250L + attempt * 150L)
+        }
+        voices = found
+            .sortedWith(
+                compareBy(
+                    {
+                        when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(it)) {
+                            eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> 0
+                            eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> 1
+                            eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> 2
+                            else -> 3
+                        }
+                    },
+                    { it.isNetworkConnectionRequired },
+                    { it.name },
+                ),
+            )
+            .map { voice ->
+                val kind = when (eu.kanade.tachiyomi.data.tts.VoiceHelper.classify(voice)) {
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE -> "♀ Женский"
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.MALE -> "♂ Мужской"
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.TEEN -> "👦 Подросток"
+                    else -> "Другой"
+                }
+                val net = if (voice.isNetworkConnectionRequired) "☁ сеть" else "📱 локальный"
+                voice.name to "$kind • $net • ${voice.name.substringAfterLast(':')}"
+            }
+
+        // Автовыбор выполняется по тому же выбранному пакету движка, включая
+        // RHVoice fallback для прошивок с пустым getVoices().
+        val names = voices.map { it.first }.toSet()
+        if (selectedVoice.isBlank() || selectedVoice !in names) {
+            eu.kanade.tachiyomi.data.tts.VoiceHelper
+                .pick(
+                    activeProbe,
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE,
+                    null,
+                    systemEnginePkg,
+                )
+                ?.let { selectedVoice = it.name }
+        }
+        if (voiceFemale.isBlank() || voiceFemale !in names) {
+            eu.kanade.tachiyomi.data.tts.VoiceHelper
+                .pick(
+                    activeProbe,
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.FEMALE,
+                    null,
+                    systemEnginePkg,
+                )
+                ?.let { voiceFemale = it.name }
+        }
+        if (voiceMale.isBlank() || voiceMale !in names) {
+            eu.kanade.tachiyomi.data.tts.VoiceHelper
+                .pick(
+                    activeProbe,
+                    eu.kanade.tachiyomi.data.tts.VoiceKind.MALE,
+                    null,
+                    systemEnginePkg,
+                )
+                ?.let { voiceMale = it.name }
+        }
+        sysReady = true
     }
 
     AlertDialog(
