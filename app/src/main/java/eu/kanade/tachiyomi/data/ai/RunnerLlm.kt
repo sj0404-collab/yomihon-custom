@@ -128,142 +128,322 @@ object RunnerLlm {
             onStatus("Нет GitHub-токена: задайте его в настройках вкладки AI (⚙)")
             return@withContext null
         }
+        val selectedOs = if (os == "windows") "windows" else "linux"
         val session = Session(
             id = "s" + System.currentTimeMillis().toString(36) + (1000..9999).random(),
             model = modelKey,
-            os = os,
+            os = selectedOs,
         )
-        onStatus("Запуск ранера…")
-        val dispatched = runCatching {
-            val conn = URL("https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/dispatches")
-                .openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-            conn.setRequestProperty("Authorization", "token $token")
-            conn.setRequestProperty("Accept", "application/vnd.github+json")
-            val body = JSONObject()
-                .put("ref", "main")
-                .put(
-                    "inputs",
-                    JSONObject()
-                        .put("model", modelKey)
-                        .put("session", session.id)
-                        .put("custom_url", customUrl)
-                        .put("os", os),
-                )
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
-            val ok = conn.responseCode in 200..299
-            conn.disconnect()
-            ok
-        }.getOrDefault(false)
-        if (!dispatched) {
-            onStatus("Не удалось запустить workflow (токен? сеть?)")
+
+        onStatus("Отправляем запуск в GitHub Actions…")
+        val dispatchBody = JSONObject()
+            .put("ref", "main")
+            .put(
+                "inputs",
+                JSONObject()
+                    .put("model", modelKey)
+                    .put("session", session.id)
+                    .put("custom_url", customUrl)
+                    .put("os", selectedOs),
+            )
+        val dispatch = runCatching {
+            githubRequest(
+                token = token,
+                url = "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/dispatches",
+                method = "POST",
+                body = dispatchBody.toString(),
+            )
+        }.getOrElse {
+            onStatus("Не удалось связаться с GitHub: ${it.message ?: "ошибка сети"}")
+            return@withContext null
+        }
+        if (dispatch.code !in 200..299) {
+            onStatus("GitHub отклонил запуск (${dispatch.code}): ${apiError(dispatch.body)}")
             return@withContext null
         }
 
-        // Ожидание артефакта endpoint-<session>: модель качается в ранер 2-5 мин.
-        // ЛОГИ ЗАПУСКА (по запросу пользователя): опрашиваем реальный статус
-        // шага workflow и показываем, что именно сейчас происходит.
-        onStatus("Ранер скачивает модель (2-5 мин)…")
-        val deadline = System.currentTimeMillis() + 8 * 60_000L
+        // Workflow dispatch не возвращает id запуска. Находим ровно наш run по
+        // уникальному session id, затем читаем только ЕГО job и артефакты.
+        // Это устраняет гонку старой реализации с глобальными 20 артефактами.
+        val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
+        var lastStatus = ""
+        var runId: Long? = null
         while (System.currentTimeMillis() < deadline) {
-            delay(15_000)
-            fetchRunStep(token, session.id)?.let { onStatus(it) }
-            val endpoint = fetchEndpointArtifact(token, session.id)
-            if (endpoint != null) {
-                session.url = endpoint.first
-                session.apiKey = endpoint.second
-                session.terminalUrl = endpoint.third.ifBlank { null }
-                saveSession(context, session)
-                onStatus("Сессия готова: ${endpoint.first}")
-                return@withContext session
+            val state = fetchRunState(token, session.id, selectedOs)
+            runId = state.runId ?: runId
+            if (state.message != lastStatus) {
+                onStatus(state.message)
+                lastStatus = state.message
             }
-            onStatus("Ждём туннель… (${(deadline - System.currentTimeMillis()) / 1000}с)")
+
+            // Endpoint публикуется до долгого keep-alive шага. Ищем его в
+            // конкретном run, поэтому параллельные ранеры больше не мешают.
+            runId?.let { id ->
+                fetchEndpointArtifact(token, id, session.id)?.let { endpoint ->
+                    session.url = endpoint.first
+                    session.apiKey = endpoint.second
+                    session.terminalUrl = endpoint.third.ifBlank { null }
+                    saveSession(context, session)
+                    onStatus("✅ Сессия готова: ${endpoint.first}")
+                    return@withContext session
+                }
+            }
+
+            // Раньше failure/cancelled молча проглатывались, и приложение все
+            // восемь минут показывало ожидание. Теперь ошибка шага видна сразу.
+            if (state.terminal) {
+                onStatus(state.message)
+                return@withContext null
+            }
+            delay(POLL_INTERVAL_MS)
         }
-        onStatus("Таймаут: ранер не поднялся за 8 минут")
+        onStatus(
+            if (runId == null) {
+                "Таймаут: GitHub не создал запуск за ${START_TIMEOUT_MS / 60_000} минут"
+            } else {
+                "Таймаут: endpoint не появился за ${START_TIMEOUT_MS / 60_000} минут. " +
+                    "Последний статус: ${lastStatus.ifBlank { "неизвестен" }}"
+            },
+        )
         null
     }
 
-    /** Живой статус запуска: имя выполняемого шага джобы llm-runner. */
-    private fun fetchRunStep(token: String, sessionId: String): String? {
-        return runCatching {
-            val runsConn = URL(
-                "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/runs?per_page=5",
-            ).openConnection() as HttpURLConnection
-            runsConn.setRequestProperty("Authorization", "token $token")
-            val body = runsConn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-            runsConn.disconnect()
-            val runs = JSONObject(body).getJSONArray("workflow_runs")
-            var runId = -1L
-            for (i in 0 until runs.length()) {
-                val r = runs.getJSONObject(i)
-                if (r.optString("display_title").contains(sessionId)) {
-                    runId = r.getLong("id")
-                    break
-                }
+    private const val START_TIMEOUT_MS = 12L * 60_000L
+    private const val POLL_INTERVAL_MS = 5_000L
+
+    private data class GithubResponse(val code: Int, val body: String)
+
+    private data class BinaryResponse(val code: Int, val body: ByteArray)
+
+    private data class RunState(
+        val runId: Long? = null,
+        val terminal: Boolean = false,
+        val message: String,
+    )
+
+    /** GET/POST GitHub API с таймаутами и чтением тела ошибки. */
+    private fun githubRequest(
+        token: String,
+        url: String,
+        method: String = "GET",
+        body: String? = null,
+    ): GithubResponse {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = method
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            conn.setRequestProperty("User-Agent", "Yomihon-Runner")
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.outputStream.use { it.write(body.toByteArray()) }
             }
-            if (runId < 0) return "Ранер в очереди GitHub…"
-            val jobsConn = URL("https://api.github.com/repos/$REPO/actions/runs/$runId/jobs")
-                .openConnection() as HttpURLConnection
-            jobsConn.setRequestProperty("Authorization", "token $token")
-            val jbody = jobsConn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-            jobsConn.disconnect()
-            val jobs = JSONObject(jbody).getJSONArray("jobs")
-            if (jobs.length() == 0) return "Ранер стартует…"
-            val job = jobs.getJSONObject(0)
-            if (job.optString("status") == "queued") return "Ранер в очереди…"
-            val steps = job.optJSONArray("steps") ?: return "Ранер работает…"
-            for (i in 0 until steps.length()) {
-                val st = steps.getJSONObject(i)
-                if (st.optString("status") == "in_progress") {
-                    return "▶ " + when (st.optString("name")) {
-                        "Download llama.cpp server" -> "Скачивается llama.cpp…"
-                        "Download GGUF model" -> "Скачивается модель в ранер…"
-                        "Start server, terminal and tunnels" -> "Запуск сервера и туннелей…"
-                        else -> st.optString("name")
-                    }
-                }
-            }
-            "Ранер работает…"
-        }.getOrNull()
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            return GithubResponse(code, stream?.use { it.readBytes().toString(Charsets.UTF_8) }.orEmpty())
+        } finally {
+            conn.disconnect()
+        }
     }
 
-    /** Ищет артефакт endpoint-<session>, скачивает zip и достаёт endpoint.json. */
-    private fun fetchEndpointArtifact(token: String, sessionId: String): Triple<String, String, String>? {
+    /** Скачивание бинарного артефакта с безопасным проходом GitHub redirect. */
+    private fun githubDownload(token: String, initialUrl: String): BinaryResponse {
+        var currentUrl = initialUrl
+        repeat(5) {
+            val url = URL(currentUrl)
+            val conn = url.openConnection() as HttpURLConnection
+            try {
+                conn.instanceFollowRedirects = false
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 30_000
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+                conn.setRequestProperty("User-Agent", "Yomihon-Runner")
+                // Не отправляем PAT на внешний release-assets/blob storage.
+                if (url.host == "api.github.com") {
+                    conn.setRequestProperty("Authorization", "Bearer $token")
+                    conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                }
+                val code = conn.responseCode
+                if (code in setOf(301, 302, 303, 307, 308)) {
+                    currentUrl = conn.getHeaderField("Location")
+                        ?: return BinaryResponse(code, ByteArray(0))
+                } else {
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    return BinaryResponse(code, stream?.use { it.readBytes() } ?: ByteArray(0))
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return BinaryResponse(310, ByteArray(0))
+    }
+
+    private fun apiError(body: String): String = runCatching {
+        JSONObject(body).optString("message").ifBlank { body.take(180) }
+    }.getOrDefault(body.take(180)).ifBlank { "нет описания" }
+
+    /** Реальный статус выбранной job; failure/cancelled являются терминальными. */
+    private fun fetchRunState(token: String, sessionId: String, os: String): RunState {
         return runCatching {
-            val listConn = URL("https://api.github.com/repos/$REPO/actions/artifacts?per_page=20")
-                .openConnection() as HttpURLConnection
-            listConn.setRequestProperty("Authorization", "token $token")
-            val body = listConn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-            listConn.disconnect()
-            val arts = JSONObject(body).getJSONArray("artifacts")
-            var dlUrl: String? = null
-            for (i in 0 until arts.length()) {
-                val a = arts.getJSONObject(i)
-                if (a.getString("name") == "endpoint-$sessionId" && !a.getBoolean("expired")) {
-                    dlUrl = a.getString("archive_download_url")
+            val runsResponse = githubRequest(
+                token,
+                "https://api.github.com/repos/$REPO/actions/workflows/$WORKFLOW/runs" +
+                    "?event=workflow_dispatch&per_page=20",
+            )
+            if (runsResponse.code !in 200..299) {
+                return RunState(message = "GitHub API ${runsResponse.code}: ${apiError(runsResponse.body)}")
+            }
+            val runs = JSONObject(runsResponse.body).getJSONArray("workflow_runs")
+            var run: JSONObject? = null
+            for (i in 0 until runs.length()) {
+                val candidate = runs.getJSONObject(i)
+                if (candidate.optString("display_title").contains(sessionId)) {
+                    run = candidate
                     break
                 }
             }
-            if (dlUrl == null) return null
-            val zipConn = URL(dlUrl).openConnection() as HttpURLConnection
-            zipConn.setRequestProperty("Authorization", "token $token")
-            zipConn.instanceFollowRedirects = true
-            val zipBytes = zipConn.inputStream.use { it.readBytes() }
-            zipConn.disconnect()
-            var json: String? = null
-            ZipInputStream(zipBytes.inputStream()).use { zis ->
-                var e = zis.nextEntry
-                while (e != null) {
-                    if (e.name == "endpoint.json") {
-                        json = zis.readBytes().toString(Charsets.UTF_8)
-                        break
-                    }
-                    e = zis.nextEntry
+            val foundRun = run ?: return RunState(message = "⏳ Запуск принят, ждём ранер GitHub…")
+            val runId = foundRun.getLong("id")
+            val runStatus = foundRun.optString("status")
+            val runConclusion = foundRun.optString("conclusion")
+            if (runStatus == "queued" || runStatus == "waiting" || runStatus == "pending") {
+                return RunState(runId = runId, message = "⏳ Ранер в очереди GitHub…")
+            }
+
+            val jobsResponse = githubRequest(
+                token,
+                "https://api.github.com/repos/$REPO/actions/runs/$runId/jobs?per_page=20",
+            )
+            if (jobsResponse.code !in 200..299) {
+                return RunState(
+                    runId = runId,
+                    terminal = runStatus == "completed",
+                    message = "GitHub jobs API ${jobsResponse.code}: ${apiError(jobsResponse.body)}",
+                )
+            }
+            val jobs = JSONObject(jobsResponse.body).getJSONArray("jobs")
+            val wantedName = "serve-$os"
+            var job: JSONObject? = null
+            for (i in 0 until jobs.length()) {
+                val candidate = jobs.getJSONObject(i)
+                if (candidate.optString("name") == wantedName) {
+                    job = candidate
+                    break
                 }
             }
-            val j = JSONObject(json ?: return null)
-            Triple(j.getString("url"), j.getString("api_key"), j.optString("terminal"))
+            if (job == null) {
+                for (i in 0 until jobs.length()) {
+                    val candidate = jobs.getJSONObject(i)
+                    if (candidate.optString("conclusion") != "skipped") {
+                        job = candidate
+                        break
+                    }
+                }
+            }
+
+            val selectedJob = job
+            val completed = runStatus == "completed" || selectedJob?.optString("status") == "completed"
+            val conclusion = selectedJob?.optString("conclusion").orEmpty().ifBlank { runConclusion }
+            val steps = selectedJob?.optJSONArray("steps")
+            if (completed) {
+                var failedStep = ""
+                if (steps != null) {
+                    for (i in 0 until steps.length()) {
+                        val step = steps.getJSONObject(i)
+                        if (step.optString("conclusion") in setOf("failure", "cancelled", "timed_out")) {
+                            failedStep = step.optString("name")
+                            break
+                        }
+                    }
+                }
+                val detail = when (conclusion) {
+                    "cancelled" -> "запуск отменён"
+                    "timed_out" -> "превышен лимит времени"
+                    "success" -> "job завершилась до публикации endpoint"
+                    else -> "ошибка запуска"
+                }
+                return RunState(
+                    runId = runId,
+                    terminal = true,
+                    message = "❌ $detail" +
+                        failedStep.takeIf { it.isNotBlank() }?.let { " • шаг: $it" }.orEmpty() +
+                        " • run #$runId",
+                )
+            }
+
+            if (steps != null) {
+                for (i in 0 until steps.length()) {
+                    val step = steps.getJSONObject(i)
+                    if (step.optString("status") == "in_progress") {
+                        val name = step.optString("name")
+                        val text = when {
+                            name.startsWith("Restore model cache") -> "Проверяем кэш модели…"
+                            name.startsWith("Download llama.cpp") -> "Скачивается llama.cpp…"
+                            name.startsWith("Download GGUF") -> "Скачивается модель в ранер…"
+                            name.startsWith("Save model cache") -> "Сохраняем модель в кэш…"
+                            name.startsWith("Start server") -> "Запускаются сервер и туннель…"
+                            name.startsWith("Upload endpoint") -> "Публикуется endpoint…"
+                            name.startsWith("Keep session") -> "Ранер готов, забираем endpoint…"
+                            else -> name
+                        }
+                        return RunState(runId = runId, message = "▶ $text")
+                    }
+                }
+            }
+            RunState(runId = runId, message = "▶ Ранер запускается…")
+        }.getOrElse {
+            RunState(runId = null, message = "Временная ошибка статуса: ${it.message ?: "сеть"}")
+        }
+    }
+
+    /** Ищет endpoint только внутри нужного run, скачивает zip и читает JSON. */
+    private fun fetchEndpointArtifact(
+        token: String,
+        runId: Long,
+        sessionId: String,
+    ): Triple<String, String, String>? {
+        return runCatching {
+            val response = githubRequest(
+                token,
+                "https://api.github.com/repos/$REPO/actions/runs/$runId/artifacts?per_page=100",
+            )
+            if (response.code !in 200..299) return null
+            val artifacts = JSONObject(response.body).getJSONArray("artifacts")
+            var downloadUrl: String? = null
+            for (i in 0 until artifacts.length()) {
+                val artifact = artifacts.getJSONObject(i)
+                if (
+                    artifact.getString("name") == "endpoint-$sessionId" &&
+                    !artifact.getBoolean("expired")
+                ) {
+                    downloadUrl = artifact.getString("archive_download_url")
+                    break
+                }
+            }
+            val url = downloadUrl ?: return null
+            val zipResponse = githubDownload(token, url)
+            if (zipResponse.code !in 200..299 || zipResponse.body.isEmpty()) return null
+            var endpointJson: String? = null
+            ZipInputStream(zipResponse.body.inputStream()).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (entry.name == "endpoint.json") {
+                        endpointJson = zis.readBytes().toString(Charsets.UTF_8)
+                        break
+                    }
+                    entry = zis.nextEntry
+                }
+            }
+            val endpoint = JSONObject(endpointJson ?: return null)
+            Triple(
+                endpoint.getString("url"),
+                endpoint.getString("api_key"),
+                endpoint.optString("terminal"),
+            )
         }.getOrNull()
     }
 
