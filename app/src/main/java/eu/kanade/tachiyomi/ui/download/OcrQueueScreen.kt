@@ -666,17 +666,34 @@ object OcrQueueScreen : Screen() {
         val elevenKey by elevenKeyPref.changes().collectAsState(initial = elevenKeyPref.get())
         val elevenVoiceIdPref = remember { ocrPreferences.elevenVoiceId() }
         val elevenVoiceId by elevenVoiceIdPref.changes().collectAsState(initial = elevenVoiceIdPref.get())
+        val systemEnginePkgPref = remember { ocrPreferences.systemTtsEngine() }
+        val systemEnginePkg by systemEnginePkgPref.changes().collectAsState(initial = systemEnginePkgPref.get())
 
-        // Живой probe системного TTS: реальные голоса устройства
+        // Живой probe системного TTS: реальные голоса именно выбранного
+        // движка (RHVoice, Google, Acapela и т. д.), а не движка Android
+        // по умолчанию. При смене пакета probe пересоздаётся сразу.
         var probe by remember { mutableStateOf<TextToSpeech?>(null) }
         var probeReady by remember { mutableStateOf(false) }
-        DisposableEffect(Unit) {
+        DisposableEffect(systemEnginePkg) {
+            probe = null
+            probeReady = false
             var tts: TextToSpeech? = null
-            tts = TextToSpeech(context) { status ->
-                if (status == TextToSpeech.SUCCESS) probe = tts
-                probeReady = true
+            var disposed = false
+            val listener = TextToSpeech.OnInitListener { status ->
+                if (!disposed) {
+                    if (status == TextToSpeech.SUCCESS) probe = tts
+                    probeReady = true
+                }
+            }
+            tts = if (systemEnginePkg.isBlank()) {
+                TextToSpeech(context.applicationContext, listener)
+            } else {
+                TextToSpeech(context.applicationContext, listener, systemEnginePkg)
             }
             onDispose {
+                disposed = true
+                if (probe === tts) probe = null
+                runCatching { tts?.stop() }
                 runCatching { tts?.shutdown() }
             }
         }
@@ -903,27 +920,25 @@ object OcrQueueScreen : Screen() {
                 // Acapela / любой установленный. Список — РЕАЛЬНЫЙ, из
                 // TextToSpeech.engines устройства.
                 run {
-                    val enginePkgPref = remember { ocrPreferences.systemTtsEngine() }
-                    val enginePkg by enginePkgPref.changes().collectAsState(initial = enginePkgPref.get())
                     val engines = remember { TtsSpeaker.installedEngines(context) }
                     if (engines.isEmpty()) {
                         InfoWidget(text = "TTS-движки не найдены. Установите Speech Services by Google или RHVoice.")
                     } else {
                         ListPreferenceWidget(
-                            value = enginePkg,
+                            value = systemEnginePkg,
                             title = "Движок синтеза",
-                            subtitle = engines.firstOrNull { it.first == enginePkg }?.second
+                            subtitle = engines.firstOrNull { it.first == systemEnginePkg }?.second
                                 ?: "Системный по умолчанию",
                             icon = null,
                             entries = buildMap {
                                 put("", "Системный по умолчанию")
                                 engines.forEach { (pkg, label) -> put(pkg, label) }
                             },
-                            onValueChange = { enginePkgPref.set(it) },
+                            onValueChange = { systemEnginePkgPref.set(it) },
                         )
                         InfoWidget(
-                            text = "После смены движка список голосов ниже обновится при следующем " +
-                                "открытии экрана. Голоса RHVoice/Acapela появятся в общем списке.",
+                            text = "После смены движка список ниже обновится автоматически. " +
+                                "Голоса RHVoice/Acapela появятся в общем списке.",
                         )
                     }
                 }

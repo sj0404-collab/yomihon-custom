@@ -78,10 +78,15 @@ fun TtsSettingsDialog(
 
     var voices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var sysReady by remember { mutableStateOf(false) }
+    val systemEnginePkg = remember { prefs.systemTtsEngine().get() }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(systemEnginePkg) {
+        voices = emptyList()
+        sysReady = false
         var probe: TextToSpeech? = null
-        probe = TextToSpeech(context) { status ->
+        var disposed = false
+        val listener = TextToSpeech.OnInitListener { status ->
+            if (disposed) return@OnInitListener
             if (status == TextToSpeech.SUCCESS) {
                 // Группировка из overlay-translator: русские голоса,
                 // классифицированные по полу (Svetlana и др. — ♀,
@@ -137,9 +142,15 @@ fun TtsSettingsDialog(
             }
             sysReady = true
         }
+        probe = if (systemEnginePkg.isBlank()) {
+            TextToSpeech(context.applicationContext, listener)
+        } else {
+            TextToSpeech(context.applicationContext, listener, systemEnginePkg)
+        }
         onDispose {
-            probe?.stop()
-            probe?.shutdown()
+            disposed = true
+            runCatching { probe?.stop() }
+            runCatching { probe?.shutdown() }
         }
     }
 
