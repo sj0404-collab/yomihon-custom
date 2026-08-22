@@ -758,6 +758,16 @@ object OcrQueueScreen : Screen() {
         }
         val offlineVoices = allVoices.filter { it.isOffline }
         val onlineVoices = allVoices.filter { !it.isOffline }
+        LaunchedEffect(allVoices, systemEnginePkg) {
+            if (allVoices.isEmpty()) return@LaunchedEffect
+            val names = allVoices.map { it.name }.toSet()
+            val female = allVoices.firstOrNull { it.kindLabel.contains("Женский") } ?: allVoices.first()
+            val male = allVoices.firstOrNull { it.kindLabel.contains("Мужской") }
+                ?: allVoices.getOrElse(1) { allVoices.first() }
+            if (voiceName !in names) voiceNamePref.set(female.name)
+            if (voiceFemale !in names) voiceFemalePref.set(female.name)
+            if (voiceMale !in names) voiceMalePref.set(male.name)
+        }
 
         // Живой список голосов ElevenLabs по ключу (реальный API, без фейков)
         var elevenVoices by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
@@ -956,7 +966,15 @@ object OcrQueueScreen : Screen() {
                                 put("", "Системный по умолчанию")
                                 engines.forEach { (pkg, label) -> put(pkg, label) }
                             },
-                            onValueChange = { systemEnginePkgPref.set(it) },
+                            onValueChange = { packageName ->
+                                systemEnginePkgPref.set(packageName)
+                                // Voice names are engine-specific. Keeping a
+                                // Google id after switching to RHVoice made the
+                                // UI claim that Google was still selected.
+                                voiceNamePref.set("")
+                                voiceFemalePref.set("")
+                                voiceMalePref.set("")
+                            },
                         )
                         InfoWidget(
                             text = "После смены движка список ниже обновится автоматически. " +

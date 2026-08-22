@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.ai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
+import eu.kanade.tachiyomi.network.NetworkPreferences
 import mihon.domain.ocr.service.OcrPreferences
 import org.json.JSONArray
 import org.json.JSONObject
@@ -10,7 +11,10 @@ import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Онлайн AI-ассистент читалки. Два провайдера, оба OpenAI-совместимые:
@@ -62,6 +66,55 @@ object AiAssistant {
 
     private fun prefs(): OcrPreferences = Injekt.get()
 
+    private val modelCooldownUntil = ConcurrentHashMap<String, Long>()
+
+    @Volatile
+    private var lastFailureMessage: String = ""
+
+    fun lastFailure(): String = lastFailureMessage
+
+    /**
+     * Raw AI calls used URLConnection directly and silently ignored the proxy
+     * configured in Settings → Advanced. Route Zen/OpenRouter through the same
+     * HTTP/SOCKS proxy, including optional Basic proxy authentication.
+     */
+    internal fun openConnection(url: String): HttpURLConnection {
+        val network = Injekt.get<NetworkPreferences>()
+        val rawHost = network.proxyHost.get().trim()
+        val enabled = network.enableProxy.get() && rawHost.isNotBlank()
+        val target = URL(url)
+        if (!enabled) return target.openConnection() as HttpURLConnection
+
+        val parsed = runCatching {
+            val withScheme = if (rawHost.contains("://")) rawHost else "http://$rawHost"
+            URL(withScheme)
+        }.getOrNull()
+        val host = parsed?.host?.takeIf { it.isNotBlank() }
+            ?: rawHost.substringBefore(':').substringBefore('/')
+        val explicitPort = parsed?.port?.takeIf { it > 0 }
+            ?: rawHost.substringAfter(':', "").substringBefore('/').toIntOrNull()
+        val port = explicitPort ?: network.proxyPort.get().coerceIn(1, 65_535)
+        val type = if (network.proxyType.get() == 1) Proxy.Type.SOCKS else Proxy.Type.HTTP
+        val connection = target.openConnection(Proxy(type, InetSocketAddress(host, port))) as HttpURLConnection
+        val user = network.proxyUser.get()
+        if (user.isNotBlank() && type == Proxy.Type.HTTP) {
+            val credentials = "$user:${network.proxyPassword.get()}"
+            val encoded = android.util.Base64.encodeToString(
+                credentials.toByteArray(Charsets.UTF_8),
+                android.util.Base64.NO_WRAP,
+            )
+            connection.setRequestProperty("Proxy-Authorization", "Basic $encoded")
+        }
+        return connection
+    }
+
+    private fun coolingDown(model: String): Boolean =
+        (modelCooldownUntil[model] ?: 0L) > System.currentTimeMillis()
+
+    private fun coolDown(model: String, durationMs: Long) {
+        modelCooldownUntil[model] = System.currentTimeMillis() + durationMs
+    }
+
     /** Запись скрытого AI-чата: что спросили, что ответила модель, сколько заняло. */
     data class LogEntry(
         val time: Long,
@@ -86,7 +139,7 @@ object AiAssistant {
     /** Живой список бесплатных моделей OpenRouter (":free"). */
     suspend fun fetchOpenRouterFreeModels(): List<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val conn = URL("https://openrouter.ai/api/v1/models").openConnection() as HttpURLConnection
+            val conn = openConnection("https://openrouter.ai/api/v1/models")
             conn.connectTimeout = 10_000
             conn.readTimeout = 20_000
             val body = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -108,6 +161,8 @@ object AiAssistant {
         val model: String,
         /** Токены запроса+ответа (usage.total_tokens; 0 если провайдер не отдал). */
         val tokens: Int = 0,
+        /** false when provider stopped because max_tokens was exhausted. */
+        val complete: Boolean = true,
     )
 
     /**
@@ -129,20 +184,39 @@ object AiAssistant {
             val key = p.openrouterApiKey().get()
             if (provider == PROVIDER_OPENROUTER && key.isNotBlank()) {
                 val model = p.openrouterFreeModel().get().ifBlank { OPENROUTER_FREE_FALLBACK.first() }
+                if (coolingDown(model) && p.aiAutoRotate().get()) {
+                    return@withContext zenChatWithRotation(userPrompt, systemPrompt, maxTokens)
+                }
                 // Временные сбои сети/прокси ретраим на той же модели,
-                // прежде чем считать OpenRouter «упавшим»
+                // прежде чем считать OpenRouter «упавшим».
                 var reply: ChatReply? = null
+                var lastOutcome: Outcome? = null
                 for (delayMs in longArrayOf(0, 1_200, 2_500)) {
                     if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
-                    when (val res = chatRawOutcome(
+                    val outcome = chatRawOutcome(
                         "https://openrouter.ai/api/v1/chat/completions",
                         model, key, userPrompt, systemPrompt, maxTokens,
-                    )) {
-                        is Outcome.Ok -> { reply = res.reply }
-                        Outcome.Transient -> continue // сбой сети → ещё попытка
-                        else -> {} // лимит/фатально — ретраи не помогут
+                    )
+                    lastOutcome = outcome
+                    when (outcome) {
+                        is Outcome.Ok -> {
+                            reply = outcome.reply
+                            modelCooldownUntil.remove(model)
+                        }
+                        Outcome.Transient -> continue
+                        else -> {}
                     }
                     break
+                }
+                if (reply == null) {
+                    coolDown(
+                        model,
+                        when (lastOutcome) {
+                            Outcome.RateLimited -> 15 * 60_000L
+                            Outcome.Fatal -> 5 * 60_000L
+                            else -> 90_000L
+                        },
+                    )
                 }
                 if (reply != null || !p.aiAutoRotate().get()) return@withContext reply
                 // Автосмена: OpenRouter реально недоступен → пробуем Zen
@@ -170,11 +244,14 @@ object AiAssistant {
      */
     private suspend fun zenChatWithRotation(userPrompt: String, systemPrompt: String?, maxTokens: Int): ChatReply? {
         val preferred = prefs().zenModel().get().ifBlank { ZEN_MODELS.first() }
-        val order = if (prefs().aiAutoRotate().get()) {
+        val configuredOrder = if (prefs().aiAutoRotate().get()) {
             listOf(preferred) + ZEN_MODELS.filter { it != preferred }
         } else {
             listOf(preferred)
         }
+        // A model that just returned a limit/5xx must not become first again
+        // when the user taps Retry. Keep it on cooldown across chat turns.
+        val order = configuredOrder.filterNot(::coolingDown).ifEmpty { configuredOrder }
         val retryDelaysMs = longArrayOf(1_200, 2_500)
         for (m in order) {
             var attempt = 0
@@ -183,11 +260,23 @@ object AiAssistant {
                     "https://opencode.ai/zen/v1/chat/completions",
                     m, "", userPrompt, systemPrompt, maxTokens,
                 )) {
-                    is Outcome.Ok -> return res.reply
-                    Outcome.RateLimited -> break // честный лимит → следующая модель
-                    Outcome.Fatal -> break
+                    is Outcome.Ok -> {
+                        modelCooldownUntil.remove(m)
+                        return res.reply
+                    }
+                    Outcome.RateLimited -> {
+                        coolDown(m, 15 * 60_000L)
+                        break
+                    }
+                    Outcome.Fatal -> {
+                        coolDown(m, 5 * 60_000L)
+                        break
+                    }
                     Outcome.Transient -> {
-                        if (attempt >= retryDelaysMs.size) break // сеть лежит совсем → дальше
+                        if (attempt >= retryDelaysMs.size) {
+                            coolDown(m, 90_000L)
+                            break
+                        }
                         kotlinx.coroutines.delay(retryDelaysMs[attempt])
                         attempt++
                     }
@@ -237,12 +326,13 @@ object AiAssistant {
                 .put("messages", messages)
                 .put("max_tokens", maxTokens)
                 .put("temperature", 0.0)
+                .put("stream", false)
 
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = openConnection(url)
             conn.requestMethod = "POST"
             conn.doOutput = true
-            conn.connectTimeout = 8_000
-            conn.readTimeout = 30_000
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 90_000
             conn.setRequestProperty("Content-Type", "application/json")
             if (apiKey.isNotBlank()) conn.setRequestProperty("Authorization", "Bearer $apiKey")
 
@@ -252,6 +342,7 @@ object AiAssistant {
                 ?.use { it.readBytes().toString(Charsets.UTF_8) }.orEmpty()
             conn.disconnect()
             if (code !in 200..299) {
+                lastFailureMessage = "$model: HTTP $code — ${text.take(160)}"
                 logcat(LogPriority.WARN) { "AI assistant HTTP $code ($model): ${text.take(160)}" }
                 addLog(
                     LogEntry(
@@ -272,9 +363,9 @@ object AiAssistant {
                 }
             }
             val root = JSONObject(text)
-            val message = root
-                .optJSONArray("choices")?.optJSONObject(0)
-                ?.optJSONObject("message")
+            val choice = root.optJSONArray("choices")?.optJSONObject(0)
+            val message = choice?.optJSONObject("message")
+            val finishReason = choice?.optString("finish_reason").orEmpty()
             val tokens = root.optJSONObject("usage")?.optInt("total_tokens", 0) ?: 0
             val answer = message?.optString("content")?.trim()?.ifBlank { null }
             // Размышления reasoning-моделей: Zen отдаёт их в «reasoning»
@@ -288,8 +379,20 @@ object AiAssistant {
                     ?: m.optString("reasoning_content").takeIf { it.isNotBlank() && it != "null" }
             }?.trim()?.ifBlank { null }
             addLog(LogEntry(startedAt, model, userPrompt.take(200), (answer ?: "<пусто>").take(200), System.currentTimeMillis() - startedAt))
-            answer?.let { Outcome.Ok(ChatReply(it, reasoning, model, tokens)) } ?: Outcome.Fatal
+            answer?.let {
+                lastFailureMessage = ""
+                Outcome.Ok(
+                    ChatReply(
+                        content = it,
+                        reasoning = reasoning,
+                        model = model,
+                        tokens = tokens,
+                        complete = finishReason != "length",
+                    ),
+                )
+            } ?: Outcome.Fatal
         } catch (e: Exception) {
+            lastFailureMessage = "$model: ${e.javaClass.simpleName} — ${e.message?.take(160)}"
             addLog(LogEntry(startedAt, model, userPrompt.take(200), "ОШИБКА: ${e.message?.take(120)}", System.currentTimeMillis() - startedAt))
             logcat(LogPriority.WARN, e) { "AI assistant call failed ($model)" }
             // Сетевые исключения (SocketTimeout, ConnectException, SSL,

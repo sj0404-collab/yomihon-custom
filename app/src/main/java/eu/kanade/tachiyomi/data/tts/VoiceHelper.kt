@@ -167,14 +167,12 @@ object VoiceHelper {
      * missing/disabled pack. This lets us recover the installed subset on OEM
      * firmware where Android loses the service's onGetVoices() response.
      */
-    private fun installedRhVoices(tts: TextToSpeech, language: String): List<Voice> {
+    /** Local RHVoice catalog used by the settings UI and loopback HTTP API. */
+    fun localCatalog(language: String): List<Voice> {
         val lang = language.lowercase(Locale.US)
-        val names = rhVoiceCatalog[lang].orEmpty()
-        if (names.isEmpty()) return emptyList()
-        val original = runCatching { tts.voice }.getOrNull()
         val locale = localeFor(lang)
-        val result = names.mapNotNull { name ->
-            val candidate = Voice(
+        return rhVoiceCatalog[lang].orEmpty().map { name ->
+            Voice(
                 name,
                 locale,
                 Voice.QUALITY_NORMAL,
@@ -182,16 +180,25 @@ object VoiceHelper {
                 false,
                 emptySet(),
             )
-            candidate.takeIf {
-                runCatching { tts.setVoice(candidate) == TextToSpeech.SUCCESS }.getOrDefault(false)
-            }
+        }
+    }
+
+    private fun installedRhVoices(tts: TextToSpeech, language: String): List<Voice> {
+        val candidates = localCatalog(language)
+        if (candidates.isEmpty()) return emptyList()
+        val original = runCatching { tts.voice }.getOrNull()
+        val accepted = candidates.filter { candidate ->
+            runCatching { tts.setVoice(candidate) == TextToSpeech.SUCCESS }.getOrDefault(false)
         }
         if (original != null) {
             runCatching { tts.setVoice(original) }
         } else {
-            runCatching { tts.setLanguage(locale) }
+            runCatching { tts.setLanguage(localeFor(language)) }
         }
-        return result
+        // Several OEM TextToSpeech clients reject manually constructed Voice
+        // objects before RHVoice sees them. The same names still work when sent
+        // as Engine.KEY_PARAM_VOICE_NAME with speak(), so keep the local list.
+        return accepted.ifEmpty { candidates }
     }
 
     /** Значащий сегмент имени Google-голоса: `ru-ru-x-dfc-local` -> `dfc`. */

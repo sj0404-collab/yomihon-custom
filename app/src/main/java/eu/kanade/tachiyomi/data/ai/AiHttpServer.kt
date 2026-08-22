@@ -1,7 +1,10 @@
 package eu.kanade.tachiyomi.data.ai
 
 import android.content.Context
+import eu.kanade.tachiyomi.data.tts.VoiceHelper
+import eu.kanade.tachiyomi.data.tts.VoiceKind
 import kotlinx.coroutines.runBlocking
+import mihon.domain.ocr.service.OcrPreferences
 import logcat.LogPriority
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,6 +16,8 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 /**
  * Мини HTTP-сервер AI-агента: чат доступен ИЗ ВНЕШНЕГО БРАУЗЕРА
@@ -113,6 +118,51 @@ object AiHttpServer {
                             .put("images", JSONArray(reply.images.map { AiWorkspace.relPath(context, it) }))
                         respond(out, 200, "application/json; charset=utf-8", json.toString().toByteArray())
                     }
+                    method == "GET" && path == "/tts/voices" -> {
+                        val language = queryParam(query, "lang")?.ifBlank { "ru" } ?: "ru"
+                        val prefs = Injekt.get<OcrPreferences>()
+                        val voices = JSONArray()
+                        VoiceHelper.localCatalog(language).forEach { voice ->
+                            val gender = when (VoiceHelper.classify(voice)) {
+                                VoiceKind.FEMALE -> "female"
+                                VoiceKind.MALE -> "male"
+                                VoiceKind.TEEN -> "teen"
+                                VoiceKind.OTHER -> "other"
+                            }
+                            voices.put(
+                                JSONObject()
+                                    .put("name", voice.name)
+                                    .put("language", voice.locale.toLanguageTag())
+                                    .put("gender", gender)
+                                    .put("local", true),
+                            )
+                        }
+                        val json = JSONObject()
+                            .put("engine", prefs.systemTtsEngine().get())
+                            .put("selected", prefs.voiceName().get())
+                            .put("female", prefs.voiceFemale().get())
+                            .put("male", prefs.voiceMale().get())
+                            .put("voices", voices)
+                        respond(out, 200, "application/json; charset=utf-8", json.toString().toByteArray())
+                    }
+                    method == "POST" && path == "/tts/voice" -> {
+                        val request = runCatching { JSONObject(body) }.getOrDefault(JSONObject())
+                        val name = request.optString("name").trim()
+                        val language = request.optString("lang").ifBlank { "ru" }
+                        val slot = request.optString("slot").ifBlank { "main" }
+                        val valid = VoiceHelper.localCatalog(language).any { it.name == name }
+                        if (!valid) {
+                            respond(out, 400, "application/json", "{\"error\":\"unknown voice\"}".toByteArray())
+                        } else {
+                            val prefs = Injekt.get<OcrPreferences>()
+                            when (slot) {
+                                "female" -> prefs.voiceFemale().set(name)
+                                "male" -> prefs.voiceMale().set(name)
+                                else -> prefs.voiceName().set(name)
+                            }
+                            respond(out, 200, "application/json", "{\"ok\":true}".toByteArray())
+                        }
+                    }
                     method == "GET" && path == "/files" -> {
                         val arr = JSONArray()
                         AiWorkspace.listAll(context).filter { it.isFile }.forEach {
@@ -150,6 +200,12 @@ object AiHttpServer {
             }
         }
     }
+
+    private fun queryParam(query: String, name: String): String? =
+        query.split('&')
+            .firstOrNull { it.substringBefore('=') == name }
+            ?.substringAfter('=', "")
+            ?.let { URLDecoder.decode(it, "UTF-8") }
 
     private fun respond(
         out: OutputStream,

@@ -7,8 +7,6 @@ import logcat.LogPriority
 import org.json.JSONObject
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -124,7 +122,7 @@ object AiPlugins {
         when (plugin.kind) {
             "http" -> runCatching {
                 val url = substitute(plugin.template, args, urlEncode = true)
-                val conn = URL(url).openConnection() as HttpURLConnection
+                val conn = AiAssistant.openConnection(url)
                 conn.requestMethod = plugin.method.uppercase().ifBlank { "GET" }
                 conn.connectTimeout = 15_000
                 conn.readTimeout = 30_000

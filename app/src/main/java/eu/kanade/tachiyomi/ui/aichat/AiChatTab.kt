@@ -208,7 +208,8 @@ data object AiChatTab : Tab {
             pushMsg(Msg("user", text, images = atts.filter { isImage(it) }))
             busyFlow.value = true
             chatScope.launch {
-                // Готовим описание вложений для модели: картинки — через OCR,
+                try {
+                    // Готовим описание вложений для модели: картинки — через OCR,
                 // текстовые файлы — содержимое, бинарные — только метаданные.
                 val attInfo = if (atts.isEmpty()) {
                     null
@@ -267,7 +268,7 @@ data object AiChatTab : Tab {
                                 null
                             }
                         }
-                        else -> { p, sys -> eu.kanade.tachiyomi.data.ai.AiAssistant.chatFull(p, sys, maxTokens = 900) }
+                        else -> { p, sys -> eu.kanade.tachiyomi.data.ai.AiAssistant.chatFull(p, sys, maxTokens = 1800) }
                     }
                 if (chatFn == null) {
                     withContext(Dispatchers.Main) {
@@ -311,6 +312,21 @@ data object AiChatTab : Tab {
                             sourcePrompt = text,
                         ),
                     )
+                    busyFlow.value = false
+                }
+                } catch (error: Exception) {
+                    withContext(Dispatchers.Main) {
+                        pushMsg(
+                            Msg(
+                                role = "ai",
+                                text = "Сбой AI-хода: ${error.message?.take(180) ?: "неизвестная ошибка"}. " +
+                                    "Выполненные инструменты сохранены; запрос можно повторить.",
+                                model = "error",
+                                sourcePrompt = text,
+                            ),
+                        )
+                    }
+                } finally {
                     busyFlow.value = false
                 }
             }
@@ -619,6 +635,14 @@ data object AiChatTab : Tab {
     ) {
         val context = LocalContext.current
         val prefs = remember { Injekt.get<OcrPreferences>() }
+        val networkPrefs = remember { Injekt.get<eu.kanade.tachiyomi.network.NetworkPreferences>() }
+        val proxyEnabled by networkPrefs.enableProxy.changes().collectAsState(initial = networkPrefs.enableProxy.get())
+        val proxyType by networkPrefs.proxyType.changes().collectAsState(initial = networkPrefs.proxyType.get())
+        val proxyHost by networkPrefs.proxyHost.changes().collectAsState(initial = networkPrefs.proxyHost.get())
+        val proxyUser by networkPrefs.proxyUser.changes().collectAsState(initial = networkPrefs.proxyUser.get())
+        val proxyPassword by networkPrefs.proxyPassword.changes()
+            .collectAsState(initial = networkPrefs.proxyPassword.get())
+        var proxyPortText by rememberSaveable { mutableStateOf(networkPrefs.proxyPort.get().toString()) }
         val tabVisiblePref = remember { prefs.aiTabVisible() }
         val serverPref = remember { prefs.aiHttpServer() }
         var serverOn by remember { mutableStateOf(eu.kanade.tachiyomi.data.ai.AiHttpServer.isRunning) }
@@ -673,6 +697,71 @@ data object AiChatTab : Tab {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            Text("Прокси онлайн-AI", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Использовать прокси для Zen/OpenRouter")
+                    Text(
+                        "Используются те же параметры, что в Настройки → Дополнительно → Прокси.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = proxyEnabled,
+                    onCheckedChange = networkPrefs.enableProxy::set,
+                )
+            }
+            if (proxyEnabled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = proxyType == 0,
+                        onClick = { networkPrefs.proxyType.set(0) },
+                        label = { Text("HTTP") },
+                    )
+                    FilterChip(
+                        selected = proxyType == 1,
+                        onClick = { networkPrefs.proxyType.set(1) },
+                        label = { Text("SOCKS5") },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = proxyHost,
+                        onValueChange = networkPrefs.proxyHost::set,
+                        label = { Text("Хост прокси") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = proxyPortText,
+                        onValueChange = { value ->
+                            proxyPortText = value.filter(Char::isDigit).take(5)
+                            proxyPortText.toIntOrNull()?.takeIf { it in 1..65_535 }
+                                ?.let(networkPrefs.proxyPort::set)
+                        },
+                        label = { Text("Порт") },
+                        singleLine = true,
+                        modifier = Modifier.width(112.dp),
+                    )
+                }
+                OutlinedTextField(
+                    value = proxyUser,
+                    onValueChange = networkPrefs.proxyUser::set,
+                    label = { Text("Логин прокси (необязательно)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = proxyPassword,
+                    onValueChange = networkPrefs.proxyPassword::set,
+                    label = { Text("Пароль прокси (необязательно)") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             // ---- Локальные LLM (по ОЗУ, с тестом) ----
             Text(

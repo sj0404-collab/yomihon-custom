@@ -227,15 +227,28 @@ object TtsSpeaker {
                     VoiceHelper.pick(engine, VoiceKind.FEMALE, saved, systemEnginePkg)
                 }
             }
+            val activeEnginePackage = systemEnginePkg
+                ?: runCatching { engine.defaultEngine }.getOrNull()
+            val isRhVoice = activeEnginePackage.orEmpty().contains("rhvoice", ignoreCase = true)
+            val forcedVoiceName = v?.name?.takeIf { isRhVoice }
             if (v != null) {
                 val res = engine.setVoice(v)
                 if (res != TextToSpeech.SUCCESS) {
-                    // Голос без данных — откат на язык, звук будет всегда
-                    logcat(LogPriority.WARN) { "Voice ${'$'}{v.name} rejected (missing data?), falling back to ru-RU" }
+                    // Some OEM clients reject a manually-created RHVoice Voice
+                    // before the engine sees it. speak() below also sends the
+                    // exact name in KEY_PARAM_VOICE_NAME, bypassing that bug.
+                    logcat(LogPriority.WARN) { "Voice ${'$'}{v.name} rejected by TextToSpeech client" }
                     engine.language = Locale("ru", "RU")
                 }
             } else {
                 engine.language = Locale("ru", "RU")
+            }
+            val voiceParams = forcedVoiceName?.let { name ->
+                android.os.Bundle().apply {
+                    // Hidden Android framework key used internally by
+                    // TextToSpeech.setVoice(); literal keeps public-SDK builds.
+                    putString("voiceName", name)
+                }
             }
             // Пунктуация → реальные паузы и интонация: текст режется на
             // предложения, каждое говорится отдельной utterance, между ними
@@ -292,7 +305,7 @@ object TtsSpeaker {
                 }
                 val mode = if (queued) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
                 val r = try {
-                    engine.speak(trimmed, mode, null, "yk_$i")
+                    engine.speak(trimmed, mode, voiceParams, "yk_$i")
                 } catch (e: Exception) {
                     logcat(LogPriority.WARN, e) { "speak() rejected an utterance" }
                     TextToSpeech.ERROR

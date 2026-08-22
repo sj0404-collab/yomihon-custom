@@ -19,8 +19,6 @@ import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -129,7 +127,45 @@ object AiAgent {
      * исполняются самим приложением — модели достаточно уметь писать текст.
      */
     private val onlineChat: suspend (String, String) -> AiAssistant.ChatReply? = { p, sys ->
-        AiAssistant.chatFull(p, sys, maxTokens = 900)
+        AiAssistant.chatFull(p, sys, maxTokens = 1800)
+    }
+
+    /**
+     * A tool turn must survive a provider hiccup after side effects already
+     * happened. Retry only the model call and join max-token continuations;
+     * never execute a tool merely because the network response was lost.
+     */
+    private suspend fun reliableChat(
+        chat: suspend (String, String) -> AiAssistant.ChatReply?,
+        prompt: String,
+        systemPrompt: String,
+    ): AiAssistant.ChatReply? {
+        var reply: AiAssistant.ChatReply? = null
+        for (attempt in 0 until 3) {
+            reply = runCatching { chat(prompt, systemPrompt) }.getOrNull()
+            if (reply != null) break
+            kotlinx.coroutines.delay(800L * (attempt + 1))
+        }
+        var combined = reply ?: return null
+        for (continuation in 0 until 2) {
+            if (combined.complete) break
+            val next = runCatching {
+                chat(
+                    prompt + "\n\nОтвет оборвался по лимиту. Уже полученная часть:\n" +
+                        combined.content.takeLast(6000) +
+                        "\n\nПродолжи строго с места обрыва. Не повторяй уже написанное.",
+                    systemPrompt,
+                )
+            }.getOrNull() ?: break
+            combined = combined.copy(
+                content = combined.content + "\n" + next.content,
+                reasoning = next.reasoning ?: combined.reasoning,
+                model = next.model,
+                tokens = combined.tokens + next.tokens,
+                complete = next.complete,
+            )
+        }
+        return combined
     }
 
     suspend fun run(
@@ -156,9 +192,15 @@ object AiAgent {
         var totalTokens = 0
         var roundsDone = 0
 
-        var reply = chat(prompt, SYSTEM_PROMPT)
+        var reply = reliableChat(chat, prompt, SYSTEM_PROMPT)
             ?: return@withContext AgentReply(
-                "Нет ответа от AI-бэкенда (сеть/лимиты/модель не готова). Попробуйте ещё раз или смените бэкенд в ⚙.",
+                buildString {
+                    append("Нет ответа от AI-бэкенда после повторов и ротации.")
+                    AiAssistant.lastFailure().takeIf { it.isNotBlank() }?.let {
+                        append(" Последняя ошибка: ").append(it)
+                    }
+                    append(" Проверьте прокси в ⚙ или смените бэкенд.")
+                },
                 emptyList(), emptyList(),
             )
         totalTokens += reply.tokens
@@ -166,10 +208,21 @@ object AiAgent {
         var reasoning = reply.reasoning
         var usedModel = reply.model
 
-        // До 3 раундов инструментов, чтобы не зациклиться
-        for (round in 1..3) {
-            val calls = parseToolCalls(context, answer)
-            if (calls.isEmpty()) break
+        // Up to six rounds; exact duplicate calls are never executed twice in
+        // one user turn (important for append_file/write_file side effects).
+        val executedCalls = mutableSetOf<String>()
+        for (round in 1..6) {
+            val parsedCalls = parseToolCalls(context, answer)
+            if (parsedCalls.isEmpty()) break
+            val calls = parsedCalls.filter { call ->
+                executedCalls.add(call.name + "\u0000" + call.args.toString())
+            }
+            if (calls.isEmpty()) {
+                answer = stripToolSyntax(context, answer).ifBlank {
+                    "Все запрошенные инструменты уже выполнены; повторный вызов пропущен."
+                }
+                break
+            }
             roundsDone = round
             val outputs = calls.map { call ->
                 val t0 = System.currentTimeMillis()
@@ -185,10 +238,12 @@ object AiAgent {
                 results += finalR
                 "${finalR.name}: ${finalR.output.take(700)}"
             }
-            val followUp = "Результаты инструментов:\n" + outputs.joinToString("\n---\n") +
-                "\n\nТеперь дай финальный ответ пользователю (без @tool, если всё сделано)."
-            val next = chat(
-                prompt + "\n\n(твои вызовы выполнены)\n" + followUp,
+            val followUp = "Твой предыдущий ответ с вызовами:\n${answer.take(6000)}\n\n" +
+                "Результаты инструментов:\n" + outputs.joinToString("\n---\n") +
+                "\n\nПродолжи задачу. Если всё сделано — дай полный финальный ответ без @tool."
+            val next = reliableChat(
+                chat,
+                prompt + "\n\n(вызовы выполнены приложением)\n" + followUp,
                 SYSTEM_PROMPT,
             )
             if (next != null) {
@@ -197,7 +252,19 @@ object AiAgent {
                 if (next.reasoning != null) reasoning = next.reasoning
                 usedModel = next.model
             } else {
-                answer = outputs.joinToString("\n")
+                // Network/provider failed after tools already made changes.
+                // Return a complete local checkpoint instead of losing the
+                // turn or forcing the user to execute the same tools again.
+                answer = buildString {
+                    append(stripToolSyntax(context, answer).takeIf { it.isNotBlank() }.orEmpty())
+                    if (isNotEmpty()) append("\n\n")
+                    append("Инструменты выполнены, но финальный ответ модели не получен:\n")
+                    results.forEach { result ->
+                        append("• ").append(result.name).append(": ")
+                            .append(result.output.take(700)).append('\n')
+                    }
+                    append("Результаты сохранены; повторять инструменты не требуется.")
+                }
                 break
             }
         }
@@ -256,6 +323,47 @@ object AiAgent {
             out += ToolCall(name, args)
         }
 
+        // --- Multiline @tool name { ... } with balanced JSON. This recovers
+        // calls split across model lines or joined from a max-token continuation.
+        val markerRe = Regex("(?:@tool\\s+|@)([A-Za-z0-9_]+)\\s*")
+        for (marker in markerRe.findAll(text)) {
+            val name = marker.groupValues[1]
+            if (name !in known) continue
+            val start = text.indexOf('{', marker.range.last + 1)
+            if (start < 0) continue
+            var depth = 0
+            var quoted = false
+            var escaped = false
+            var end = -1
+            for (i in start until text.length) {
+                val ch = text[i]
+                if (escaped) {
+                    escaped = false
+                    continue
+                }
+                if (quoted && ch == '\\') {
+                    escaped = true
+                    continue
+                }
+                if (ch == '"') quoted = !quoted
+                if (!quoted) {
+                    if (ch == '{') depth++
+                    if (ch == '}') {
+                        depth--
+                        if (depth == 0) {
+                            end = i
+                            break
+                        }
+                    }
+                }
+            }
+            if (end > start) {
+                runCatching { JSONObject(text.substring(start, end + 1)) }
+                    .getOrNull()
+                    ?.let { out += ToolCall(name, it) }
+            }
+        }
+
         // --- Строчные стили
         for (raw in text.lines()) {
             var t = raw.trim().trim('`').trim()
@@ -266,8 +374,9 @@ object AiAgent {
             val name = (if (space > 0) t.substring(0, space) else t).trim()
             if (name !in known) continue
             val json = if (space > 0) t.substring(space + 1).trim() else "{}"
-            out += runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }
-                .getOrElse { ToolCall(name, JSONObject()) } // кривой json -> без аргументов
+            runCatching { ToolCall(name, JSONObject(json.ifBlank { "{}" })) }
+                .getOrNull()
+                ?.let(out::add) // incomplete JSON is recovered by the multiline parser
         }
         return out
     }
@@ -340,7 +449,7 @@ object AiAgent {
                     token.isBlank() -> ToolResult("github_api", "PAT не привязан: задайте его в ⚙ вкладки AI")
                     !path.startsWith("/") -> ToolResult("github_api", "ОШИБКА: path должен начинаться с /")
                     else -> runCatching {
-                        val conn = URL("https://api.github.com$path").openConnection() as HttpURLConnection
+                        val conn = AiAssistant.openConnection("https://api.github.com$path")
                         conn.connectTimeout = 15_000
                         conn.readTimeout = 30_000
                         conn.setRequestProperty("Authorization", "token $token")
@@ -504,7 +613,7 @@ object AiAgent {
             val url = "https://image.pollinations.ai/prompt/" +
                 URLEncoder.encode(prompt.take(400), "UTF-8").replace("+", "%20") +
                 "?width=768&height=768&nologo=true"
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = AiAssistant.openConnection(url)
             conn.connectTimeout = 20_000
             conn.readTimeout = 120_000
             conn.setRequestProperty("User-Agent", "Yomikai/1.0")
@@ -530,7 +639,7 @@ object AiAgent {
         val url = if (rawUrl.startsWith("http")) rawUrl else "https://$rawUrl"
         return runCatching {
             val started = System.currentTimeMillis()
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = AiAssistant.openConnection(url)
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
             conn.instanceFollowRedirects = false
