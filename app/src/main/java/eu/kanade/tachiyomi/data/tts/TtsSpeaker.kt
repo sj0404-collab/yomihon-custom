@@ -53,6 +53,10 @@ object TtsSpeaker {
 
     private var systemTts: TextToSpeech? = null
     private var systemReady = false
+
+    /** Инициализация системного TTS в процессе — повторные speak() ждут listener'а. */
+    @Volatile
+    private var initInProgress = false
     private var mediaPlayer: MediaPlayer? = null
 
     @Volatile
@@ -79,22 +83,35 @@ object TtsSpeaker {
             runCatching { systemTts?.shutdown() }
             systemTts = null
             systemReady = false
+            initInProgress = false
         }
         systemTts?.let {
             if (systemReady) { onReady(it); return }
         }
         if (systemTts == null) {
+            // Прошлая попытка инициализации провалилась и объект остался
+            // «вечным null» — все последующие вызовы молча получали onReady(null),
+            // и офлайн-TTS выглядел мёртвым до перезапуска приложения.
+            // Теперь упавший движок честно пересоздаётся.
             systemEnginePkg = wantEngine
             val listener = TextToSpeech.OnInitListener { status ->
                 systemReady = status == TextToSpeech.SUCCESS
+                initInProgress = false
                 onReady(if (systemReady) systemTts else null)
             }
+            initInProgress = true
             systemTts = if (wantEngine != null) {
                 TextToSpeech(context.applicationContext, listener, wantEngine)
             } else {
                 TextToSpeech(context.applicationContext, listener)
             }
+        } else if (!initInProgress && !systemReady) {
+            // Зависший полуинициализированный экземпляр: убираем и пробуем заново.
+            runCatching { systemTts?.shutdown() }
+            systemTts = null
+            onReady(null)
         } else {
+            // Инициализация уже идёт — не дёргаем движок, ответ придёт из listener'а.
             onReady(null)
         }
     }
