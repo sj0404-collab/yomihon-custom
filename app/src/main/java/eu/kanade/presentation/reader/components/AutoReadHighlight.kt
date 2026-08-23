@@ -130,37 +130,6 @@ fun AutoReadHighlight(
             )
         }
 
-        Card(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(start = 12.dp, end = 12.dp, bottom = 96.dp)
-                .fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
-            ),
-        ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Row {
-                    Text(
-                        "🔊 ${region.index}/${region.total}",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    if (region.marks.isNotBlank()) {
-                        Text(
-                            "  ${region.marks}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = accent,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-                Text(
-                    region.translated ?: region.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+
     }
 }
