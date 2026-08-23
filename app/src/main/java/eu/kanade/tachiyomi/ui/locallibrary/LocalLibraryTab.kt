@@ -96,7 +96,9 @@ data object LocalLibraryTab : Tab {
         val storageManager = remember { Injekt.get<StorageManager>() }
         val storagePreferences = remember { Injekt.get<StoragePreferences>() }
 
-        var scanning by remember { mutableStateOf(cachedStats == null) }
+        // Холодный вход больше НЕ блокирует интерфейс: сразу показываем вкладку
+        // (без счётчиков), скан идёт в фоне, цифры появляются по готовности.
+        var scanning by remember { mutableStateOf(false) }
         var stats by remember { mutableStateOf(cachedStats) }
         var roots by remember { mutableStateOf(storagePreferences.externalLibraryRoots.get().toList()) }
         var activeRoot by remember { mutableStateOf(storagePreferences.externalLibraryActiveRoot.get()) }
@@ -127,6 +129,8 @@ data object LocalLibraryTab : Tab {
                     // обычный вход на вкладку берёт кэш и не трогает диск
                     val rootsKey = roots.sorted().joinToString("|")
                     if (cachedStats == null || rootsKey != cachedRootsKey) {
+                        // Скан в фоне (withIOContext), UI живёт: показываем лёгкий
+                        // индикатор, но список и кнопки остаются интерактивными.
                         scanning = true
                         val fresh = withIOContext { scanStorage(storageManager) }
                         cachedStats = fresh
