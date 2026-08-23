@@ -166,7 +166,7 @@ internal class CyrillicOcrEngine(
                 val row = rows.firstOrNull { existing ->
                     val center = existing.map { it.first.centerY }.average().toFloat()
                     val height = existing.map { it.first.height }.average().toFloat()
-                    abs(item.first.centerY - center) <= max(item.first.height, height) * 0.60f
+                    abs(item.first.centerY - center) <= max(item.first.height.toFloat(), height) * 0.60f
                 }
                 if (row != null) row += item else rows += mutableListOf(item)
             }
