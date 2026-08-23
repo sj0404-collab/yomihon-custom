@@ -221,7 +221,9 @@ object OnnxTts {
             }
             _progress.value = _progress.value + (RUNTIME_PACK_ID to 1f)
             aar.delete()
-            isRuntimeInstalled(context)
+            val ok = isRuntimeInstalled(context)
+            if (ok) bumpInstalled()
+            ok
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "ONNX runtime download failed" }
             aar.delete()
@@ -236,6 +238,7 @@ object OnnxTts {
     fun deleteRuntime(context: Context) {
         unload()
         runtimeDir(context).deleteRecursively()
+        bumpInstalled()
         // runtimeLoaded остаётся true до перезапуска процесса — честно скажем
     }
 
@@ -264,6 +267,19 @@ object OnnxTts {
 
     private val _progress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val progress: StateFlow<Map<String, Float>> = _progress
+
+    /**
+     * Счётчик изменений установленных пакетов (рантайм, голоса). UI собирает
+     * его вместе с [progress]: после скачивания/удаления флаги вроде
+     * isInstalled мгновенно пересчитываются в Compose (раньше они были
+     * заморожены в remember{} и кнопки не появлялись после загрузки).
+     */
+    private val _installedVersion = MutableStateFlow(0)
+    val installedVersion: StateFlow<Int> = _installedVersion
+
+    private fun bumpInstalled() {
+        _installedVersion.value += 1
+    }
 
     private val activeDownloads = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -329,7 +345,9 @@ object OnnxTts {
                 }
             }
             tarball.delete()
-            isInstalled(context, v)
+            val ok = isInstalled(context, v)
+            if (ok) bumpInstalled()
+            ok
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "ONNX voice download failed: ${v.id}" }
             tarball.delete()
@@ -344,6 +362,7 @@ object OnnxTts {
     fun delete(context: Context, v: Voice) {
         unload()
         voiceDir(context, v).deleteRecursively()
+        bumpInstalled()
     }
 
     // ---- Инференс через рефлексию (AAR может отсутствовать в сборке) ----
