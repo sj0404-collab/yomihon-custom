@@ -335,6 +335,25 @@ object TtsSpeaker {
      * pref_onnx_voice; при отсутствии установленного голоса — фолбэк на
      * системный TTS (честно, без тишины).
      */
+    /** Test an ONNX voice: speak a sample phrase with the given voice. */
+    fun speakOnnxTest(context: Context, voice: OnnxTts.Voice) {
+        currentJob = scope.launch {
+            setSpeaking(true)
+            try {
+                if (!OnnxTts.isAvailable(context) || !OnnxTts.isInstalled(context, voice)) {
+                    withContext(Dispatchers.Main) { speakSystem(context, "Голос не установлен", null) }
+                    return@launch
+                }
+                val wav = OnnxTts.synthesizeToFile(context, voice, "Привет! Это тест нейроголоса.", 1.0f)
+                if (wav != null) playFileBlocking(wav)
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "ONNX test failed" }
+            } finally {
+                setSpeaking(false)
+            }
+        }
+    }
+
     private fun speakOnnx(context: Context, text: String, gender: String?) {
         val p = prefs()
         currentJob = scope.launch {
