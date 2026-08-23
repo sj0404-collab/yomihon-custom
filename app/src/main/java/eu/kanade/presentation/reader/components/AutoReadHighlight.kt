@@ -47,6 +47,10 @@ fun AutoReadHighlight(
     region: AutoReadEngine.SpokenRegion,
     modifier: Modifier = Modifier,
     engine: AutoReadEngine? = null,
+    /** The actual displayed image rect within the parent (0..1 normalized).
+     *  When null, falls back to the full composable area (may be wrong
+     *  with letterboxed images). Set this from ReaderPageImageView.displayedImageLocalRect(). */
+    imageRect: android.graphics.RectF? = null,
 ) {
     val prefs = remember { Injekt.get<OcrPreferences>() }
     // Не кэшируем навсегда: пользователь меняет цвет в настройках — рамки
@@ -67,15 +71,20 @@ fun AutoReadHighlight(
         } else {
             emptyList()
         }
+        val imgFr = imageRect
+        val iwFr = if (imgFr != null) (imgFr.right - imgFr.left) * w else w
+        val ihFr = if (imgFr != null) (imgFr.bottom - imgFr.top) * h else h
+        val ixFr = if (imgFr != null) imgFr.left * w else 0f
+        val iyFr = if (imgFr != null) imgFr.top * h else 0f
         for (fr in frameRegions) {
             if (fr.state == AutoReadEngine.FrameRegion.State.CURRENT) continue // текущую рисуем ниже ярче
             val b = engine?.mapToViewport(fr.box) ?: fr.box
-            val frW = with(density) { ((b.right - b.left) * w).toDp() }
-            val frH = with(density) { ((b.bottom - b.top) * h).toDp() }
+            val frW = with(density) { ((b.right - b.left) * iwFr).toDp() }
+            val frH = with(density) { ((b.bottom - b.top) * ihFr).toDp() }
             val done = fr.state == AutoReadEngine.FrameRegion.State.DONE
             Box(
                 modifier = Modifier
-                    .offset { IntOffset((b.left * w).roundToInt(), (b.top * h).roundToInt()) }
+                    .offset { IntOffset((ixFr + b.left * iwFr).roundToInt(), (iyFr + b.top * ihFr).roundToInt()) }
                     .width(frW)
                     .height(frH)
                     .border(
@@ -90,13 +99,18 @@ fun AutoReadHighlight(
             )
         }
 
+        val img = imageRect
+        val iw = if (img != null) (img.right - img.left) * w else w
+        val ih = if (img != null) (img.bottom - img.top) * h else h
+        val ix = if (img != null) img.left * w else 0f
+        val iy = if (img != null) img.top * h else 0f
         val mapped = engine?.mapToViewport(region.box) ?: region.box
-        val boxWidth = with(density) { ((mapped.right - mapped.left) * w).toDp() }
-        val boxHeight = with(density) { ((mapped.bottom - mapped.top) * h).toDp() }
+        val boxWidth = with(density) { ((mapped.right - mapped.left) * iw).toDp() }
+        val boxHeight = with(density) { ((mapped.bottom - mapped.top) * ih).toDp() }
         val offsetModifier = Modifier.offset {
             IntOffset(
-                (mapped.left * w).roundToInt(),
-                (mapped.top * h).roundToInt(),
+                (ix + mapped.left * iw).roundToInt(),
+                (iy + mapped.top * ih).roundToInt(),
             )
         }
 
