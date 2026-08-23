@@ -30,19 +30,11 @@ import java.net.UnknownHostException
 /**
  * OCR repository implementation that manages engine selection, page scanning, and OCR cache.
  */
-/** Внешний офлайн-движок, живущий в app-слое (Tesseract из tar.xz в APK). */
-interface ExternalOcrEngine {
-    suspend fun recognize(image: Bitmap): String
-    suspend fun close()
-}
-
 class OcrRepositoryImpl(
     private val context: Context,
-    /** Фабрика Tesseract-движка; null в сборках без него. */
-    private val tesseractFactory: (() -> ExternalOcrEngine)? = null,
 ) : OcrRepository {
     private val preferenceStore = AndroidPreferenceStore(context)
-    private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.LEGACY)
+    private val ocrModelPref = preferenceStore.getEnum("pref_ocr_model", OcrModel.CYRILLIC)
     private val useFallbackModelsPref = preferenceStore.getBoolean("pref_use_fallback_models", true)
 
     private val environmentResult by lazy {
@@ -58,6 +50,7 @@ class OcrRepositoryImpl(
     private val cacheStore by lazy { OcrCacheStore(context) }
     private val ocrPreferences by lazy { mihon.domain.ocr.service.OcrPreferences(preferenceStore) }
 
+    private var cyrillicEngine: CyrillicOcrEngine? = null
     private var legacyEngine: LegacyOcrEngine? = null
     private var fastEngine: FastOcrEngine? = null
     private var glensEngine: GlensOcrEngine? = null
@@ -65,7 +58,6 @@ class OcrRepositoryImpl(
     private var openRouterEngine: OpenRouterOcrEngine? = null
     private var googleAiEngine: GoogleAiOcrEngine? = null
     private var zenFreeEngine: ZenFreeOcrEngine? = null
-    private var tesseractEngine: ExternalOcrEngine? = null
     private var detEngine: DetOcrEngine? = null
 
     private val engineLocks = OcrEngineLocks()
@@ -85,6 +77,7 @@ class OcrRepositoryImpl(
     private var activeOperations = 0
 
     internal enum class EngineType {
+        CYRILLIC,
         LEGACY,
         FAST,
         GLENS,
@@ -92,19 +85,21 @@ class OcrRepositoryImpl(
         OPENROUTER,
         GOOGLE,
         ZEN_FREE,
-        TESSERACT,
     }
 
     private fun selectedEngineType(): EngineType {
         return when (ocrModelPref.get()) {
-            OcrModel.LEGACY -> EngineType.LEGACY
-            OcrModel.FAST -> EngineType.FAST
+            OcrModel.CYRILLIC -> EngineType.CYRILLIC
+            // Old offline selections migrate transparently to the Russian
+            // engine; the Japanese FAST/LEGACY models are no longer defaults.
+            OcrModel.LEGACY -> EngineType.CYRILLIC
+            OcrModel.FAST -> EngineType.CYRILLIC
             OcrModel.GLENS -> EngineType.GLENS
             OcrModel.OWOCR -> EngineType.OWOCR
             OcrModel.OPENROUTER -> EngineType.OPENROUTER
             OcrModel.GOOGLE -> EngineType.GOOGLE
             OcrModel.ZEN_FREE -> EngineType.ZEN_FREE
-            OcrModel.TESSERACT -> EngineType.TESSERACT
+            OcrModel.TESSERACT -> EngineType.CYRILLIC
         }
     }
 
@@ -129,10 +124,9 @@ class OcrRepositoryImpl(
         EngineType.OPENROUTER, EngineType.GOOGLE,
     )
     private val offlineEngines = listOf(
-        // Tesseract первым: всегда в APK, не требует скачивания
-        // FAST/LEGACY исключены из фолбэков: японские manga-ocr модели
-        // на русском тексте выдают мусор (фидбек пользователя)
-        EngineType.TESSERACT,
+        // One canonical offline engine for Russian/Cyrillic text. Legacy,
+        // FAST and Tesseract remain migration-only enum values.
+        EngineType.CYRILLIC,
     )
 
     private fun isNetworkAvailable(): Boolean {
@@ -149,7 +143,7 @@ class OcrRepositoryImpl(
      *  auto    — при сети: онлайн → локальные; без сети: ТОЛЬКО локальные
      *            (онлайн даже не пробуются — мгновенный переход, без таймаутов);
      *  online  — только онлайн-движки;
-     *  offline — только локальные (TESSERACT всегда доступен: модели в APK);
+     *  offline — только локальный Cyrillic PP-OCR (скачиваемый pack);
      *  single  — фолбэков нет.
      */
     private fun fallbackChain(primary: EngineType): List<EngineType> {
@@ -178,6 +172,13 @@ class OcrRepositoryImpl(
 
     private fun engineFor(type: EngineType): OcrEngine {
         return when (type) {
+            EngineType.CYRILLIC -> {
+                cyrillicEngine ?: CyrillicOcrEngine(
+                    context,
+                    requireEnvironment(),
+                    textPostprocessor,
+                ).also { cyrillicEngine = it }
+            }
             EngineType.FAST -> {
                 fastEngine ?: FastOcrEngine(context, requireEnvironment(), textPostprocessor).also {
                     fastEngine = it
@@ -211,15 +212,6 @@ class OcrRepositoryImpl(
             EngineType.ZEN_FREE -> {
                 zenFreeEngine ?: ZenFreeOcrEngine(context, ocrPreferences).also {
                     zenFreeEngine = it
-                }
-            }
-            EngineType.TESSERACT -> {
-                val engine = tesseractEngine
-                    ?: tesseractFactory?.invoke()?.also { tesseractEngine = it }
-                    ?: error("Tesseract engine unavailable in this build")
-                object : OcrEngine {
-                    override suspend fun recognizeText(image: Bitmap): String = engine.recognize(image)
-                    override fun close() { /* закрывается в closeEngines() */ }
                 }
             }
         }
@@ -301,6 +293,13 @@ class OcrRepositoryImpl(
                     else -> originalBitmap
                 }
                 when (val selectedModel = ocrModelPref.get()) {
+                    OcrModel.CYRILLIC -> scanLocalOrFallback(
+                        chapterId = chapterId,
+                        pageIndex = pageIndex,
+                        image = bitmap,
+                        modelKey = selectedModel,
+                        type = EngineType.CYRILLIC,
+                    )
                     OcrModel.GLENS -> scanWithGlens(
                         chapterId = chapterId,
                         pageIndex = pageIndex,
@@ -312,14 +311,14 @@ class OcrRepositoryImpl(
                         pageIndex = pageIndex,
                         image = bitmap,
                         modelKey = selectedModel,
-                        type = EngineType.LEGACY,
+                        type = EngineType.CYRILLIC,
                     )
                     OcrModel.FAST -> scanLocalOrFallback(
                         chapterId = chapterId,
                         pageIndex = pageIndex,
                         image = bitmap,
                         modelKey = selectedModel,
-                        type = EngineType.FAST,
+                        type = EngineType.CYRILLIC,
                     )
                     OcrModel.OWOCR -> scanOwOcrOrFallback(
                         chapterId = chapterId,
@@ -341,12 +340,12 @@ class OcrRepositoryImpl(
                         modelKey = selectedModel,
                         type = EngineType.GOOGLE,
                     )
-                    OcrModel.TESSERACT -> scanWithEngineOrFallback(
+                    OcrModel.TESSERACT -> scanLocalOrFallback(
                         chapterId = chapterId,
                         pageIndex = pageIndex,
                         image = bitmap,
                         modelKey = selectedModel,
-                        type = EngineType.TESSERACT,
+                        type = EngineType.CYRILLIC,
                     )
                     OcrModel.ZEN_FREE -> scanWithEngineOrFallback(
                         chapterId = chapterId,
@@ -442,13 +441,13 @@ class OcrRepositoryImpl(
                     modelKey = modelKey,
                 )
             } else {
-                // Без сети: Tesseract из APK как аварийный распознаватель
+                // Без сети используем единый Cyrillic PP-OCR.
                 scanLocally(
                     chapterId = chapterId,
                     pageIndex = pageIndex,
                     image = image,
                     modelKey = modelKey,
-                    type = EngineType.TESSERACT,
+                    type = EngineType.CYRILLIC,
                 )
             }
         }
@@ -470,7 +469,7 @@ class OcrRepositoryImpl(
                 type = type,
             )
         } catch (e: Throwable) {
-            val target = if (isNetworkAvailable()) EngineType.ZEN_FREE else EngineType.TESSERACT
+            val target = if (isNetworkAvailable()) EngineType.ZEN_FREE else EngineType.CYRILLIC
             logcat(LogPriority.WARN, e) {
                 "Local OCR model unavailable; falling back to ${target.name.lowercase()}"
             }
@@ -720,6 +719,9 @@ class OcrRepositoryImpl(
 
     private suspend fun closeEngines() {
         engineLocks.withAllLocks {
+            cyrillicEngine?.close()
+            cyrillicEngine = null
+
             legacyEngine?.close()
             legacyEngine = null
 
@@ -740,9 +742,6 @@ class OcrRepositoryImpl(
 
             zenFreeEngine?.close()
             zenFreeEngine = null
-
-            tesseractEngine?.close()
-            tesseractEngine = null
 
             detEngine?.close()
             detEngine = null

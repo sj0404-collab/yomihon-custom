@@ -127,6 +127,7 @@ private fun OcrModelQuickSwitcher() {
 
     /** Пак моделей, который нужен движку (null = скачивать нечего). */
     fun packOf(model: OcrModel): String? = when (model) {
+        OcrModel.CYRILLIC -> "cyrillic_ocr"
         OcrModel.FAST -> "manga_ocr_fast"
         OcrModel.LEGACY -> "manga_ocr"
         else -> null
@@ -140,11 +141,10 @@ private fun OcrModelQuickSwitcher() {
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
         listOf(
-            // FAST/LEGACY скрыты: это японские manga-ocr модели,
-            // с русским текстом несовместимы (по фидбеку пользователя)
+            // The only offline option is the Russian/Cyrillic PP-OCR pack.
+            OcrModel.CYRILLIC,
             OcrModel.ZEN_FREE,
             OcrModel.GLENS,
-            OcrModel.TESSERACT,
             OcrModel.OWOCR,
             OcrModel.OPENROUTER,
             OcrModel.GOOGLE,
@@ -156,7 +156,8 @@ private fun OcrModelQuickSwitcher() {
             val downloading = pack != null && progressMap.containsKey(pack)
             val subtitle = when {
                 downloading -> "загрузка ${(progressMap[pack]!! * 100).toInt()}%"
-                model == OcrModel.TESSERACT -> "офлайн • модели в APK"
+                model == OcrModel.CYRILLIC && !installed -> "офлайн • скачать ~21 МБ"
+                model == OcrModel.CYRILLIC -> "офлайн • русский PP-OCR ✅"
                 pack != null && !installed -> "локальная • нажмите, чтобы скачать"
                 pack != null -> "локальная • скачана ✅"
                 model == OcrModel.OWOCR -> "внешний сервер OwOCR (ПК, WebSocket)"

@@ -126,6 +126,28 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         Injekt.importModule(AppModule(this))
         Injekt.importModule(DomainModule())
 
+        // Cyrillic PP-OCR is the default and only supported offline OCR. Its
+        // ~21 MB model pack stays outside the APK and is fetched once. A failed
+        // startup download can still be retried from Text Recognition settings.
+        Thread {
+            runCatching {
+                val ocrPrefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                if (
+                    ocrPrefs.ocrModel().get() in setOf(
+                        mihon.domain.ocr.model.OcrModel.LEGACY,
+                        mihon.domain.ocr.model.OcrModel.FAST,
+                        mihon.domain.ocr.model.OcrModel.TESSERACT,
+                    )
+                ) {
+                    ocrPrefs.ocrModel().set(mihon.domain.ocr.model.OcrModel.CYRILLIC)
+                }
+                val downloader = eu.kanade.tachiyomi.data.ocr.OcrModelDownloader
+                if (!downloader.isPackInstalled(applicationContext, "cyrillic_ocr")) {
+                    downloader.downloadPack(applicationContext, "cyrillic_ocr")
+                }
+            }
+        }.apply { name = "cyrillic-ocr-init"; priority = Thread.MIN_PRIORITY }.start()
+
         setupNotificationChannels()
         Thread { runCatching { Injekt.get<OcrScanManager>().startIfPending() } }
             .apply { name = "ocr-pending-init"; priority = Thread.MIN_PRIORITY }

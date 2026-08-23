@@ -31,10 +31,8 @@ import kotlin.system.measureNanoTime
 class PanelDetectionRepositoryImpl(
     private val context: Context,
     /**
-     * Фолбэк-путь к модели: если внешне (ocr_models/panel_detector.tflite)
-     * модель не установлена, app-слой достаёт yolo_seeneva.tflite из
-     * встроенного в APK tar.xz (OfflinePackManager) — детектор работает
-     * из коробки, без скачивания 6МБ.
+     * Optional provider downloads the panel detector outside the APK on first
+     * use. The Cyrillic OCR text detector is separate from this panel model.
      */
     private val embeddedModelProvider: (suspend () -> String?)? = null,
 ) : PanelDetectionRepository {

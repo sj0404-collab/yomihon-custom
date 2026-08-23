@@ -224,8 +224,7 @@ baselineProfile {
 }
 
 dependencies {
-    // Офлайн OCR: Tesseract (модели в assets/ocr_packs/*.tar.xz)
-    implementation(libs.tesseract4android)
+    // Russian/Cyrillic PP-OCR models are downloaded outside the APK.
     // ONNX-голоса: только Java-API sherpa-onnx (238КБ, из classes.jar AAR).
     // Нативные .so (55МБ!) НЕ в APK — качаются как дополнение в рантайме
     // (OnnxTts.downloadRuntime) и грузятся через System.load.

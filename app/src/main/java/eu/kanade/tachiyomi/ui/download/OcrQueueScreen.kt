@@ -332,20 +332,11 @@ object OcrQueueScreen : Screen() {
         val isPanelDetectorDown by isPanelDetectorDownPref.changes()
             .collectAsState(initial = isPanelDetectorDownPref.get())
 
-        // Офлайн-Tesseract: расширенные настройки
-        val tessLangsPref = remember { ocrPreferences.tessLangs() }
-        val tessLangs by tessLangsPref.changes().collectAsState(initial = tessLangsPref.get())
-        val tessPsmPref = remember { ocrPreferences.tessPsm() }
-        val tessPsm by tessPsmPref.changes().collectAsState(initial = tessPsmPref.get())
-        val tessUpscalePref = remember { ocrPreferences.tessUpscaleMinSide() }
-        val tessUpscale by tessUpscalePref.changes().collectAsState(initial = tessUpscalePref.get())
-        val tessPreprocessPref = remember { ocrPreferences.tessPreprocess() }
-        val tessPreprocess by tessPreprocessPref.changes().collectAsState(initial = tessPreprocessPref.get())
-        val keepPacksPref = remember { ocrPreferences.keepOfflinePacks() }
-        val keepPacks by keepPacksPref.changes().collectAsState(initial = keepPacksPref.get())
-
-        // Синхронизация флагов с реальным наличием файлов на диске
+        // Migrate every old offline choice to the new canonical Cyrillic OCR.
         LaunchedEffect(Unit) {
+            if (ocrModelPreference.get() in setOf(OcrModel.LEGACY, OcrModel.FAST, OcrModel.TESSERACT)) {
+                ocrModelPreference.set(OcrModel.CYRILLIC)
+            }
             isMangaOcrDownPref.set(
                 eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, "manga_ocr"),
             )
@@ -387,13 +378,14 @@ object OcrQueueScreen : Screen() {
                 subtitle = stringResource(ocrModel.titleRes),
                 icon = null,
                 entries = mapOf(
-                    // LEGACY/FAST скрыты: японские manga-ocr, русский не умеют
+                    // One canonical offline engine; old Japanese/Tesseract
+                    // engines are migration-only and hidden from new choices.
+                    OcrModel.CYRILLIC to stringResource(OcrModel.CYRILLIC.titleRes),
                     OcrModel.GLENS to stringResource(OcrModel.GLENS.titleRes),
                     OcrModel.OWOCR to stringResource(OcrModel.OWOCR.titleRes),
                     OcrModel.OPENROUTER to stringResource(OcrModel.OPENROUTER.titleRes),
                     OcrModel.GOOGLE to stringResource(OcrModel.GOOGLE.titleRes),
                     OcrModel.ZEN_FREE to stringResource(OcrModel.ZEN_FREE.titleRes),
-                    OcrModel.TESSERACT to stringResource(OcrModel.TESSERACT.titleRes),
                 ),
                 onValueChange = ocrModelPreference::set,
             )
@@ -407,7 +399,7 @@ object OcrQueueScreen : Screen() {
                     title = "Фолбэк при сбое движка",
                     subtitle = when (fallbackPreset) {
                         "online" -> "Только онлайн: Lens → Zen → Gemini"
-                        "offline" -> "Только локальные: Tesseract (модели в APK)"
+                        "offline" -> "Только локальные: русский Cyrillic PP-OCR"
                         "single" -> "Без фолбэков — только выбранный движок"
                         else -> "Авто: при сети — онлайн, без сети — локальные"
                     },
@@ -422,100 +414,35 @@ object OcrQueueScreen : Screen() {
                 )
             }
 
-            PreferenceGroupHeader(title = "Офлайн-распознавание (Tesseract)")
+            PreferenceGroupHeader(title = "Офлайн-распознавание — русский Cyrillic OCR")
             InfoWidget(
-                text = "Работает полностью без сети: модели eng+rus встроены в APK (tar.xz, 2.9 МБ) " +
-                    "и извлекаются только при использовании движка.",
+                text = "Новый движок по умолчанию: PP-OCRv4 detector + PP-OCRv3 recognizer " +
+                    "+ PP-OCRv5 verifier. Работает полностью без сети после загрузки; " +
+                    "модели (~21 МБ) хранятся отдельно и не увеличивают APK.",
             )
-            ListPreferenceWidget(
-                value = tessLangs,
-                title = "Языки распознавания",
-                subtitle = when (tessLangs) {
-                    "rus" -> "Только русский — быстрее, если текст точно русский"
-                    "eng" -> "Только английский — быстрее, если текст точно английский"
-                    "eng+rus" -> "Русский + английский (по умолчанию)"
-                    else -> tessLangs + " (языки без установленного пака пропускаются)"
-                },
-                icon = null,
-                entries = buildMap {
-                    put("eng+rus", "Русский + английский")
-                    put("rus", "Только русский")
-                    put("eng", "Только английский")
-                    // Скачанные языковые паки добавляют варианты
-                    eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.TESS_LANG_PACKS.forEach { (pack, code, label) ->
-                        if (eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack)) {
-                            put(code, label.substringBefore(" •"))
-                            put("$code+rus", label.substringBefore(" •") + " + русский")
-                        }
-                    }
-                },
-                onValueChange = tessLangsPref::set,
-            )
-
-            PreferenceGroupHeader(title = "Языковые паки Tesseract (скачать один раз)")
-            InfoWidget(
-                text = "Официальные модели tessdata_fast. После установки язык появляется " +
-                    "в списке «Языки распознавания» выше. Русский и английский уже встроены в APK.",
-            )
-            eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.TESS_LANG_PACKS.forEach { (pack, _, label) ->
-                var installed by remember(pack) {
-                    mutableStateOf(eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(context, pack))
-                }
-                ModelPackRow(
-                    pack = pack,
-                    title = label.substringBefore(" •"),
-                    sizeHint = label.substringAfter("• "),
-                    installed = installed,
-                    onInstalledChange = { installed = it },
+            var cyrillicInstalled by remember {
+                mutableStateOf(
+                    eu.kanade.tachiyomi.data.ocr.OcrModelDownloader.isPackInstalled(
+                        context,
+                        "cyrillic_ocr",
+                    ),
                 )
             }
-            ListPreferenceWidget(
-                value = tessPsm,
-                title = "Сегментация страницы",
-                subtitle = when (tessPsm) {
-                    "auto" -> "Авто — Tesseract сам ищет блоки текста"
-                    "sparse" -> "Разреженный текст — надписи разбросаны по странице"
-                    "single_line" -> "Одна строка — для узких горизонтальных кропов"
-                    else -> "Один блок — лучший режим для баллонов манги"
+            ModelPackRow(
+                pack = "cyrillic_ocr",
+                title = "Русский/Cyrillic PP-OCR",
+                sizeHint = "~21 МБ • офлайн • рекомендуется",
+                installed = cyrillicInstalled,
+                onInstalledChange = { installed ->
+                    cyrillicInstalled = installed
+                    if (installed) ocrModelPreference.set(OcrModel.CYRILLIC)
                 },
-                icon = null,
-                entries = mapOf(
-                    "single_block" to "Один блок (баллоны манги)",
-                    "auto" to "Авто (вся страница)",
-                    "sparse" to "Разреженный текст (звуки, надписи)",
-                    "single_line" to "Одна строка",
-                ),
-                onValueChange = tessPsmPref::set,
-            )
-            SliderItem(
-                value = tessUpscale,
-                valueRange = 0..640,
-                steps = 9, // позиции: 0, 64, 128, …, 640
-                label = "Апскейл мелкого текста",
-                valueString = if (tessUpscale == 0) "выкл" else "до $tessUpscale px",
-                onChange = { tessUpscalePref.set((it / 64) * 64) },
-            )
-            SwitchPreferenceWidget(
-                checked = tessPreprocess,
-                title = "Предобработка изображения",
-                subtitle = "Ч/б + контраст: убирает цветные фоны баллонов, повышает точность",
-                onCheckedChanged = tessPreprocessPref::set,
-            )
-            SwitchPreferenceWidget(
-                checked = keepPacks,
-                title = "Держать модели распакованными",
-                subtitle = if (keepPacks) {
-                    "Быстрый старт движка • ~8 МБ постоянно на диске"
-                } else {
-                    "Экономия места: в покое только tar.xz в APK, извлечение при использовании"
-                },
-                onCheckedChanged = keepPacksPref::set,
             )
 
             PreferenceGroupHeader(title = "Управление локальными OCR-моделями")
             InfoWidget(
-                text = "Хранятся вне APK (Android/data/…/files/ocr_models или Yomihon/OCR). " +
-                    "Tesseract (офлайн) всегда доступен — его модели встроены в APK.",
+                text = "Все локальные модели хранятся вне APK в Android/data/…/files/ocr_models " +
+                    "или Yomihon/OCR и скачиваются только по запросу.",
             )
             // Manga OCR (Legacy) и Fast Manga OCR удалены из UI: это
             // ЯПОНСКИЕ модели (bluolightning/manga-ocr), кириллицу не читают —

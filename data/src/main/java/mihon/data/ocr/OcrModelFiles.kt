@@ -24,6 +24,11 @@ object OcrModelFiles {
 
     /** Maps asset-style paths to flat file names used in external folders and model packages. */
     private val flatNames = mapOf(
+        "cyrillic_ocr/detector.tflite" to "cyrillic_detector.tflite",
+        "cyrillic_ocr/recognizer_v3.tflite" to "cyrillic_recognizer_v3.tflite",
+        "cyrillic_ocr/recognizer_v5.tflite" to "cyrillic_recognizer_v5.tflite",
+        "cyrillic_ocr/dict_v3.txt" to "cyrillic_dict_v3.txt",
+        "cyrillic_ocr/dict_v5.txt" to "cyrillic_dict_v5.txt",
         "ocr/encoder.tflite" to "encoder.tflite",
         "ocr/decoder.tflite" to "decoder.tflite",
         "ocr/embeddings.bin" to "embeddings.bin",

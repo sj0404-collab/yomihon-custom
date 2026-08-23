@@ -5,6 +5,12 @@ package mihon.domain.ocr.model
  */
 enum class OcrModel {
     /**
+     * Default downloadable Russian/Cyrillic offline engine: PP-OCRv3 with
+     * PP-OCRv5 verifier and PP-OCRv4 text detector.
+     */
+    CYRILLIC,
+
+    /**
      * Legacy and slower model, supports GPU/CPU.
      */
     LEGACY,

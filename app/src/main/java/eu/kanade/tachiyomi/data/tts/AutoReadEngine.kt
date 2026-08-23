@@ -46,8 +46,8 @@ class AutoReadEngine(
     /** Детектор панелей/баллонов (YOLO Seeneva, модель в APK). */
     private val detectPanels: mihon.domain.panel.interactor.DetectPanels by lazy { Injekt.get() }
 
-    /** Отдельный Tesseract для баллонов: кропы мелкие, распознаются быстро. */
-    private val bubbleTess by lazy { eu.kanade.tachiyomi.data.ocr.TesseractOcrEngine(context) }
+    /** Selected OCR engine for individual balloon crops (Cyrillic by default). */
+    private val bubbleOcr: mihon.domain.ocr.interactor.OcrProcessor by lazy { Injekt.get() }
 
     /** Строка кадра: текст + нормализованный box (для подсветки/порядка). */
     private data class Line(val text: String, val boundingBox: OcrBoundingBox)
@@ -204,12 +204,11 @@ class AutoReadEngine(
                 val order = prefs.scanReadingOrder().get()
 
                 // ===== БАЛЛОНЫ ВМЕСТО «ВСЕЙ СТРАНИЦЫ» (фикс по скриншотам) =====
-                // Полностраничные движки (Tesseract/Zen/OwOCR) возвращают ОДИН
-                // регион 0,0-1,1: весь кадр читался как одна реплика «1/1» с
-                // мусором между баллонами. Теперь такой результат разбирается:
-                //  1) YOLO-детектор (модель в APK) находит баллоны;
-                //  2) каждый баллон кропается и распознаётся отдельно офлайн-
-                //     Tesseract'ом (кропы мелкие — это быстро);
+                // Полностраничные движки возвращают один регион 0,0-1,1.
+                // Для авточтения такой результат дополнительно разбирается:
+                //  1) YOLO-детектор находит баллоны;
+                //  2) каждый баллон распознаётся выбранным OCR (по умолчанию
+                //     полностью офлайн Cyrillic PP-OCR);
                 //  3) каждый баллон = своя реплика со своей рамкой, номером
                 //     {N} и полом говорящего.
                 // Если детектор ничего не нашёл — текст страницы хотя бы
@@ -405,9 +404,6 @@ class AutoReadEngine(
         _currentRegion.value = null
         _frameRegions.value = emptyList()
         _isReading.value = false
-        // Выгружаем баллонный Tesseract (модели по настройке либо стираются,
-        // либо остаются распакованными для быстрого рестарта)
-        scope.launch { runCatching { bubbleTess.close() } }
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
@@ -437,8 +433,8 @@ class AutoReadEngine(
 
     /**
      * YOLO-детект баллонов на кадре + пофрагментный OCR. Каждый найденный
-     * баллон становится отдельной репликой со своей рамкой. Работает
-     * полностью офлайн: модель детектора и Tesseract лежат в APK.
+     * баллон становится отдельной репликой со своей рамкой. После разовой
+     * загрузки моделей весь конвейер работает полностью офлайн.
      */
     private suspend fun readBubbles(
         bitmap: Bitmap,
@@ -477,7 +473,9 @@ class AutoReadEngine(
             if (right - left < 16 || bottom - top < 16) continue
             val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
             val text = try {
-                bubbleTess.recognize(crop)
+                val cropPixels = IntArray(crop.width * crop.height)
+                crop.getPixels(cropPixels, 0, crop.width, 0, 0, crop.width, crop.height)
+                bubbleOcr.getText(OcrImage(crop.width, crop.height, cropPixels))
             } finally {
                 if (!crop.isRecycled) crop.recycle()
             }

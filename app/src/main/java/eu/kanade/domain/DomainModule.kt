@@ -287,17 +287,7 @@ class DomainModule : InjektModule {
         addFactory { FindExistingAnkiNotes(get()) }
 
         addSingletonFactory<OcrRepository> {
-            OcrRepositoryImpl(
-                context = get<Application>(),
-                tesseractFactory = {
-                    val app = get<Application>()
-                    val tess = eu.kanade.tachiyomi.data.ocr.TesseractOcrEngine(app)
-                    object : mihon.data.ocr.ExternalOcrEngine {
-                        override suspend fun recognize(image: android.graphics.Bitmap) = tess.recognize(image)
-                        override suspend fun close() = tess.close()
-                    }
-                },
-            )
+            OcrRepositoryImpl(context = get<Application>())
         }
         addSingletonFactory { OcrScanStore(get<Application>(), get()) }
         addSingletonFactory<OcrPageSourceGateway> { OcrPageSourceGatewayImpl(get<Application>(), get(), get()) }
