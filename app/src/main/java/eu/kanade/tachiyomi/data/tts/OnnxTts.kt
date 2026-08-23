@@ -73,6 +73,51 @@ object OnnxTts {
         return d.isDirectory && d.walkTopDown().any { it.extension == "onnx" }
     }
 
+    private const val ONNX_CHANNEL = "onnx_download"
+    private const val ONNX_NOTIF_ID = 77002
+
+    private fun ensureOnnxChannel(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (nm.getNotificationChannel(ONNX_CHANNEL) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(ONNX_CHANNEL, "Загрузка голосов", android.app.NotificationManager.IMPORTANCE_LOW).apply {
+                        description = "Прогресс загрузки нейроголосов"
+                    }
+                )
+            }
+        }
+    }
+
+    private fun showOnnxNotif(context: Context, title: String, text: String, progress: Int) {
+        ensureOnnxChannel(context)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val pi = android.app.PendingIntent.getActivity(context, 0, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        val notif = androidx.core.app.NotificationCompat.Builder(context, ONNX_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setProgress(100, progress, progress < 0)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        nm.notify(ONNX_NOTIF_ID, notif)
+    }
+
+    private fun cancelOnnxNotif(context: Context) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+        nm?.cancel(ONNX_NOTIF_ID)
+    }
+
+    private fun fmtSize(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes Б"
+        bytes < 1048576 -> "${"%.1f".format(bytes / 1024.0)} КБ"
+        else -> "${"%.1f".format(bytes / 1048576.0)} МБ"
+    }
+
+
     // ---- СКАЧИВАЕМЫЙ НАТИВНЫЙ РАНТАЙМ (вынесен из APK ради веса -55МБ) ----
     // Java-API вкомпилирован (238КБ), а .so-библиотеки качаются один раз:
     // AAR с официального релиза -> извлекаются только .so нужного ABI
@@ -116,6 +161,8 @@ object OnnxTts {
                 if (f.isFile) System.load(f.absolutePath)
             }
             runtimeLoaded = true
+            cancelOnnxNotif(context)
+            showOnnxNotif(context, "TTS-рантайм готов", "Голоса можно скачивать", 100)
             true
         }.onFailure {
             logcat(LogPriority.ERROR, it) { "sherpa-onnx runtime load failed" }
@@ -153,6 +200,7 @@ object OnnxTts {
                         if (pct != lastPct) {
                             lastPct = pct
                             _progress.value = _progress.value + (RUNTIME_PACK_ID to pct / 100f)
+                            showOnnxNotif(context, "Загрузка TTS-рантайма", "${pct}% (~46 МБ)", pct)
                         }
                     }
                 }
@@ -160,6 +208,7 @@ object OnnxTts {
             // Извлечение .so только своего ABI
             val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
             _progress.value = _progress.value + (RUNTIME_PACK_ID to 0.9f)
+            showOnnxNotif(context, "Распаковка TTS-рантайма", "…", 90)
             java.util.zip.ZipInputStream(aar.inputStream().buffered()).use { zis ->
                 var e = zis.nextEntry
                 while (e != null) {
