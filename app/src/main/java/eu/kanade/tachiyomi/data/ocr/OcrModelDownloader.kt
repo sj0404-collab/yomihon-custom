@@ -13,7 +13,6 @@ import kotlinx.coroutines.withContext
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -269,7 +268,7 @@ object OcrModelDownloader {
                                 "${pct}% — файл ${fileIndex + 1}/${files.size}",
                                 pct,
                                 downloadedBytes = totalDownloaded,
-                                totalBytes = totalPackSize.takeIf { it > 0 },
+                                totalBytes = totalPackSize.takeIf { it > 0 } ?: 0L,
                             )
                         }
                         // If server didn't report size, track from actual download
