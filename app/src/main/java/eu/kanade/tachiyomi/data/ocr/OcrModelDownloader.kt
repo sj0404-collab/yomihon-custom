@@ -9,6 +9,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import eu.kanade.tachiyomi.R
 import logcat.LogPriority
 import mihon.data.ocr.OcrModelFiles
 import tachiyomi.core.common.util.system.logcat
@@ -23,6 +32,54 @@ import java.net.URL
  * opt-in download. Files can also be installed manually into Yomihon/OCR/ on
  * shared storage (see OcrModelFiles for the full search order).
  */
+
+/** Utility: format bytes to human-readable size. */
+private fun formatSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes Б"
+    bytes < 1048576 -> "${"%.1f".format(bytes / 1024.0)} КБ"
+    bytes < 1073741824 -> "${"%.1f".format(bytes / 1048576.0)} МБ"
+    else -> "${"%.2f".format(bytes / 1073741824.0)} ГБ"
+}
+
+private const val CHANNEL_ID = "model_download"
+private const val NOTIF_ID = 77001
+
+private fun ensureChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Загрузка моделей", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Прогресс загрузки OCR и TTS моделей"
+                }
+            )
+        }
+    }
+}
+
+/** Show/update download progress notification in the shade. */
+private fun showNotif(context: Context, title: String, text: String, progress: Int) {
+    ensureChannel(context)
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+    val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setProgress(100, progress, progress < 0)
+        .setContentIntent(pi)
+        .setOngoing(true)
+        .setSilent(true)
+        .build()
+    nm.notify(NOTIF_ID, notif)
+}
+
+private fun cancelNotif(context: Context) {
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+    nm?.cancel(NOTIF_ID)
+}
+
 object OcrModelDownloader {
 
     /** Model packs: pack name -> list of (url, flat file name). */
@@ -174,6 +231,8 @@ object OcrModelDownloader {
                         val fileIndex = done
                         val r = downloadFile(url, File(baseDir, name)) { frac ->
                             setProgress(pack, (fileIndex + frac) / files.size)
+                        val pct = ((fileIndex + frac) / files.size * 100).toInt()
+                        showNotif(context, "Загрузка моделей: $pack", "${pct}% — файл ${fileIndex + 1}/${files.size}", pct)
                         }
                         done++
                         r
@@ -185,12 +244,16 @@ object OcrModelDownloader {
             } finally {
                 downloadMutex.withLock { activePacks.remove(pack) }
                 setProgress(pack, null)
+            cancelNotif(context)
             }
 
             withContext(Dispatchers.Main) {
                 if (ok) {
+                    cancelNotif(context)
+                    showNotif(context, "Модели установлены", "Локальный OCR готов", 100)
                     context.toast("Модели установлены: локальный OCR готов к работе")
                 } else {
+                    cancelNotif(context)
                     context.toast("Не удалось скачать модели. Проверьте интернет и повторите")
                 }
                 onFinished(ok)
