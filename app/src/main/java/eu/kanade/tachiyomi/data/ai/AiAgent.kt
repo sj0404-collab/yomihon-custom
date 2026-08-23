@@ -208,10 +208,11 @@ object AiAgent {
         var reasoning = reply.reasoning
         var usedModel = reply.model
 
-        // Up to six rounds; exact duplicate calls are never executed twice in
-        // one user turn (important for append_file/write_file side effects).
+        // Раундов стало больше (было 6 — сложные задачи обрывались на середине),
+        // дубликаты вызовов по-прежнему не исполняются дважды за один ход
+        // (важно для append_file/write_file).
         val executedCalls = mutableSetOf<String>()
-        for (round in 1..6) {
+        for (round in 1..12) {
             val parsedCalls = parseToolCalls(context, answer)
             if (parsedCalls.isEmpty()) break
             val calls = parsedCalls.filter { call ->
@@ -226,7 +227,12 @@ object AiAgent {
             roundsDone = round
             val outputs = calls.map { call ->
                 val t0 = System.currentTimeMillis()
-                val r = runCatching { execute(context, call, chat) }
+                // Инструменты больше не могут зависнуть навсегда (gen_image /
+                // check_site на медленной сети): жёсткий таймаут 120 секунд.
+                val r = runCatching {
+                    withTimeoutOrNull(120_000L) { execute(context, call, chat) }
+                        ?: ToolResult(call.name, "ОШИБКА: инструмент не ответил за 120 секунд", status = "error")
+                }
                     .getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}", status = "error") }
                     .copy(
                         args = call.args.toString().take(200),
