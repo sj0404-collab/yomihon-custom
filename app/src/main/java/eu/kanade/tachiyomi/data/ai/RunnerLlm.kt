@@ -221,14 +221,19 @@ object RunnerLlm {
         val message: String,
     )
 
-    /** GET/POST GitHub API с таймаутами и чтением тела ошибки. */
+    /**
+     * GET/POST GitHub API с таймаутами и чтением тела ошибки.
+     * Ходит через прокси приложения (Настройки → Сеть), как и AI-чат:
+     * раньше раннеры молча игнорировали прокси и не работали там, где
+     * прямой доступ к api.github.com заблокирован.
+     */
     private fun githubRequest(
         token: String,
         url: String,
         method: String = "GET",
         body: String? = null,
     ): GithubResponse {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = AiAssistant.openConnection(url) as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 15_000
@@ -255,7 +260,13 @@ object RunnerLlm {
         var currentUrl = initialUrl
         repeat(5) {
             val url = URL(currentUrl)
-            val conn = url.openConnection() as HttpURLConnection
+            // Redirects ведут на внешнее хранилище артефактов — напрямую, без прокси.
+            val viaProxy = url.host == "api.github.com"
+            val conn = if (viaProxy) {
+                AiAssistant.openConnection(url) as HttpURLConnection
+            } else {
+                url.openConnection() as HttpURLConnection
+            }
             try {
                 conn.instanceFollowRedirects = false
                 conn.connectTimeout = 15_000
@@ -459,7 +470,8 @@ object RunnerLlm {
                 messages.put(JSONObject().put("role", r).put("content", c))
             }
             val answer = runCatching {
-                val conn = URL("$url/v1/chat/completions").openConnection() as HttpURLConnection
+                // Туннель cloudflared тоже может требовать прокси (как chat.try.ai).
+                val conn = AiAssistant.openConnection("$url/v1/chat/completions") as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.doOutput = true
                 conn.connectTimeout = 20_000
@@ -490,7 +502,7 @@ object RunnerLlm {
     suspend fun isAlive(session: Session): Boolean = withContext(Dispatchers.IO) {
         val url = session.url ?: return@withContext false
         runCatching {
-            val conn = URL("$url/health").openConnection() as HttpURLConnection
+            val conn = AiAssistant.openConnection("$url/health") as HttpURLConnection
             conn.connectTimeout = 8_000
             conn.readTimeout = 8_000
             session.apiKey?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
