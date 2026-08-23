@@ -369,7 +369,7 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
                         IconButton(onClick = {
                             prefs.voiceEngine().set(TtsSpeaker.ENGINE_ONNX)
                             prefs.onnxVoice().set(voice.id)
-                            TtsSpeaker.speakOnnxTest(context, voice)
+                            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) { TtsSpeaker.speakOnnxTest(context, voice) }
                         }) { Icon(Icons.Default.PlayArrow, "Проба") }
                         Spacer(Modifier.width(4.dp))
                         OutlinedButton(onClick = {
@@ -380,7 +380,7 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
                     } else {
                         Button(onClick = {
                             kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                OnnxTts.downloadVoice(context, voice)
+                                OnnxTts.download(context, voice)
                             }
                         }) { Text("${voice.sizeMb} МБ") }
                     }
