@@ -263,7 +263,7 @@ object RunnerLlm {
             // Redirects ведут на внешнее хранилище артефактов — напрямую, без прокси.
             val viaProxy = url.host == "api.github.com"
             val conn = if (viaProxy) {
-                AiAssistant.openConnection(url) as HttpURLConnection
+                AiAssistant.openConnection(currentUrl) as HttpURLConnection
             } else {
                 url.openConnection() as HttpURLConnection
             }
