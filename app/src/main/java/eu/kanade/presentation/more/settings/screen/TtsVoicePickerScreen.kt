@@ -162,6 +162,10 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
     val enginePkg = remember { prefs.systemTtsEngine().get() }
     var onnxCatalog = remember { OnnxTts.CATALOG }
     val onnxProgress = OnnxTts.progress.collectAsState()
+    // Версия установленных пакетов: после скачивания рантайма/голоса флаги
+    // isInstalled пересчитываются сразу (раньше были заморожены в remember{}
+    // и «ничего не происходило» — кнопки не менялись до перезахода).
+    val installedVersion by OnnxTts.installedVersion.collectAsState()
 
     DisposableEffect(enginePkg) {
         systemVoices = emptyList(); systemReady = false; ttsProbe = null
@@ -292,7 +296,7 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
 
         // Runtime download button
         item {
-            val runtimeInstalled = remember { OnnxTts.isRuntimeInstalled(context) }
+            val runtimeInstalled = remember(installedVersion) { OnnxTts.isRuntimeInstalled(context) }
             val runtimeProg = onnxProgress.value[OnnxTts.RUNTIME_PACK_ID]
             Card(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
                 Row(
@@ -314,18 +318,28 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
                     if (runtimeInstalled) {
                         Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF4CAF50))
                     } else {
-                        Button(onClick = {
-                            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                OnnxTts.downloadRuntime(context)
-                            }
-                        }) { Text("Скачать") }
+                        var downloadingRuntime by remember { mutableStateOf(false) }
+                        Button(
+                            enabled = !downloadingRuntime,
+                            onClick = {
+                                downloadingRuntime = true
+                                context.toast("Загрузка рантайма началась")
+                                kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                                    val ok = runCatching { OnnxTts.downloadRuntime(context) }.getOrDefault(false)
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        downloadingRuntime = false
+                                        context.toast(if (ok) "Рантайм установлен" else "Ошибка загрузки рантайма — смотрите логи")
+                                    }
+                                }
+                            },
+                        ) { Text(if (downloadingRuntime) "Скачивается…" else "Скачать") }
                     }
                 }
             }
         }
 
         items(onnxCatalog) { voice ->
-            val installed = remember { OnnxTts.isInstalled(context, voice) }
+            val installed = remember(installedVersion) { OnnxTts.isInstalled(context, voice) }
             val isOnnxActive = prefs.voiceEngine().get() == TtsSpeaker.ENGINE_ONNX &&
                 prefs.onnxVoice().get() == voice.id
             val prog = onnxProgress.value[voice.id]
@@ -379,8 +393,13 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
                         }) { Text("Актив.") }
                     } else {
                         Button(onClick = {
+                            context.toast("Загрузка голоса ${voice.name}…")
                             kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                OnnxTts.download(context, voice)
+                                val ok = runCatching { OnnxTts.download(context, voice) }.getOrDefault(false)
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    if (ok) context.toast("Голос ${voice.name} установлен") 
+                                    else context.toast("Ошибка загрузки ${voice.name}")
+                                }
                             }
                         }) { Text("${voice.sizeMb} МБ") }
                     }
