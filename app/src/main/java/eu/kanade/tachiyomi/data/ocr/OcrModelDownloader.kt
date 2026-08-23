@@ -58,15 +58,29 @@ private fun ensureChannel(context: Context) {
 }
 
 /** Show/update download progress notification in the shade. */
-private fun showNotif(context: Context, title: String, text: String, progress: Int) {
+private fun showNotif(
+    context: Context,
+    title: String,
+    text: String,
+    progress: Int,
+    downloadedBytes: Long = 0,
+    totalBytes: Long = 0,
+) {
     ensureChannel(context)
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
     val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    // Build informative sub-text with size when available
+    val sizeText = when {
+        totalBytes > 0 -> "${formatSize(downloadedBytes)} / ${formatSize(totalBytes)}"
+        downloadedBytes > 0 -> formatSize(downloadedBytes)
+        else -> null
+    }
+    val contentText = if (sizeText != null) "$text  ($sizeText)" else text
     val notif = NotificationCompat.Builder(context, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.stat_sys_download)
         .setContentTitle(title)
-        .setContentText(text)
+        .setContentText(contentText)
         .setProgress(100, progress, progress < 0)
         .setContentIntent(pi)
         .setOngoing(true)
@@ -226,13 +240,41 @@ object OcrModelDownloader {
                 } else {
                     // Прогресс по файлам: каждый файл — своя доля пака,
                     // внутри файла — по скачанным байтам (Content-Length).
+                    // Pre-fetch Content-Length for all files to show total size
+                    val fileSizes = files.map { (url, _) ->
+                        runCatching {
+                            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                                connectTimeout = 10_000
+                                requestMethod = "HEAD"
+                            }
+                            conn.disconnect()
+                            conn.contentLengthLong.takeIf { it > 0 } ?: 0L
+                        }.getOrDefault(0L)
+                    }
+                    val totalPackSize = fileSizes.sum()
                     var done = 0
+                    var totalDownloaded = 0L
                     files.all { (url, name) ->
                         val fileIndex = done
+                        var fileDownloaded = 0L
                         val r = downloadFile(url, File(baseDir, name)) { frac ->
+                            val prev = fileDownloaded
+                            fileDownloaded = (fileSizes[fileIndex] * frac).toLong()
+                            totalDownloaded += (fileDownloaded - prev)
                             setProgress(pack, (fileIndex + frac) / files.size)
-                        val pct = ((fileIndex + frac) / files.size * 100).toInt()
-                        showNotif(context, "Загрузка моделей: $pack", "${pct}% — файл ${fileIndex + 1}/${files.size}", pct)
+                            val pct = ((fileIndex + frac) / files.size * 100).toInt()
+                            showNotif(
+                                context,
+                                "Загрузка моделей: $pack",
+                                "${pct}% — файл ${fileIndex + 1}/${files.size}",
+                                pct,
+                                downloadedBytes = totalDownloaded,
+                                totalBytes = totalPackSize.takeIf { it > 0 },
+                            )
+                        }
+                        // If server didn't report size, track from actual download
+                        if (fileSizes[fileIndex] == 0L) {
+                            totalDownloaded += File(baseDir, name).length()
                         }
                         done++
                         r
@@ -250,8 +292,10 @@ object OcrModelDownloader {
             withContext(Dispatchers.Main) {
                 if (ok) {
                     cancelNotif(context)
-                    showNotif(context, "Модели установлены", "Локальный OCR готов", 100)
-                    context.toast("Модели установлены: локальный OCR готов к работе")
+                    val size = installedSize(context, pack)
+                    val sizeStr = if (size > 0) " (${formatSize(size)})" else ""
+                    showNotif(context, "Модели установлены", "Локальный OCR готов$sizeStr", 100)
+                    context.toast("Модели установлены: локальный OCR готов к работе$sizeStr")
                 } else {
                     cancelNotif(context)
                     context.toast("Не удалось скачать модели. Проверьте интернет и повторите")
