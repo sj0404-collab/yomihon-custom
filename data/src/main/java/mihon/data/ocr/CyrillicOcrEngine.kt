@@ -138,8 +138,27 @@ internal class CyrillicOcrEngine(
         return false
     }
 
-    private fun readDictionary(path: String): List<String> =
-        java.io.File(path).readLines(Charsets.UTF_8).dropLastWhile(String::isEmpty)
+    private fun readDictionary(path: String): List<String> {
+        val raw = java.io.File(path).readBytes()
+        // Strip UTF-8 BOM (EF BB BF) if present — GitHub raw files
+        // and some editors prepend it, causing the first dict entry
+        // to be corrupted (e.g. "\uFEFFА" instead of "А").
+        val text = if (raw.size >= 3 &&
+            raw[0] == 0xEF.toByte() &&
+            raw[1] == 0xBB.toByte() &&
+            raw[2] == 0xBF.toByte()
+        ) {
+            String(raw, 3, raw.size - 3, Charsets.UTF_8)
+        } else {
+            // Try UTF-8 first; fall back to Windows-1251 for legacy dicts
+            try {
+                String(raw, Charsets.UTF_8)
+            } catch (_: Exception) {
+                String(raw, java.nio.charset.Charset.forName("windows-1251"))
+            }
+        }
+        return text.lines().dropLastWhile(String::isEmpty)
+    }
 
     override suspend fun recognizeText(image: Bitmap): String {
         ensureInitialized()
