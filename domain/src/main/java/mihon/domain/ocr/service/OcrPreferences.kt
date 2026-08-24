@@ -125,6 +125,9 @@ class OcrPreferences(
     // Встроенный HTTP-сервер агента (http://127.0.0.1:8765 и по Wi-Fi)
     fun aiHttpServer() = preferenceStore.getBoolean("pref_ai_http_server", false)
 
+    /** Секрет доступа к встроенному HTTP-серверу AI (генерируется лениво при старте). */
+    fun aiHttpToken() = preferenceStore.getString("pref_ai_http_token", "")
+
     // GitHub PAT для полу-онлайн LLM-сессий (llm-runner.yml): нужен scope
     // actions:write на репозиторий. Хранится только на устройстве.
     fun githubPat() = preferenceStore.getString("pref_github_pat", "")
