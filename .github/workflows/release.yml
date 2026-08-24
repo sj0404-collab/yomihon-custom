@@ -55,8 +55,8 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
       - name: Rename APK
-        run: |
         shell: bash
+        run: |
           set -e
 
           mv app/build/outputs/apk/release/app-armeabi-v7a-release.apk yomihon-armeabi-v7a-${{ needs.get_tag.outputs.tag }}.apk
@@ -108,8 +108,8 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
       - name: Rename APK
-        run: |
         shell: bash
+        run: |
           set -e
 
           mv app/build/outputs/apk/foss/app-universal-foss.apk yomihon-${{ needs.get_tag.outputs.tag }}-foss.apk
