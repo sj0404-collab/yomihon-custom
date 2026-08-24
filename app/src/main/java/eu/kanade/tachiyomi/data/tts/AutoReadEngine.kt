@@ -238,6 +238,15 @@ class AutoReadEngine(
                     .filter { it.text.length >= MIN_TEXT_LENGTH }
                     .filter { isMeaningful(it.text, language) }
                     .filter { !isDuplicate(it.text) }
+                    // Рамка обязана лежать внутри страницы и иметь разумный
+                    // размер: иначе голубая подсветка вылезает за текст/экран.
+                    .filter { b ->
+                        val bb = b.boundingBox
+                        bb.left >= -0.001f && bb.top >= -0.001f &&
+                            bb.right <= 1.001f && bb.bottom <= 1.001f &&
+                            (bb.right - bb.left) > 0.02f &&
+                            (bb.bottom - bb.top) > 0.01f
+                    }
                     .toList()
 
                 // 3) порядок чтения
@@ -280,7 +289,7 @@ class AutoReadEngine(
                 val localGenders = LocalSpeakerAi.guessGenders(ordered.map { it.text })
                 val genders = java.util.concurrent.atomic.AtomicReferenceArray<String?>(ordered.size)
                 for (i in ordered.indices) {
-                    genders.set(i, localGenders[i])
+                    genders.set(i, localGenders[i] ?: detectGenderByDictionary(ordered[i].text))
                 }
                 aiRefine = null
                 // Gemini Vision как ещё один фоновый уточнитель — только с ключом
@@ -410,11 +419,18 @@ class AutoReadEngine(
     private suspend fun speakAndAwait(text: String, gender: String? = null, speakerSlot: Int = 0) {
         val done = MutableStateFlow(false)
         var started = false
+        val t0 = System.currentTimeMillis()
         TtsSpeaker.speakAs(context, text, gender, speakerSlot) { speaking ->
-            if (speaking) started = true
-            if (!speaking && started) done.value = true
+            if (speaking && !started) {
+                started = true
+                logcat(LogPriority.DEBUG) { "TTS started (${System.currentTimeMillis() - t0}ms): ${text.take(60)}" }
+            }
+            if (!speaking && started) {
+                done.value = true
+                logcat(LogPriority.DEBUG) { "TTS done in ${System.currentTimeMillis() - t0}ms" }
+            }
         }
-        // страховка: макс. время = длина текста * 180мс + 4с
+        // страховка: макс. время = длина текста * 220мс + запас 5с
         val timeoutMs = text.length * 220L + 5_000L
         val start = System.currentTimeMillis()
         while (!done.value && System.currentTimeMillis() - start < timeoutMs) {
@@ -424,10 +440,44 @@ class AutoReadEngine(
             }
             delay(40) // быстрый опрос: между репликами нет лишней паузы
         }
+        // Диагностика недоговорённых реплик: TTS мог прерваться без onDone.
+        if (started && !done.value) {
+            logcat(LogPriority.WARN) {
+                "TTS timeout without onDone: ${text.take(60)} (waited ${System.currentTimeMillis() - start}ms)"
+            }
+        } else if (!started) {
+            logcat(LogPriority.WARN) { "TTS never started: ${text.take(60)}" }
+        }
     }
 
     /** Строка (ряд) для сортировки: реплики в пределах 12% высоты — один ряд. */
     private fun rowOf(top: Float): Int = (top / 0.12f).toInt()
+
+    /**
+     * Словарный фолбэк пола говорящего: работает, когда морфология
+     * LocalSpeakerAi не дала ответа (в реплике нет «я …ла/…л»). Ориентируемся
+     * на маркеры окружения персонажа: родственные связи и роли. Возвращаем
+     * пол только при явном перевесе — иначе null (нейтральный голос).
+     */
+    private fun detectGenderByDictionary(text: String): String? {
+        val maleMarkers = listOf(
+            "брат", "отец", "папа", "дед", "сын", "мужчина", "парень",
+            "господин", "старик", "мальчик", "юноша", "принц", "король",
+        )
+        val femaleMarkers = listOf(
+            "сестра", "мать", "мама", "бабушка", "дочь", "женщина", "девушка",
+            "госпожа", "старуха", "девочка", "принцесса", "королева",
+        )
+        val lower = text.lowercase()
+        // Подстрочный поиск покрывает падежи: «моей сестры», «к отцу».
+        val maleCount = maleMarkers.count { lower.contains(it) }
+        val femaleCount = femaleMarkers.count { lower.contains(it) }
+        return when {
+            maleCount > femaleCount -> "male"
+            femaleCount > maleCount -> "female"
+            else -> null
+        }
+    }
 
     // region Баллоны (YOLO) и чистка OCR-мусора
 
@@ -530,7 +580,14 @@ class AutoReadEngine(
          *  • остальные строки склеиваются пробелом.
          */
         fun cleanOcrGarbage(text: String, language: String): String {
-            val rows = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+            val rawRows = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+            // OCR часто путает буквы с цифрами («4» вместо «а», «1» вместо «л»).
+            // Убираем цифровые обрывки (числа без буквенного соседства):
+            // «4а», «eS la 4», случайные «7» в середине текста.
+            val rows = rawRows.map { row ->
+                row.replace(Regex("(?<![\\p{L}0-9])[0-9]+(?![\\p{L}])"), " ")
+                    .replace(Regex("\\s+"), " ").trim()
+            }.filter { it.isNotBlank() }
             if (rows.isEmpty()) return ""
             val kept = rows.filter { row -> isMeaningfulRow(row, language) }
             // Если ВСЁ забраковано, но исходник был длинный — вернём самую
