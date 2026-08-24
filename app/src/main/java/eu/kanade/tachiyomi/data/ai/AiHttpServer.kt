@@ -16,6 +16,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.util.UUID
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -35,6 +36,22 @@ object AiHttpServer {
 
     const val PORT = 8765
 
+    /**
+     * Секрет доступа к серверу: генерируется один раз и хранится в настройках.
+     * Каждый запрос обязан передавать ?key=<токен>, иначе 401. Раньше сервер
+     * слушал 0.0.0.0 вообще без авторизации — любой сосед по Wi-Fi мог
+     * пользоваться агентом и читать workspace.
+     */
+    fun tokenFor(context: Context): String {
+        val prefs = Injekt.get<OcrPreferences>()
+        val existing = prefs.aiHttpToken().get()
+        if (existing.isNotBlank()) return existing
+        val generated = UUID.randomUUID().toString().replace("-", "").take(16)
+        prefs.aiHttpToken().set(generated)
+        logcat(LogPriority.INFO) { "AiHttpServer: сгенерирован ключ доступа" }
+        return generated
+    }
+
     @Volatile
     private var server: ServerSocket? = null
     private var thread: Thread? = null
@@ -48,6 +65,7 @@ object AiHttpServer {
         val ss = ServerSocket()
         ss.reuseAddress = true
         ss.bind(InetSocketAddress("0.0.0.0", PORT))
+        tokenFor(appContext) // ключ должен существовать до первого запроса
         server = ss
         thread = Thread {
             while (!ss.isClosed) {
@@ -105,6 +123,18 @@ object AiHttpServer {
                 }
 
                 val out = s.getOutputStream()
+
+                // Доступ только по ключу ?key=... (см. tokenFor).
+                if (queryParam(fullPath.substringAfter('?', ""), "key") != tokenFor(context)) {
+                    respond(
+                        out,
+                        401,
+                        "text/plain; charset=utf-8",
+                        "401 Unauthorized\n\nОткройте ссылку с ключом из приложения:\nвкладка AI — блок «Доступ из внешнего браузера».".toByteArray(),
+                    )
+                    return
+                }
+
                 val path = fullPath.substringBefore('?')
                 val query = fullPath.substringAfter('?', "")
                 when {
@@ -252,23 +282,24 @@ object AiHttpServer {
 <div id="log"></div>
 <footer><input id="t" placeholder="Сообщение агенту…" onkeydown="if(event.key==='Enter')send()"><button onclick="send()">➤</button></footer>
 <script>
+const KEY=new URLSearchParams(location.search).get('key')||'';
 const log=document.getElementById('log');
 function add(cls,text,html){const d=document.createElement('div');d.className='m '+cls;if(html)d.innerHTML=html;else d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
 async function send(){
  const t=document.getElementById('t');const text=t.value.trim();if(!text)return;t.value='';
  add('u',text);const w=add('a','…думаю');
  try{
-  const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+  const r=await fetch('/chat?key='+KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
   const j=await r.json();
   let h=j.text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
   if(j.tools&&j.tools.length)h+='<div class="tools">'+j.tools.map(x=>'🔧 '+x.replace(/</g,'&lt;')).join('<br>')+'</div>';
-  if(j.images)for(const p of j.images)h+='<br><img src="/file?p='+encodeURIComponent(p)+'"><br><a href="/file?p='+encodeURIComponent(p)+'" download>⬇ скачать</a>';
+  if(j.images)for(const p of j.images)h+='<br><img src="/file?p='+encodeURIComponent(p)+'&key='+KEY+'"><br><a href="/file?p='+encodeURIComponent(p)+'&key='+KEY+'" download>⬇ скачать</a>';
   w.innerHTML=h;
  }catch(e){w.textContent='Ошибка: '+e;}
 }
 async function files(){
- const r=await fetch('/files');const j=await r.json();
- add('a','',j.map(f=>'<a href="/file?p='+encodeURIComponent(f.path)+'" download>'+f.path+'</a> ('+Math.round(f.size/1024)+' КБ)').join('<br>')||'workspace пуст');
+ const r=await fetch('/files?key='+KEY);const j=await r.json();
+ add('a','',j.map(f=>'<a href="/file?p='+encodeURIComponent(f.path)+'&key='+KEY+'" download>'+f.path+'</a> ('+Math.round(f.size/1024)+' КБ)').join('<br>')||'workspace пуст');
 }
 </script></body></html>
     """.trimIndent()
