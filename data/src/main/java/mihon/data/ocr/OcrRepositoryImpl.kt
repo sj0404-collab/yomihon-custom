@@ -584,13 +584,52 @@ class OcrRepositoryImpl(
         modelKey: OcrModel,
         type: EngineType,
     ): OcrPageResult {
-        val boxes = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
-            engineLocks.withDetectionLock {
-                val engine = detectionEngine()
-                engine.detectTextRegions(image)
+        // Детектор областей (DetOcrEngine) пока заглушка и бросает
+        // DetectionUnavailable. Раньше исключение покидало scanLocally и
+        // локальный режим ВСЕГДА проваливался в онлайн-fallback, даже когда
+        // модели установлены. Деградируем честно: текстовый движок сам
+        // находит строки внутри страницы (внутренний детектор), результат —
+        // один регион на всю страницу (isWholePage=true).
+        val boxes: List<OcrBoundingBox>? = try {
+            submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                engineLocks.withDetectionLock {
+                    val engine = detectionEngine()
+                    engine.detectTextRegions(image)
+                }
             }
+                .filter(OcrBoundingBox::isValid)
+        } catch (e: OcrException.DetectionUnavailable) {
+            logcat(LogPriority.INFO) {
+                "Region detector unavailable; falling back to whole-page recognition"
+            }
+            null
         }
-            .filter(OcrBoundingBox::isValid)
+
+        if (boxes == null) {
+            val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                recognizeWithEngine(type, image)
+            }.trim()
+            val regions = if (text.isBlank()) {
+                emptyList()
+            } else {
+                listOf(
+                    OcrRegion(
+                        order = 0,
+                        text = text,
+                        boundingBox = OcrBoundingBox(0f, 0f, 1f, 1f),
+                        textOrientation = OcrTextOrientation.Horizontal,
+                    ),
+                )
+            }
+            return OcrPageResult(
+                chapterId = chapterId,
+                pageIndex = pageIndex,
+                ocrModel = modelKey,
+                imageWidth = image.width,
+                imageHeight = image.height,
+                regions = regions,
+            )
+        }
 
         val regions = boxes.mapIndexedNotNull { index, box ->
             val crop = cropBitmap(image, box) ?: return@mapIndexedNotNull null
