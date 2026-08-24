@@ -1114,8 +1114,9 @@ data object AiChatTab : Tab {
                     Text("Доступ из внешнего браузера", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         if (serverOn) {
-                            "Работает: http://127.0.0.1:${eu.kanade.tachiyomi.data.ai.AiHttpServer.PORT} " +
-                                "(с других устройств Wi-Fi — http://IP-телефона:${eu.kanade.tachiyomi.data.ai.AiHttpServer.PORT})"
+                            val httpKey = eu.kanade.tachiyomi.data.ai.AiHttpServer.tokenFor(context)
+                            "Работает: http://127.0.0.1:${eu.kanade.tachiyomi.data.ai.AiHttpServer.PORT}/?key=$httpKey " +
+                                "(с других устройств Wi-Fi — http://IP-телефона:${eu.kanade.tachiyomi.data.ai.AiHttpServer.PORT}/?key=$httpKey)"
                         } else {
                             "Выключен. Включите — чат и workspace откроются в любом браузере."
                         },
