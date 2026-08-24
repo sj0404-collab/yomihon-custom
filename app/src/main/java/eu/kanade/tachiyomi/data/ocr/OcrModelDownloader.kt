@@ -134,10 +134,36 @@ object OcrModelDownloader {
         "panel_detector" to listOf("panel_detector/model.tflite"),
     )
 
+    /** Пин коммита репозитория моделей: неизменяемый источник файлов. */
+    private const val CYRILLIC_PIN = "0279620ace18256b36850d6773bad03ffad03fa7"
+
     private fun cyrillic(path: String): String {
-        return "https://raw.githubusercontent.com/sj0404-collab/ocr-rus-cyrillic/" +
-            "0279620ace18256b36850d6773bad03ffad03fa7/$path"
+        return "https://raw.githubusercontent.com/sj0404-collab/ocr-rus-cyrillic/$CYRILLIC_PIN/$path"
     }
+
+    /** Зеркало через jsDelivr CDN (тот же пин) — резерв при сбоях raw.github. */
+    private fun cyrillicMirror(path: String): String {
+        return "https://cdn.jsdelivr.net/gh/sj0404-collab/ocr-rus-cyrillic@$CYRILLIC_PIN/$path"
+    }
+
+    /**
+     * Резервные URL по плоскому имени файла: если основной источник
+     * недоступен (rate-limit raw.githubusercontent, блокировки провайдера),
+     * загрузчик автоматически пробует зеркала.
+     */
+    private val FILE_MIRRORS: Map<String, List<String>> = mapOf(
+        "cyrillic_detector.tflite" to listOf(
+            cyrillicMirror("models/tflite/pp-ocrv4_mobile_det_float32.tflite"),
+        ),
+        "cyrillic_recognizer_v3.tflite" to listOf(
+            cyrillicMirror("models/tflite/cyrillic_pp-ocrv3_mobile_rec_float32.tflite"),
+        ),
+        "cyrillic_recognizer_v5.tflite" to listOf(
+            cyrillicMirror("models/tflite/cyrillic_pp-ocrv5_mobile_rec_float32.tflite"),
+        ),
+        "cyrillic_dict_v3.txt" to listOf(cyrillicMirror("models/dicts/cyrillic_dict.txt")),
+        "cyrillic_dict_v5.txt" to listOf(cyrillicMirror("models/dicts/ppocrv5_cyrillic_dict.txt")),
+    )
 
     private fun hf(repo: String, path: String): String {
         return "https://huggingface.co/$repo/resolve/main/$path"
@@ -256,7 +282,17 @@ object OcrModelDownloader {
                     files.all { (url, name) ->
                         val fileIndex = done
                         var fileDownloaded = 0L
-                        val r = downloadFile(url, File(baseDir, name)) { frac ->
+                        // Основной URL + зеркала (jsDelivr): raw.githubusercontent
+                        // иногда rate-limit-ит или недоступен — пробуем по порядку.
+                        val candidates = listOf(url) + FILE_MIRRORS[name].orEmpty()
+                        var r = false
+                        for ((attempt, candidateUrl) in candidates.withIndex()) {
+                            if (attempt > 0) {
+                                logcat(LogPriority.WARN) {
+                                    "Pack $pack: primary source failed for $name, trying mirror"
+                                }
+                            }
+                            r = downloadFile(candidateUrl, File(baseDir, name)) { frac ->
                             val prev = fileDownloaded
                             fileDownloaded = (fileSizes[fileIndex] * frac).toLong()
                             totalDownloaded += (fileDownloaded - prev)
@@ -270,6 +306,8 @@ object OcrModelDownloader {
                                 downloadedBytes = totalDownloaded,
                                 totalBytes = totalPackSize.takeIf { it > 0 } ?: 0L,
                             )
+                        }
+                            if (r) break
                         }
                         // If server didn't report size, track from actual download
                         if (fileSizes[fileIndex] == 0L) {
