@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import mihon.domain.ocr.exception.OcrException
+import mihon.domain.ocr.model.OcrBoundingBox
 import tachiyomi.core.common.util.system.logcat
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -158,6 +159,33 @@ internal class CyrillicOcrEngine(
             }
         }
         return text.lines().dropLastWhile(String::isEmpty)
+    }
+
+    /**
+     * Границы текстовых строк, найденные детектором PP-OCRv4, в
+     * нормализованных координатах.
+     *
+     * Тот же проход, что и в [recognizeText], но без распознавания: нужен
+     * репозиторию, чтобы построить регионы страницы (по региону на реплику)
+     * вместо одного региона на весь лист. Раньше эту роль должен был играть
+     * DetOcrEngine, но он оставался заглушкой, и детектор был доступен
+     * только изнутри распознавания.
+     */
+    suspend fun detectRegions(image: Bitmap): List<OcrBoundingBox> {
+        ensureInitialized()
+        return mutex.withLock {
+            require(!image.isRecycled) { "Input bitmap is recycled" }
+            detectTextBoxes(image).mapNotNull { box ->
+                OcrBoxGeometry.normalize(
+                    left = box.rect.left,
+                    top = box.rect.top,
+                    right = box.rect.right,
+                    bottom = box.rect.bottom,
+                    imageWidth = image.width,
+                    imageHeight = image.height,
+                )
+            }
+        }
     }
 
     override suspend fun recognizeText(image: Bitmap): String {

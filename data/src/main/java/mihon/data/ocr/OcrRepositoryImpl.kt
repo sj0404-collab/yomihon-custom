@@ -219,14 +219,29 @@ class OcrRepositoryImpl(
 
     private fun detectionEngine(): DetOcrEngine {
         return detEngine ?: (
-            if (localOcrAvailable()) {
-                UnavailableDetOcrEngine() // TODO: replace with real DetOcrEngine with a local model
+            // Детектор живёт в паке cyrillic_ocr вместе с распознавателями.
+            // Пока модели не скачаны (или LiteRT недоступен) — заглушка, и
+            // scanLocally честно деградирует на распознавание всей страницы.
+            if (localOcrAvailable() && cyrillicModelsInstalled()) {
+                CyrillicDetOcrEngine { engineFor(EngineType.CYRILLIC) as CyrillicOcrEngine }
             } else {
                 UnavailableDetOcrEngine()
             }
             ).also {
             detEngine = it
         }
+    }
+
+    /** Пак cyrillic_ocr установлен целиком (детектор + распознаватель + словарь). */
+    private fun cyrillicModelsInstalled(): Boolean {
+        return OcrModelFiles.allInstalled(
+            context,
+            listOf(
+                CyrillicOcrEngine.DETECTOR_PATH,
+                CyrillicOcrEngine.PRIMARY_PATH,
+                CyrillicOcrEngine.PRIMARY_DICT_PATH,
+            ),
+        )
     }
 
     private suspend fun recognizeWithEngine(type: EngineType, image: Bitmap): String {
@@ -584,12 +599,15 @@ class OcrRepositoryImpl(
         modelKey: OcrModel,
         type: EngineType,
     ): OcrPageResult {
-        // Детектор областей (DetOcrEngine) пока заглушка и бросает
-        // DetectionUnavailable. Раньше исключение покидало scanLocally и
-        // локальный режим ВСЕГДА проваливался в онлайн-fallback, даже когда
-        // модели установлены. Деградируем честно: текстовый движок сам
-        // находит строки внутри страницы (внутренний детектор), результат —
-        // один регион на всю страницу (isWholePage=true).
+        // Детектор областей работает на модели PP-OCRv4 из пака cyrillic_ocr
+        // и даёт по региону на строку — благодаря этому тап по конкретной
+        // реплике открывает именно её.
+        //
+        // Если пак не установлен (или LiteRT недоступен), детектор бросает
+        // DetectionUnavailable, и мы честно деградируем: распознаём страницу
+        // целиком и отдаём один регион на весь лист (isWholePage = true).
+        // Раньше заглушка бросала всегда, поэтому постраничный режим был
+        // единственно возможным.
         val boxes: List<OcrBoundingBox>? = try {
             submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
                 engineLocks.withDetectionLock {
@@ -605,7 +623,14 @@ class OcrRepositoryImpl(
             null
         }
 
-        if (boxes == null) {
+        // Детектор ничего не нашёл, либо нашёл единственный бокс во весь лист:
+        // разметки по репликам не получится, поэтому идём общим путём, а не
+        // сообщаем «текста нет».
+        val usableBoxes = boxes?.takeIf { found ->
+            found.isNotEmpty() && !(found.size == 1 && OcrBoxGeometry.coversWholePage(found[0]))
+        }
+
+        if (usableBoxes == null) {
             val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
                 recognizeWithEngine(type, image)
             }.trim()
@@ -631,7 +656,7 @@ class OcrRepositoryImpl(
             )
         }
 
-        val regions = boxes.mapIndexedNotNull { index, box ->
+        val regions = usableBoxes.mapIndexedNotNull { index, box ->
             val crop = cropBitmap(image, box) ?: return@mapIndexedNotNull null
             try {
                 val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
@@ -758,6 +783,10 @@ class OcrRepositoryImpl(
 
     private suspend fun closeEngines() {
         engineLocks.withAllLocks {
+            // Сначала сбрасываем детектор: он делегирует в cyrillicEngine и
+            // после его закрытия ссылался бы на закрытые модели.
+            detEngine = null
+
             cyrillicEngine?.close()
             cyrillicEngine = null
 
