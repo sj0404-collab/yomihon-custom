@@ -130,12 +130,15 @@ fun AutoReadHighlight(
 
         if (style == "underline" || style == "both") {
             // Подчёркивание: линия по нижней границе реплики.
+            // Считаем по iw/ih и со смещением ix/iy — как рамка выше. Раньше
+            // здесь стояли w/h без смещения, поэтому линия уезжала от текста
+            // тем сильнее, чем больше поля вокруг страницы.
             Box(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (mapped.left * w).roundToInt(),
-                            (mapped.bottom * h).roundToInt(),
+                            (ix + mapped.left * iw).roundToInt(),
+                            (iy + mapped.bottom * ih).roundToInt(),
                         )
                     }
                     .width(boxWidth)

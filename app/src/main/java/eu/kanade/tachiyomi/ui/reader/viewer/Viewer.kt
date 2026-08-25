@@ -75,4 +75,18 @@ interface Viewer {
     fun setActiveOcrOverlay(overlay: ReaderActiveOcrOverlay?): Boolean = overlay == null
 
     fun resolveSelectionCaptures(region: ReaderSelectionRegion): List<ReaderSelectionCapture> = emptyList()
+
+    /**
+     * Прямоугольник реально отображаемой страницы в координатах [getView],
+     * нормализованный в доли (0..1) размеров этой вьюхи.
+     *
+     * Нужен подсветке реплик: координаты OCR заданы относительно самой
+     * страницы, а страница почти никогда не занимает всю область экрана —
+     * у манги остаются поля сверху и снизу, у вебтуна по бокам. Без этой
+     * поправки рамки смещаются и не совпадают с текстом.
+     *
+     * null — страница ещё не готова; вызывающий код тогда работает по всей
+     * области, как раньше.
+     */
+    fun displayedPageRect(): RectF? = null
 }

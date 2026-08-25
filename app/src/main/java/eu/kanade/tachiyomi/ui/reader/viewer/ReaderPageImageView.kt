@@ -839,6 +839,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
         )
     }
 
+    /**
+     * Прямоугольник реально отображаемой картинки внутри вьюхи, в пикселях.
+     *
+     * Нужен подсветке реплик: страница почти никогда не занимает всю область
+     * (поля сверху/снизу у манги, по бокам у вебтуна), поэтому нормализованные
+     * координаты OCR нельзя умножать на размер контейнера — рамки уезжают.
+     */
+    fun displayedImageRectOrNull(): RectF? = displayedImageLocalRect()
+
     private fun displayedImageLocalRect(): RectF? {
         return when (val currentPageView = pageView) {
             is SubsamplingScaleImageView -> {

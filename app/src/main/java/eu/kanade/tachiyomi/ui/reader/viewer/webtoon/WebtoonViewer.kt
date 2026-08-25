@@ -257,6 +257,33 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         return matched
     }
 
+    override fun displayedPageRect(): android.graphics.RectF? {
+        val height = frame.height.toFloat()
+        val width = frame.width.toFloat()
+        if (width <= 0f || height <= 0f) return null
+
+        // В ленте одновременно видно несколько страниц: берём ту, что
+        // пересекает центр экрана — именно её сейчас читают.
+        val centerY = height / 2f
+        val pageView = recycler.children
+            .filterIsInstance(ReaderPageImageView::class.java)
+            .firstOrNull { child ->
+                val top = child.y + recycler.y
+                top <= centerY && centerY <= top + child.height
+            } ?: return null
+
+        val imageRect = pageView.displayedImageRectOrNull() ?: return null
+        val offsetX = pageView.x + recycler.x
+        val offsetY = pageView.y + recycler.y
+
+        return android.graphics.RectF(
+            (imageRect.left + offsetX) / width,
+            (imageRect.top + offsetY) / height,
+            (imageRect.right + offsetX) / width,
+            (imageRect.bottom + offsetY) / height,
+        )
+    }
+
     override fun resolveSelectionCaptures(region: ReaderSelectionRegion): List<ReaderSelectionCapture> {
         return recycler.children
             .filterIsInstance(ReaderPageImageView::class.java)

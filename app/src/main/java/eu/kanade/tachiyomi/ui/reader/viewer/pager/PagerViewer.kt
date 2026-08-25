@@ -215,6 +215,27 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         return matched
     }
 
+    override fun displayedPageRect(): android.graphics.RectF? {
+        val holder = pager.children
+            .filterIsInstance(PagerPageHolder::class.java)
+            .firstOrNull { it.isShown } ?: return null
+        val imageRect = holder.displayedImageRectOrNull() ?: return null
+
+        // Из координат холдера в координаты pager, затем в доли.
+        val offsetX = (holder.left - pager.scrollX).toFloat()
+        val offsetY = (holder.top - pager.scrollY).toFloat()
+        val width = pager.width.toFloat()
+        val height = pager.height.toFloat()
+        if (width <= 0f || height <= 0f) return null
+
+        return android.graphics.RectF(
+            (imageRect.left + offsetX) / width,
+            (imageRect.top + offsetY) / height,
+            (imageRect.right + offsetX) / width,
+            (imageRect.bottom + offsetY) / height,
+        )
+    }
+
     override fun resolveSelectionCaptures(region: ReaderSelectionRegion): List<ReaderSelectionCapture> {
         return pager.children
             .filterIsInstance(PagerPageHolder::class.java)

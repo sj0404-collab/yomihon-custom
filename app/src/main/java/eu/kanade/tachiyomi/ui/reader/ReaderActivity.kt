@@ -822,7 +822,18 @@ class ReaderActivity : BaseActivity() {
                 run {
                     val autoRegion by autoReadEngine.currentRegion.collectAsState()
                     autoRegion?.let { region ->
-                        eu.kanade.presentation.reader.components.AutoReadHighlight(region = region, engine = autoReadEngine)
+                        // Пересчитываем на каждую реплику: пользователь листает
+                        // и зумит, поэтому прямоугольник страницы меняется.
+                        // Без него подсветка считала, что страница занимает
+                        // весь экран, и рамки уезжали от текста.
+                        val pageRect = remember(region) {
+                            runCatching { viewModel.state.value.viewer?.displayedPageRect() }.getOrNull()
+                        }
+                        eu.kanade.presentation.reader.components.AutoReadHighlight(
+                            region = region,
+                            engine = autoReadEngine,
+                            imageRect = pageRect,
+                        )
                     }
                 }
 
