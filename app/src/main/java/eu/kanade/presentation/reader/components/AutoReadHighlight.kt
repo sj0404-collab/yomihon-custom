@@ -20,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -87,14 +88,31 @@ fun AutoReadHighlight(
                     .offset { IntOffset((ixFr + b.left * iwFr).roundToInt(), (iyFr + b.top * ihFr).roundToInt()) }
                     .width(frW)
                     .height(frH)
-                    .border(
-                        width = 1.5.dp,
-                        color = if (done) accent.copy(alpha = 0.25f) else accent.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(4.dp),
-                    )
-                    .background(
-                        if (done) accent.copy(alpha = 0.05f) else Color.Transparent,
-                        RoundedCornerShape(4.dp),
+                    // В режиме мягкого пятна карта кадра тоже без рамок:
+                    // прочитанное — едва заметная заливка, предстоящее —
+                    // чуть плотнее. Иначе страница рябит прямоугольниками.
+                    .then(
+                        if (style == "bubble") {
+                            Modifier.background(
+                                accent.copy(alpha = if (done) 0.05f else 0.10f),
+                                RoundedCornerShape(percent = 50),
+                            )
+                        } else {
+                            Modifier
+                                .border(
+                                    width = 1.5.dp,
+                                    color = if (done) {
+                                        accent.copy(alpha = 0.25f)
+                                    } else {
+                                        accent.copy(alpha = 0.55f)
+                                    },
+                                    shape = RoundedCornerShape(4.dp),
+                                )
+                                .background(
+                                    if (done) accent.copy(alpha = 0.05f) else Color.Transparent,
+                                    RoundedCornerShape(4.dp),
+                                )
+                        },
                     ),
             )
         }
@@ -111,6 +129,28 @@ fun AutoReadHighlight(
             IntOffset(
                 (ix + mapped.left * iw).roundToInt(),
                 (iy + mapped.top * ih).roundToInt(),
+            )
+        }
+
+        if (style == "bubble") {
+            // Мягкое пятно: заливка без чёткой границы. Жёсткая рамка
+            // требует точного бокса, и промах сразу заметен; полупрозрачное
+            // пятно со скруглением подсвечивает реплику, не споря с текстом.
+            val radius = minOf(boxWidth, boxHeight) / 2
+            Box(
+                modifier = offsetModifier
+                    .width(boxWidth)
+                    .height(boxHeight)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                accent.copy(alpha = 0.22f),
+                                accent.copy(alpha = 0.10f),
+                                Color.Transparent,
+                            ),
+                        ),
+                        shape = RoundedCornerShape(radius),
+                    ),
             )
         }
 

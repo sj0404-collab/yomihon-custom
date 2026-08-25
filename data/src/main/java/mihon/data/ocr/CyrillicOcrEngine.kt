@@ -151,14 +151,32 @@ internal class CyrillicOcrEngine(
         ) {
             String(raw, 3, raw.size - 3, Charsets.UTF_8)
         } else {
-            // Try UTF-8 first; fall back to Windows-1251 for legacy dicts
-            try {
-                String(raw, Charsets.UTF_8)
-            } catch (_: Exception) {
-                String(raw, java.nio.charset.Charset.forName("windows-1251"))
-            }
+            decodeDictionaryBytes(raw)
         }
         return text.lines().dropLastWhile(String::isEmpty)
+    }
+
+    /**
+     * Декодирует байты словаря, определяя кодировку по содержимому.
+     *
+     * `String(bytes, UTF_8)` НЕ бросает исключение на невалидных байтах —
+     * он молча подставляет U+FFFD. Поэтому прежний `try/catch` с откатом на
+     * windows-1251 не срабатывал никогда: словарь в 1251 превращался в
+     * строку из «ромбиков», CTC-индексы указывали на мусор, и вместо
+     * русского текста пользователь получал крякозябры.
+     *
+     * Здесь UTF-8 декодируется строго (CharsetDecoder с REPORT), и только
+     * при реальной ошибке используется windows-1251.
+     */
+    private fun decodeDictionaryBytes(raw: ByteArray): String {
+        val strictUtf8 = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        runCatching {
+            return strictUtf8.decode(java.nio.ByteBuffer.wrap(raw)).toString()
+        }
+        logcat(LogPriority.INFO) { "Dictionary is not valid UTF-8, decoding as windows-1251" }
+        return String(raw, java.nio.charset.Charset.forName("windows-1251"))
     }
 
     /**
@@ -201,7 +219,13 @@ internal class CyrillicOcrEngine(
                 val crop = Bitmap.createBitmap(image, padded.left, padded.top, padded.width(), padded.height())
                 try {
                     val result = recognizeCrop(crop)
-                    result.text.takeIf(String::isNotBlank)?.let { box to it }
+                    // Отбрасываем только совсем безнадёжное. Раньше нижней
+                    // границей де-факто служил PRIMARY_CONFIDENCE (0.90), и
+                    // верно прочитанные, но «неуверенные» слова молча
+                    // выпадали из текста.
+                    result.text
+                        .takeIf { it.isNotBlank() && result.confidence >= MIN_ACCEPT_CONFIDENCE }
+                        ?.let { box to it }
                 } finally {
                     crop.recycle()
                 }
@@ -455,10 +479,24 @@ internal class CyrillicOcrEngine(
         )
     }
 
+    /**
+     * Символы, которые модели разрешено выдавать.
+     *
+     * Латиница раньше была запрещена, и слова вроде «SOS», «BMW», «Wi-Fi»
+     * или «3D» терялись целиком: в CTC на шаге запрещённого символа
+     * побеждает другой класс или blank, поэтому рвётся всё слово, а не
+     * один знак. В русской манге латиница встречается постоянно —
+     * звукоподражания, названия, надписи на вывесках.
+     */
     private fun allowed(value: String): Boolean {
         if (value.length != 1) return false
         val char = value[0]
-        return char in '\u0400'..'\u052F' || char.isDigit() || char.isWhitespace() || char in ALLOWED_PUNCTUATION
+        return char in '\u0400'..'\u052F' ||
+            char in 'A'..'Z' ||
+            char in 'a'..'z' ||
+            char.isDigit() ||
+            char.isWhitespace() ||
+            char in ALLOWED_PUNCTUATION
     }
 
     override fun close() {
@@ -494,11 +532,26 @@ internal class CyrillicOcrEngine(
         private const val DETECTOR_SIZE = 736
         private const val RECOGNIZER_WIDTH = 320
         private const val RECOGNIZER_HEIGHT = 48
-        private const val DETECTOR_THRESHOLD = 0.28f
-        private const val MIN_COMPONENT_AREA = 28
+        // Порог активации детектора. Понижен с 0.28: на тонком шрифте и
+        // светлых баллонах часть строк не набирала 0.28 и терялась целиком.
+        private const val DETECTOR_THRESHOLD = 0.20f
+
+        // Минимальная площадь связной области. Понижена с 28: короткие
+        // реплики («Да!», «Что?..») не дотягивали и пропускались.
+        private const val MIN_COMPONENT_AREA = 16
         private const val MAX_TEXT_BOXES = 96
+
+        // Ниже этого — пробуем распознать ещё раз с повышенным контрастом.
         private const val PRIMARY_CONFIDENCE = 0.90f
+
+        // Ниже этого — подключаем модель-верификатор PP-OCRv5.
         private const val VERIFIER_THRESHOLD = 0.82f
+
+        // Результат слабее этого порога отбрасывается совсем. Раньше такого
+        // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:
+        // верно прочитанные, но неуверенные слова выпадали из текста.
+        // Лучше показать слово с опечаткой, чем молча его потерять.
+        private const val MIN_ACCEPT_CONFIDENCE = 0.25f
         private const val ALLOWED_PUNCTUATION = " .,!?;:-()[]{}\"'«»„“”%№+/=…—–"
     }
 }

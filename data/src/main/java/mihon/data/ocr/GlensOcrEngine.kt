@@ -76,7 +76,11 @@ internal class GlensOcrEngine : OcrEngine {
         val working = resized ?: image
         return try {
             val encoded = ByteArrayOutputStream()
-            val success = working.compress(Bitmap.CompressFormat.PNG, 100, encoded)
+            // JPEG вместо PNG: страница манги в PNG(100) весит около 3 МБ,
+            // и на мобильной сети отправка занимала больше десяти секунд.
+            // JPEG(85) даёт примерно 0.5 МБ при том же качестве распознавания
+            // (текст в баллонах — крупный высококонтрастный шрифт).
+            val success = working.compress(Bitmap.CompressFormat.JPEG, 85, encoded)
             if (!success) {
                 throw IOException("Failed to encode image for GLens request")
             }
