@@ -33,7 +33,7 @@ android {
         applicationId = "app.yomihon"
 
         // Версия подтягивается из релизного тега автоматически (CI передаёт
-        // RELEASE_TAG, напр. "v0.8.0-pwa" -> versionName 0.8.0, versionCode 800).
+        // RELEASE_TAG, напр. "v1.9.7" -> versionName 1.9.7, versionCode 10907).
         // Локальные сборки используют fallback ниже.
         val tagVersion = System.getenv("RELEASE_TAG")
             ?.removePrefix("v")
@@ -43,7 +43,21 @@ android {
         val effectiveVersion = tagVersion ?: fallbackVersion
         val (vMajor, vMinor, vPatch) = effectiveVersion.split(".").map(String::toInt)
 
-        versionCode = vMajor * 10000 + vMinor * 100 + vPatch
+        // Android отказывается ставить APK, чей versionCode МЕНЬШЕ уже
+        // установленного ("установлена более новая версия"). Такое уже
+        // случалось: после тега v1.9.6 (10906) сборка по тегу v0.9.5 дала
+        // 905, и APK перестал устанавливаться поверх.
+        //
+        // Поэтому versionCode берётся как максимум из трёх величин:
+        //  * значение из тега;
+        //  * число коммитов (монотонно растёт);
+        //  * MIN_VERSION_CODE — планка выше всех уже выпущенных сборок.
+        // Планку поднимать при каждом мажорном релизе; она гарантирует, что
+        // случайный старый тег не выпустит APK ниже установленного.
+        val versionFromTag = vMajor * 10000 + vMinor * 100 + vPatch
+        val commitCount = getLatestCommitCount().toIntOrNull() ?: 0
+        val minVersionCode = 10907 // v1.9.7 — последняя опубликованная сборка
+        versionCode = maxOf(versionFromTag, commitCount, minVersionCode)
         versionName = effectiveVersion
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
@@ -143,10 +157,19 @@ android {
 
     splits {
         abi {
+            // Собираем ОДИН APK под arm64-v8a: это все актуальные телефоны.
+            // Раньше выходило шесть файлов (v7a/arm64/x86/x86_64/universal/foss,
+            // до 202 МБ каждый) — долгая сборка и путаница, какой ставить.
+            // Вернуть остальные ABI: SPLIT_ALL_ABI=true.
+            val allAbi = System.getenv("SPLIT_ALL_ABI") == "true"
             isEnable = true
-            isUniversalApk = true
+            isUniversalApk = allAbi
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            if (allAbi) {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            } else {
+                include("arm64-v8a")
+            }
         }
     }
 
