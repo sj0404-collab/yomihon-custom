@@ -837,8 +837,28 @@ class ReaderActivity : BaseActivity() {
                     }
                 }
 
+                val ocrPrefsForVoice = remember { uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
+                var manualVoiceMode by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(ocrPrefsForVoice.manualVoiceMode().get())
+                }
+                var manualVoiceGender by androidx.compose.runtime.remember {
+                    androidx.compose.runtime.mutableStateOf(ocrPrefsForVoice.manualVoiceGender().get())
+                }
+
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
                     visible = state.menuVisible,
+                    manualVoiceMode = manualVoiceMode,
+                    manualVoiceGender = manualVoiceGender,
+                    onVoiceModeChange = { manual ->
+                        manualVoiceMode = manual
+                        ocrPrefsForVoice.manualVoiceMode().set(manual)
+                        toast(if (manual) "Голос выбирается вручную" else "Голос определяется автоматически")
+                    },
+                    onVoiceGenderChange = { g ->
+                        manualVoiceGender = g
+                        ocrPrefsForVoice.manualVoiceGender().set(g)
+                        toast(if (g == "male") "Мужской голос" else "Женский голос")
+                    },
                     onTriggerOcr = ::enterOcrMode,
                     onOpenOcrSettings = {
                         // Настройки озвучки — диалог прямо в читалке, никуда не уходим

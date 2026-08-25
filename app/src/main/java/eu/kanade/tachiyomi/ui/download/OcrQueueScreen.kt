@@ -879,9 +879,23 @@ object OcrQueueScreen : Screen() {
                 // Acapela / любой установленный. Список — РЕАЛЬНЫЙ, из
                 // TextToSpeech.engines устройства.
                 run {
-                    val engines = remember { TtsSpeaker.installedEngines(context) }
+                    // installedEngines() дожидается onInit движка, поэтому
+                    // считаем список в фоне: в главном потоке это подвесило бы
+                    // экран настроек на пару секунд.
+                    var engines by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+                    var enginesLoaded by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        engines = withContext(Dispatchers.IO) { TtsSpeaker.installedEngines(context) }
+                        enginesLoaded = true
+                    }
                     if (engines.isEmpty()) {
-                        InfoWidget(text = "TTS-движки не найдены. Установите Speech Services by Google или RHVoice.")
+                        InfoWidget(
+                            text = if (enginesLoaded) {
+                                "TTS-движки не найдены. Установите Speech Services by Google или RHVoice."
+                            } else {
+                                "Ищем установленные TTS-движки…"
+                            },
+                        )
                     } else {
                         ListPreferenceWidget(
                             value = systemEnginePkg,

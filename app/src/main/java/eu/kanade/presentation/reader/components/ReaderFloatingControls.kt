@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.Menu
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
@@ -44,8 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import mihon.domain.ocr.service.ScanRegion
 import kotlin.math.roundToInt
+import mihon.domain.ocr.service.ScanRegion
 
 /**
  * SAO-стиль: единственная перемещаемая плавающая кнопка. Тап (со звуком)
@@ -65,8 +68,16 @@ fun ReaderFloatingControls(
     onStopSpeak: () -> Unit = {},
     onReadingOrderChange: (String) -> Unit = {},
     readingOrder: String = "rtl",
+    /** true — голос выбирает читатель, false — определяется автоматически. */
+    manualVoiceMode: Boolean = false,
+    /** Голос в ручном режиме: "female" | "male". */
+    manualVoiceGender: String = "female",
+    onVoiceModeChange: (Boolean) -> Unit = {},
+    onVoiceGenderChange: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var manualVoice by remember(manualVoiceMode) { mutableStateOf(manualVoiceMode) }
+    var voiceGender by remember(manualVoiceGender) { mutableStateOf(manualVoiceGender) }
     var menuOpen by remember { mutableStateOf(false) }
     var showRegions by remember { mutableStateOf(false) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
@@ -223,6 +234,44 @@ fun ReaderFloatingControls(
                                 }
                                 // AI-чат убран из читалки: теперь он —
                                 // отдельная вкладка «AI» в нижней навигации.
+                                // Голос: режим (авто/ручной) и, в ручном,
+                                // выбор пола. Две кнопки рядом — чтобы не
+                                // уходить в настройки посреди главы.
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (manualVoice) "Голос: вручную  " else "Голос: авто  ",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        manualVoice = !manualVoice
+                                        onVoiceModeChange(manualVoice)
+                                    }) {
+                                        Icon(
+                                            if (manualVoice) Icons.Outlined.TouchApp else Icons.Outlined.AutoMode,
+                                            contentDescription = "Режим выбора голоса",
+                                        )
+                                    }
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    SmallFloatingActionButton(
+                                        onClick = {
+                                            if (!manualVoice) return@SmallFloatingActionButton
+                                            beepAction()
+                                            voiceGender = if (voiceGender == "male") "female" else "male"
+                                            onVoiceGenderChange(voiceGender)
+                                        },
+                                        containerColor = if (manualVoice) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                    ) {
+                                        Text(if (voiceGender == "male") "♂" else "♀")
+                                    }
+                                }
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Озвучка (TTS)  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {

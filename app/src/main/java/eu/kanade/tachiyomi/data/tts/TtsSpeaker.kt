@@ -1,6 +1,9 @@
 package eu.kanade.tachiyomi.data.tts
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -21,6 +24,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 /**
@@ -42,6 +47,9 @@ object TtsSpeaker {
      * везде равен 4000; берём с запасом, чтобы не зависеть от прошивки.
      */
     private const val HARD_UTTERANCE_LIMIT = 3500
+
+    /** Сколько ждать onInit при перечислении движков. */
+    private const val ENGINE_QUERY_TIMEOUT_MS = 3000L
 
     const val ENGINE_SYSTEM = "system_tts"
     const val ENGINE_GOOGLE_WEB = "google_web"
@@ -116,15 +124,65 @@ object TtsSpeaker {
         }
     }
 
-    /** Установленные TTS-движки устройства: (пакет, читаемое имя). */
+    /**
+     * Установленные TTS-движки устройства: (пакет, читаемое имя).
+     *
+     * Список берётся ДВУМЯ способами и объединяется:
+     *
+     * 1. PackageManager — движки объявляют сервис с интентом
+     *    `android.intent.action.TTS_SERVICE`. Работает сразу, без ожидания.
+     * 2. TextToSpeech.engines — но только ПОСЛЕ onInit: раньше здесь стоял
+     *    мгновенный вызов, и до инициализации сервис не подключён, поэтому
+     *    сторонние движки (RHVoice, Vocalizer, Acapela) в настройки не
+     *    попадали вовсе.
+     *
+     * Метод блокирующий (до [ENGINE_QUERY_TIMEOUT_MS]), поэтому вызывать его
+     * следует вне главного потока.
+     */
     fun installedEngines(context: Context): List<Pair<String, String>> {
-        // Надёжный способ узнать список движков — временный TextToSpeech
-        val probe = runCatching { TextToSpeech(context.applicationContext) {} }.getOrNull()
-        val engines = runCatching {
-            probe?.engines?.map { it.name to it.label }
-        }.getOrNull().orEmpty()
-        runCatching { probe?.shutdown() }
-        return engines
+        val app = context.applicationContext
+        val found = LinkedHashMap<String, String>()
+
+        // 1) Через PackageManager — не требует инициализации движка.
+        runCatching {
+            val pm = app.packageManager
+            val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)
+            val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentServices(intent, 0)
+            }
+            services.forEach { info ->
+                val pkg = info.serviceInfo?.packageName ?: return@forEach
+                val label = runCatching {
+                    info.serviceInfo.loadLabel(pm).toString()
+                }.getOrNull()?.takeIf { it.isNotBlank() } ?: pkg
+                found.putIfAbsent(pkg, label)
+            }
+        }.onFailure { error ->
+            logcat(LogPriority.WARN, error) { "queryIntentServices for TTS failed" }
+        }
+
+        // 2) Через сам TextToSpeech — дожидаемся onInit.
+        runCatching {
+            val ready = CountDownLatch(1)
+            var probe: TextToSpeech? = null
+            probe = TextToSpeech(app) { ready.countDown() }
+            ready.await(ENGINE_QUERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            probe?.engines?.forEach { engine ->
+                val label = engine.label?.takeIf { it.isNotBlank() } ?: engine.name
+                found[engine.name] = label
+            }
+            runCatching { probe?.shutdown() }
+        }.onFailure { error ->
+            logcat(LogPriority.WARN, error) { "TextToSpeech.engines failed" }
+        }
+
+        if (found.isEmpty()) {
+            logcat(LogPriority.WARN) { "No TTS engines found on this device" }
+        }
+        return found.map { it.key to it.value }
     }
 
     /**
@@ -158,7 +216,13 @@ object TtsSpeaker {
             setSpeaking(false)
             return
         }
-        val effectiveGender = gender ?: SpeechMarkup.genderOf(text)
+        // Ручной режим перекрывает и явно переданный пол, и разметку:
+        // читатель нажал кнопку и ждёт выбранный голос везде.
+        val manual = runCatching {
+            prefs().takeIf { it.manualVoiceMode().get() }
+                ?.manualVoiceGender()?.get()?.takeIf { g -> g.isNotBlank() }
+        }.getOrNull()
+        val effectiveGender = manual ?: gender ?: SpeechMarkup.genderOf(text)
         val slot = if (speakerSlot != 0) speakerSlot else SpeechMarkup.speakerSlot(text)
         when (prefs().voiceEngine().get()) {
             ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, spoken)

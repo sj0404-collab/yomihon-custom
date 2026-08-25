@@ -184,7 +184,10 @@ class AutoReadEngine(
                 bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 val image = OcrImage(bitmap.width, bitmap.height, pixels)
                 // Кадр в JPEG для AI-определения пола говорящих (если включено)
-                val genderJpeg: ByteArray? = if (prefs.aiGenderVoices().get()) {
+                // В ручном режиме пол задан читателем — AI Vision не нужен.
+                val genderJpeg: ByteArray? = if (prefs.aiGenderVoices().get() &&
+                    !prefs.manualVoiceMode().get()
+                ) {
                     runCatching {
                         val out = java.io.ByteArrayOutputStream()
                         val scaled = if (bitmap.width > 1024) {
@@ -353,7 +356,13 @@ class AutoReadEngine(
                     val speakTextRaw = prep?.text?.takeIf { it.isNotBlank() }
                         ?: translations.getOrNull(i) ?: region.text
 
-                    val gender = genders.get(i) // мог дозаполниться AI пока читали предыдущие
+                    // Ручной режим важнее автоопределения: читатель выбрал
+                    // голос кнопкой в читалке и ждёт именно его.
+                    val gender = if (prefs.manualVoiceMode().get()) {
+                        prefs.manualVoiceGender().get().takeIf { it.isNotBlank() } ?: "female"
+                    } else {
+                        genders.get(i) // мог дозаполниться AI пока читали предыдущие
+                    }
 
                     // Служебные пометки: номер по порядку чтения и пол.
                     // Они показываются на экране, но НЕ произносятся —

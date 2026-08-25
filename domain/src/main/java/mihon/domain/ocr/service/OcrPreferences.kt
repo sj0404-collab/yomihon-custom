@@ -188,6 +188,15 @@ class OcrPreferences(
     // Разные голоса разным персонажам одного пола в сцене
     fun perSpeakerVoices() = preferenceStore.getBoolean("pref_per_speaker_voices", true)
 
+    // ---- Выбор голоса в читалке ----
+    // false — пол реплики определяется автоматически (морфология → словарь →
+    // AI Vision). true — читатель сам выбрал голос кнопкой в читалке, и он
+    // применяется ко всем репликам.
+    fun manualVoiceMode() = preferenceStore.getBoolean("pref_manual_voice_mode", false)
+
+    // Какой голос использовать в ручном режиме: "female" | "male"
+    fun manualVoiceGender() = preferenceStore.getString("pref_manual_voice_gender", "female")
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)
