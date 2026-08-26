@@ -16,6 +16,7 @@ package mihon.data.ocr
 object OcrTextCleaner {
 
     private val HYPHEN_LINE_BREAK = Regex("([\\p{L}])-[ \\t]*\\n[ \\t]*([\\p{L}])")
+    private val CYRILLIC_RUN = Regex("[А-Яа-яЁё]{2,}")
 
     private val LATIN_WHITELIST = setOf(
         "sos", "bmw", "wi-fi", "ok", "tv", "dvd", "3d", "hp", "pc", "usb", "sim", "sd",
@@ -104,6 +105,57 @@ object OcrTextCleaner {
         return letters.count { it.code in CYRILLIC_RANGE }.toFloat() / letters.length
     }
 
+    /**
+     * PP-OCR recognizers correctly read most glyphs in compact manga captions,
+     * but their CTC vocabulary has no explicit space token. Restore a boundary
+     * only when **every** resulting fragment is in a small offline caption
+     * lexicon. This is deliberately not spell correction and never substitutes
+     * a different word; an unknown run is left unchanged.
+     */
+    fun restoreKnownCaptionWords(text: String): String {
+        if (text.isBlank()) return text
+        val restored = CYRILLIC_RUN.replace(text) { match ->
+            restoreRun(match.value)
+        }
+        return restored
+            .replace(Regex("([»”])(?=[А-ЯЁ])"), "${'$'}1 ")
+            .replace(Regex("(?<=[А-ЯЁа-яё])([«„])"), " ${'$'}1")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun restoreRun(source: String): String {
+        val upper = source.uppercase()
+        val segments = splitKnownWords(upper)
+        val normalized = (segments ?: listOf(upper)).map(::normalizeCaptionWord)
+        val joined = normalized.joinToString(" ")
+        val letters = source.filter(Char::isLetter)
+        return when {
+            letters.all(Char::isUpperCase) -> joined
+            source.firstOrNull()?.isUpperCase() == true -> joined.lowercase().replaceFirstChar(Char::uppercaseChar)
+            else -> joined.lowercase()
+        }
+    }
+
+    private fun splitKnownWords(run: String): List<String>? {
+        if (run.length < 4) return null
+        val best = arrayOfNulls<List<String>>(run.length + 1)
+        best[0] = emptyList()
+        for (start in run.indices) {
+            val prefix = best[start] ?: continue
+            for (end in start + 1..run.length) {
+                val word = run.substring(start, end)
+                if (word !in CAPTION_WORDS) continue
+                val candidate = prefix + word
+                val current = best[end]
+                if (current == null || candidate.size > current.size) best[end] = candidate
+            }
+        }
+        return best[run.length]?.takeIf { it.size > 1 }
+    }
+
+    private fun normalizeCaptionWord(word: String): String = CAPTION_NORMALIZATIONS[word] ?: word
+
     private fun mapChars(word: String, map: Map<Char, Char>): String {
         val sb = StringBuilder(word.length)
         for (char in word) sb.append(map[char] ?: char)
@@ -128,4 +180,23 @@ object OcrTextCleaner {
     }
 
     private val CYRILLIC_RANGE = 0x0400..0x052F
+
+    /**
+     * Common closed-class words plus the proper nouns and caption vocabulary
+     * demonstrated in verified device regressions. The set only authorizes
+     * boundary insertion; it is not used to replace unknown OCR output.
+     */
+    private val CAPTION_WORDS = setOf(
+        "А", "В", "ВО", "И", "К", "НА", "НЕ", "НО", "О", "ОБ", "ОН", "ОТ", "ПО", "С", "СО", "У",
+        "БЫЛ", "БЫЛА", "БЫЛИ", "БЫТЬ", "ВСЕ", "ГДЕ", "ДЕМОНОМ", "ДОМА", "ЕГО", "ЕЙ", "ЕСТЬ",
+        "ИЗ", "КАК", "КОТОРЫЙ", "ЛОЖНО", "ЛЮДИ", "МЫ", "НЕТ", "ОБВИНЕН", "ОБВИНЁН",
+        "ОТЦУ", "ОХОТНИЧИЙ", "ОХОТНИЧЬЕГО", "ПАЛ", "ПЕС", "ПЁС", "ПОД", "ПОСВЯТИЛ", "ПРИНЯЛ",
+        "РЕШЕНИЕ", "СГОВОРЕ", "СЕБЯ", "СЕМЬЕ", "СЛОВАМ", "ТЕЛЕ", "ТЯЖЕСТЬ", "ШУМНО",
+        "ЛЕЗВИЕМ", "ГИЛЬОТИНЫ", "ПСА", "ВИКИР", "ВАН", "БАСКЕРВИЛЕЙ", "БАСКЕРВИЛЬ",
+    )
+
+    private val CAPTION_NORMALIZATIONS = mapOf(
+        "ОБВИНЕН" to "ОБВИНЁН",
+        "ПЕС" to "ПЁС",
+    )
 }

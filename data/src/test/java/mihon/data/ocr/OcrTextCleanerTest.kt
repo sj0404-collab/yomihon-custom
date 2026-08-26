@@ -70,4 +70,19 @@ class OcrTextCleanerTest {
         OcrTextCleaner.isAcceptableCyrillicOcrText("Tele'axect.E") shouldBe false
         OcrTextCleaner.isAcceptableCyrillicOcrText("SOS") shouldBe true
     }
+
+    @Test
+    fun `restores caption spaces and ё without replacing unknown words`() {
+        OcrTextCleaner.restoreKnownCaptionWords("ОНБЫЛ ЛОЖНООБВИНЕН В СГОВОРЕ СДЕМОНОМ") shouldBe
+            "ОН БЫЛ ЛОЖНО ОБВИНЁН В СГОВОРЕ С ДЕМОНОМ"
+        OcrTextCleaner.restoreKnownCaptionWords("«ОХОТНИЧИЙПЕС»ДОМАБАСКЕРВИЛЕЙ.") shouldBe
+            "«ОХОТНИЧИЙ ПЁС» ДОМА БАСКЕРВИЛЕЙ."
+        OcrTextCleaner.restoreKnownCaptionWords("ВИКИРВАНБАСКЕРВИЛЬ.") shouldBe
+            "ВИКИР ВАН БАСКЕРВИЛЬ."
+    }
+
+    @Test
+    fun `unknown cyrillic run is never split or rewritten`() {
+        OcrTextCleaner.restoreKnownCaptionWords("НЕИЗВЕСТНОЕСЛОВО") shouldBe "НЕИЗВЕСТНОЕСЛОВО"
+    }
 }

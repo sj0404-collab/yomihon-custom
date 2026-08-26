@@ -29,8 +29,8 @@ import kotlin.math.round
  * Downloadable Russian/Cyrillic OCR based on PaddleOCR mobile TFLite models.
  *
  * The detector finds text-line blobs on a full page. PP-OCRv3 recognizes each
- * crop; PP-OCRv5 is loaded as a conservative verifier only for low-confidence
- * crops. No dictionary spell replacement is performed: benchmarks showed that
+ * crop; PP-OCRv5 is evaluated for every Cyrillic crop and ranked against v3.
+ * No dictionary spell replacement is performed: benchmarks showed that
  * it could turn a visually correct word (for example "мятой") into a wrong but
  * frequent dictionary word. Models live outside the APK in ocr_models/.
  */
@@ -78,7 +78,13 @@ internal class CyrillicOcrEngine(
         val height: Int get() = rect.height()
     }
 
-    private data class Recognition(val text: String, val confidence: Float)
+    private enum class RecognitionModel { V3, V5 }
+
+    private data class Recognition(
+        val text: String,
+        val confidence: Float,
+        val model: RecognitionModel = RecognitionModel.V3,
+    )
 
     suspend fun ensureInitialized() {
         if (initialized) return
@@ -421,7 +427,9 @@ internal class CyrillicOcrEngine(
      * TTS не читал её по буквам внутри русских слов.
      */
     private fun cleanRecognition(text: String): String {
-        val cleaned = OcrTextCleaner.fixLookalikesPerWord(text).trim()
+        val cleaned = OcrTextCleaner.restoreKnownCaptionWords(
+            OcrTextCleaner.fixLookalikesPerWord(text),
+        ).trim()
         return if (
             cleaned.isEmpty() ||
             OcrTextCleaner.looksLikeDictionaryRamp(cleaned) ||
@@ -547,11 +555,20 @@ internal class CyrillicOcrEngine(
     }
 
     private fun recognizeCrop(crop: Bitmap): Recognition {
-        val candidates = mutableListOf(runRecognizer(crop, primary, primaryInput, primaryOutput, primaryChars))
+        val candidates = mutableListOf(
+            runRecognizer(crop, primary, primaryInput, primaryOutput, primaryChars, RecognitionModel.V3),
+        )
         if (candidates.last().confidence < PRIMARY_CONFIDENCE) {
             val contrast = createHighContrast(crop)
             try {
-                val alternate = runRecognizer(contrast, primary, primaryInput, primaryOutput, primaryChars)
+                val alternate = runRecognizer(
+                    contrast,
+                    primary,
+                    primaryInput,
+                    primaryOutput,
+                    primaryChars,
+                    RecognitionModel.V3,
+                )
                 candidates += alternate
             } finally {
                 contrast.recycle()
@@ -561,18 +578,36 @@ internal class CyrillicOcrEngine(
         val secondInput = verifierInput
         val secondOutput = verifierOutput
         val secondChars = verifierChars
-        val primaryBest = candidates.maxByOrNull(::candidateQuality) ?: Recognition("", 0f)
         if (
-            (primaryBest.confidence < VERIFIER_THRESHOLD || candidateQuality(primaryBest) < VERIFIER_QUALITY_THRESHOLD) &&
             secondModel != null &&
             secondInput != null && secondOutput != null && secondChars != null
         ) {
-            candidates += runRecognizer(crop, secondModel, secondInput, secondOutput, secondChars)
-            val contrast = createHighContrast(crop)
-            try {
-                candidates += runRecognizer(contrast, secondModel, secondInput, secondOutput, secondChars)
-            } finally {
-                contrast.recycle()
+            // Device regression showed that v3 may assign a high confidence to
+            // Latin-shaped garbage in clean Cyrillic captions. Always compare
+            // v5 rather than treating it as a low-confidence-only fallback.
+            val verifierResult = runRecognizer(
+                crop,
+                secondModel,
+                secondInput,
+                secondOutput,
+                secondChars,
+                RecognitionModel.V5,
+            )
+            candidates += verifierResult
+            if (verifierResult.confidence < PRIMARY_CONFIDENCE) {
+                val contrast = createHighContrast(crop)
+                try {
+                    candidates += runRecognizer(
+                        contrast,
+                        secondModel,
+                        secondInput,
+                        secondOutput,
+                        secondChars,
+                        RecognitionModel.V5,
+                    )
+                } finally {
+                    contrast.recycle()
+                }
             }
         }
         return candidates.maxByOrNull(::candidateQuality) ?: Recognition("", 0f)
@@ -580,15 +615,25 @@ internal class CyrillicOcrEngine(
 
     /**
      * PP-OCRv3 can report a high softmax score for Latin-shaped noise in comic
-     * fonts. Prefer a slightly less confident verifier result when it is
-     * actually Cyrillic after lookalike repair; this is ranking, not spelling
-     * replacement, so source glyphs remain the authority.
+     * fonts. When v5 yields valid Cyrillic, prefer it over v3's softmax-only
+     * choice. This is model ranking, not spelling replacement; only verified
+     * boundary restoration occurs later in [cleanRecognition].
      */
     private fun candidateQuality(candidate: Recognition): Float {
         if (candidate.text.isBlank()) return Float.NEGATIVE_INFINITY
         val fitness = OcrTextCleaner.cyrillicFitness(candidate.text)
         val lengthBonus = min(candidate.text.count(Char::isLetter) * 0.01f, 0.12f)
-        return candidate.confidence * fitness + lengthBonus
+        val verifierBonus = if (
+            candidate.model == RecognitionModel.V5 &&
+            OcrTextCleaner.isAcceptableCyrillicOcrText(
+                OcrTextCleaner.fixLookalikesPerWord(candidate.text),
+            )
+        ) {
+            VERIFIER_CYRILLIC_BONUS
+        } else {
+            0f
+        }
+        return candidate.confidence * fitness + lengthBonus + verifierBonus
     }
 
     private fun createHighContrast(source: Bitmap): Bitmap {
@@ -618,6 +663,7 @@ internal class CyrillicOcrEngine(
         input: TensorBuffer,
         output: TensorBuffer,
         chars: List<String>,
+        recognitionModel: RecognitionModel,
     ): Recognition {
         recognizerCanvas.drawColor(Color.rgb(128, 128, 128))
         val scale = RECOGNIZER_HEIGHT.toFloat() / crop.height.coerceAtLeast(1)
@@ -660,10 +706,15 @@ internal class CyrillicOcrEngine(
         } else {
             chars.size + 1
         }
-        return decodeCtc(values, chars, classes)
+        return decodeCtc(values, chars, classes, recognitionModel)
     }
 
-    private fun decodeCtc(values: FloatArray, chars: List<String>, classes: Int): Recognition {
+    private fun decodeCtc(
+        values: FloatArray,
+        chars: List<String>,
+        classes: Int,
+        recognitionModel: RecognitionModel,
+    ): Recognition {
         if (classes <= 1 || values.size < classes) return Recognition("", 0f)
         val steps = values.size / classes
         val text = StringBuilder(steps)
@@ -693,6 +744,7 @@ internal class CyrillicOcrEngine(
         return Recognition(
             text = text.toString().trim(),
             confidence = if (confidenceCount == 0) 0f else confidenceSum / confidenceCount,
+            model = recognitionModel,
         )
     }
 
@@ -763,12 +815,9 @@ internal class CyrillicOcrEngine(
         // Ниже этого — пробуем распознать ещё раз с повышенным контрастом.
         private const val PRIMARY_CONFIDENCE = 0.90f
 
-        // Ниже этого — подключаем модель-верификатор PP-OCRv5.
-        private const val VERIFIER_THRESHOLD = 0.82f
-
-        // Below this script-aware quality, run PP-OCRv5 even when v3's raw
-        // softmax score looks high. Decorative comic fonts are the key case.
-        private const val VERIFIER_QUALITY_THRESHOLD = 0.76f
+        // Prefer valid Cyrillic from PP-OCRv5 over v3's raw-softmax-only
+        // winner. Calibrated against device captures of compact text panels.
+        private const val VERIFIER_CYRILLIC_BONUS = 0.20f
 
         // Результат слабее этого порога отбрасывается совсем. Раньше такого
         // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:
