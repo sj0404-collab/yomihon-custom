@@ -37,7 +37,7 @@ internal class CyrillicOcrEngine(
     private val context: Context,
     private val environment: Environment,
     private val textPostprocessor: TextPostprocessor,
-) : OcrEngine {
+) : LineOcrEngine {
 
     private lateinit var detector: CompiledModel
     private lateinit var primary: CompiledModel
@@ -245,8 +245,38 @@ internal class CyrillicOcrEngine(
             val text = rows.joinToString("\n") { row ->
                 row.sortedBy { it.first.rect.left }.joinToString(" ") { it.second.trim() }
             }
-            CyrillicTranslitFixer.fixLookalikes(textPostprocessor.postprocess(text)).trim()
+            cleanRecognition(textPostprocessor.postprocess(text))
         }
+    }
+
+    /**
+     * Распознавание ОДНОЙ вырезанной строки (кроп по боксу детектора).
+     *
+     * В отличие от [recognizeText] не запускает детектор повторно: строка уже
+     * вырезана, а второй проход detectTextBoxes() по кропу дробил надпись на
+     * фрагменты букв, и распознаватель выдавал мусор вместо реплики.
+     */
+    override suspend fun recognizeLine(image: Bitmap): String {
+        ensureInitialized()
+        return mutex.withLock {
+            require(!image.isRecycled) { "Input bitmap is recycled" }
+            if (image.width < 4 || image.height < 4) return@withLock ""
+            val result = recognizeCrop(image)
+            if (result.text.isBlank() || result.confidence < MIN_ACCEPT_CONFIDENCE) {
+                return@withLock ""
+            }
+            cleanRecognition(textPostprocessor.postprocess(result.text))
+        }
+    }
+
+    /**
+     * Пословная правка омоглифов и фильтр мусора «словарной лесенкой».
+     * Пословная — чтобы чистая латынь («SOS», «Wi-Fi») оставалась латынью и
+     * TTS не читал её по буквам внутри русских слов.
+     */
+    private fun cleanRecognition(text: String): String {
+        val cleaned = OcrTextCleaner.fixLookalikesPerWord(text).trim()
+        return if (cleaned.isEmpty() || OcrTextCleaner.looksLikeDictionaryRamp(cleaned)) "" else cleaned
     }
 
     private fun detectTextBoxes(image: Bitmap): List<TextBox> {
@@ -269,9 +299,11 @@ internal class CyrillicOcrEngine(
             val r = (pixel shr 16) and 0xFF
             val g = (pixel shr 8) and 0xFF
             val b = pixel and 0xFF
-            detectorFloats[out++] = (r / 255f - 0.485f) / 0.229f
+            // Модели PaddleOCR обучены в BGR (OpenCV): синий канал идёт первым,
+            // константы нормализации — по позициям каналов, как в rapidocr.
+            detectorFloats[out++] = (b / 255f - 0.485f) / 0.229f
             detectorFloats[out++] = (g / 255f - 0.456f) / 0.224f
-            detectorFloats[out++] = (b / 255f - 0.406f) / 0.225f
+            detectorFloats[out++] = (r / 255f - 0.406f) / 0.225f
         }
         detectorInput.writeFloat(detectorFloats)
         detector.run(listOf(detectorInput), listOf(detectorOutput))
@@ -436,17 +468,27 @@ internal class CyrillicOcrEngine(
         )
         var out = 0
         recognizerPixels.forEach { pixel ->
-            recognizerFloats[out++] = (((pixel shr 16) and 0xFF) / 255f - 0.5f) / 0.5f
-            recognizerFloats[out++] = (((pixel shr 8) and 0xFF) / 255f - 0.5f) / 0.5f
+            // BGR, как в эталонной реализации из репозитория моделей:
+            // «the original Paddle model was trained with BGR order».
             recognizerFloats[out++] = ((pixel and 0xFF) / 255f - 0.5f) / 0.5f
+            recognizerFloats[out++] = (((pixel shr 8) and 0xFF) / 255f - 0.5f) / 0.5f
+            recognizerFloats[out++] = (((pixel shr 16) and 0xFF) / 255f - 0.5f) / 0.5f
         }
         input.writeFloat(recognizerFloats)
         model.run(listOf(input), listOf(output))
-        return decodeCtc(output.readFloat(), chars)
+        val values = output.readFloat()
+        // Шаг классов берём из тензора, а НЕ из словаря: у модели 165 классов
+        // (164 символа + blank), а в файле словаря 163 строки. Со старым шагом
+        // dict+1=164 окно чтения дрейфовало на один класс за шаг времени, и
+        // decode выдавал «лесенку» словаря — «0123456789», «ABCDEFGHIJKLM» —
+        // вместо текста. Это и был «баг кодировки» локального OCR.
+        val classes = runCatching { output.shape.last() }.getOrNull()
+            ?.takeIf { it in 2..values.size }
+            ?: (chars.size + 1)
+        return decodeCtc(values, chars, classes)
     }
 
-    private fun decodeCtc(values: FloatArray, chars: List<String>): Recognition {
-        val classes = chars.size + 1
+    private fun decodeCtc(values: FloatArray, chars: List<String>, classes: Int): Recognition {
         if (classes <= 1 || values.size < classes) return Recognition("", 0f)
         val steps = values.size / classes
         val text = StringBuilder(steps)

@@ -4,21 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -35,10 +29,15 @@ import kotlin.math.roundToInt
  * «Линейка чтения»: подсветка текущей озвучиваемой реплики.
  *
  * Вид настраивается (Настройки → Озвучка):
- * - [OcrPreferences.highlightColor] — цвет рамки/линии;
- * - [OcrPreferences.highlightStyle] — `box` (рамка), `underline`
- *   (подчёркивание) или `both`;
- * - [OcrPreferences.highlightWidth] — толщина в dp.
+ * - [OcrPreferences.highlightColor] — цвет пятна/рамки/линии;
+ * - [OcrPreferences.highlightStyle] — `bubble` (мягкие еле заметные кружки,
+ *   по умолчанию), `box` (рамка), `underline` (подчёркивание) или `both`;
+ * - [OcrPreferences.highlightWidth] — толщина в dp для box/underline.
+ *
+ * В режиме `bubble` никакие прямоугольники не рисуются вообще: текущая
+ * реплика — радиальное пятно-круг, сходящее к нулю на краях, а история и
+ * план чтения — совсем тусклые кружки. Промах бокса при таком пятне не
+ * режет глаз, в отличие от жёсткой рамки.
  *
  * Номер реплики показывается рядом с рамкой: он нужен глазами, чтобы видеть
  * порядок чтения, но в озвучку не попадает (снимается SpeechMarkup.strip).
@@ -80,41 +79,59 @@ fun AutoReadHighlight(
         for (fr in frameRegions) {
             if (fr.state == AutoReadEngine.FrameRegion.State.CURRENT) continue // текущую рисуем ниже ярче
             val b = engine?.mapToViewport(fr.box) ?: fr.box
-            val frW = with(density) { ((b.right - b.left) * iwFr).toDp() }
-            val frH = with(density) { ((b.bottom - b.top) * ihFr).toDp() }
             val done = fr.state == AutoReadEngine.FrameRegion.State.DONE
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset((ixFr + b.left * iwFr).roundToInt(), (iyFr + b.top * ihFr).roundToInt()) }
-                    .width(frW)
-                    .height(frH)
-                    // В режиме мягкого пятна карта кадра тоже без рамок:
-                    // прочитанное — едва заметная заливка, предстоящее —
-                    // чуть плотнее. Иначе страница рябит прямоугольниками.
-                    .then(
-                        if (style == "bubble") {
-                            Modifier.background(
-                                accent.copy(alpha = if (done) 0.05f else 0.10f),
-                                RoundedCornerShape(percent = 50),
+            if (style == "bubble") {
+                // Еле прозрачный кружок: прочитанное — совсем тускло,
+                // предстоящее — чуть заметнее. Без единого прямого угла.
+                val frW = with(density) { ((b.right - b.left) * iwFr).toDp() }
+                val frH = with(density) { ((b.bottom - b.top) * ihFr).toDp() }
+                val sideDp = maxOf(frW, frH) * 1.5f
+                val sidePx = with(density) { sideDp.toPx() }
+                val cx = ixFr + (b.left + b.right) / 2f * iwFr
+                val cy = iyFr + (b.top + b.bottom) / 2f * ihFr
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (cx - sidePx / 2f).roundToInt(),
+                                (cy - sidePx / 2f).roundToInt(),
                             )
-                        } else {
-                            Modifier
-                                .border(
-                                    width = 1.5.dp,
-                                    color = if (done) {
-                                        accent.copy(alpha = 0.25f)
-                                    } else {
-                                        accent.copy(alpha = 0.55f)
-                                    },
-                                    shape = RoundedCornerShape(4.dp),
-                                )
-                                .background(
-                                    if (done) accent.copy(alpha = 0.05f) else Color.Transparent,
-                                    RoundedCornerShape(4.dp),
-                                )
-                        },
-                    ),
-            )
+                        }
+                        .width(sideDp)
+                        .height(sideDp)
+                        .background(
+                            color = accent.copy(alpha = if (done) 0.04f else 0.08f),
+                            shape = CircleShape,
+                        ),
+                )
+            } else {
+                val frW = with(density) { ((b.right - b.left) * iwFr).toDp() }
+                val frH = with(density) { ((b.bottom - b.top) * ihFr).toDp() }
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (ixFr + b.left * iwFr).roundToInt(),
+                                (iyFr + b.top * ihFr).roundToInt(),
+                            )
+                        }
+                        .width(frW)
+                        .height(frH)
+                        .border(
+                            width = 1.5.dp,
+                            color = if (done) {
+                                accent.copy(alpha = 0.25f)
+                            } else {
+                                accent.copy(alpha = 0.55f)
+                            },
+                            shape = RoundedCornerShape(4.dp),
+                        )
+                        .background(
+                            if (done) accent.copy(alpha = 0.05f) else Color.Transparent,
+                            RoundedCornerShape(4.dp),
+                        ),
+                )
+            }
         }
 
         val img = imageRect
@@ -133,23 +150,32 @@ fun AutoReadHighlight(
         }
 
         if (style == "bubble") {
-            // Мягкое пятно: заливка без чёткой границы. Жёсткая рамка
-            // требует точного бокса, и промах сразу заметен; полупрозрачное
-            // пятно со скруглением подсвечивает реплику, не споря с текстом.
-            val radius = minOf(boxWidth, boxHeight) / 2
+            // Мягкий круг: радиальное пятно с центром на реплике, полностью
+            // сходит в ноль — ни рамки, ни капсулы, ни «прямоугольника в
+            // высоту». Диаметр чуть больше реплики, чтобы накрыть текст.
+            val sideDp = maxOf(boxWidth, boxHeight) * 1.6f
+            val sidePx = with(density) { sideDp.toPx() }
+            val cx = ix + (mapped.left + mapped.right) / 2f * iw
+            val cy = iy + (mapped.top + mapped.bottom) / 2f * ih
             Box(
-                modifier = offsetModifier
-                    .width(boxWidth)
-                    .height(boxHeight)
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (cx - sidePx / 2f).roundToInt(),
+                            (cy - sidePx / 2f).roundToInt(),
+                        )
+                    }
+                    .width(sideDp)
+                    .height(sideDp)
                     .background(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                accent.copy(alpha = 0.22f),
-                                accent.copy(alpha = 0.10f),
+                                accent.copy(alpha = 0.16f),
+                                accent.copy(alpha = 0.06f),
                                 Color.Transparent,
                             ),
                         ),
-                        shape = RoundedCornerShape(radius),
+                        shape = CircleShape,
                     ),
             )
         }
@@ -171,7 +197,7 @@ fun AutoReadHighlight(
         if (style == "underline" || style == "both") {
             // Подчёркивание: линия по нижней границе реплики.
             // Считаем по iw/ih и со смещением ix/iy — как рамка выше. Раньше
-            // здесь стояли w/h без смещения, поэтому линия уезжала от текста
+            // здесь стояло w/h без смещения, поэтому линия уезжала от текста
             // тем сильнее, чем больше поля вокруг страницы.
             Box(
                 modifier = Modifier
@@ -186,7 +212,5 @@ fun AutoReadHighlight(
                     .background(accent, RoundedCornerShape(strokeWidth.dp / 2)),
             )
         }
-
-
     }
 }

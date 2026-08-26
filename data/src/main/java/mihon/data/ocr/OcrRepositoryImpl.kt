@@ -246,7 +246,9 @@ class OcrRepositoryImpl(
 
     private suspend fun recognizeWithEngine(type: EngineType, image: Bitmap): String {
         return engineLocks.withTextEngineLock(type) {
-            engineFor(type).recognizeText(image)
+            // Онлайн-модели отдают текст построчно и не склеивают переносы —
+            // соединяем «пере-\nносится» в «переносится» централизованно.
+            OcrTextCleaner.joinLineHyphens(engineFor(type).recognizeText(image))
         }
     }
 
@@ -526,7 +528,7 @@ class OcrRepositoryImpl(
             ocrModel = modelKey,
             imageWidth = image.width,
             imageHeight = image.height,
-            regions = result.regions,
+            regions = result.regions.map { it.copy(text = OcrTextCleaner.joinLineHyphens(it.text)) },
         )
     }
 
@@ -558,7 +560,7 @@ class OcrRepositoryImpl(
             ocrModel = modelKey,
             imageWidth = image.width,
             imageHeight = image.height,
-            regions = result,
+            regions = result.map { it.copy(text = OcrTextCleaner.joinLineHyphens(it.text)) },
         )
     }
 
@@ -660,7 +662,16 @@ class OcrRepositoryImpl(
             val crop = cropBitmap(image, box) ?: return@mapIndexedNotNull null
             try {
                 val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
-                    recognizeWithEngine(type, crop)
+                    engineLocks.withTextEngineLock(type) {
+                        val engine = engineFor(type)
+                        if (engine is LineOcrEngine) {
+                            // Кроп — уже готовая строка: повторный детектор
+                            // запрещён, иначе линия дробится и текст рушится.
+                            engine.recognizeLine(crop)
+                        } else {
+                            engine.recognizeText(crop)
+                        }
+                    }
                 }.trim()
                 if (text.isBlank()) {
                     null

@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.GTranslate
 import androidx.compose.material.icons.outlined.Spellcheck
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,13 @@ fun TranslationCard(
     var isTranslating by remember(originalText) { mutableStateOf(true) }
     var isSpeaking by remember(originalText) { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Выбор голоса прямо в карточке: авто/вручную и женский/мужской.
+    // Пользователь просил, чтобы в рамке с текстом рядом с кнопками «голос»
+    // и «копировать» был выбор голоса, а не только озвучка и копирование.
+    val ocrPrefs = remember { Injekt.get<OcrPreferences>() }
+    var manualVoice by remember { mutableStateOf(ocrPrefs.manualVoiceMode().get()) }
+    var voiceGender by remember { mutableStateOf(ocrPrefs.manualVoiceGender().get()) }
 
     DisposableEffect(Unit) {
         onDispose { TtsSpeaker.stop() }
@@ -149,6 +158,37 @@ fun TranslationCard(
                     )
                 }
                 Row {
+                    IconButton(
+                        onClick = {
+                            manualVoice = !manualVoice
+                            ocrPrefs.manualVoiceMode().set(manualVoice)
+                            context.toast(
+                                if (manualVoice) {
+                                    "Голос выбирается вручную"
+                                } else {
+                                    "Голос определяется автоматически"
+                                },
+                            )
+                        },
+                    ) {
+                        Icon(
+                            imageVector = if (manualVoice) Icons.Outlined.TouchApp else Icons.Outlined.AutoMode,
+                            contentDescription = "Выбор голоса: автоматически или вручную",
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            voiceGender = if (voiceGender == "male") "female" else "male"
+                            ocrPrefs.manualVoiceGender().set(voiceGender)
+                            context.toast(if (voiceGender == "male") "Мужской голос" else "Женский голос")
+                        },
+                    ) {
+                        Text(
+                            text = if (voiceGender == "male") "♂" else "♀",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
                     IconButton(
                         onClick = {
                             val textToSpeak = translationText ?: restoredCyrillic ?: originalText

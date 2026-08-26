@@ -19,3 +19,13 @@ internal interface OcrEngine {
      */
     fun close()
 }
+
+/**
+ * Движок, умеющий распознавать ОДНУ уже вырезанную строку без повторного
+ * прохода детектора. Репозиторий использует это для кропов по боксам
+ * детектора: повторный detectTextBoxes() на кропе рвал строку на фрагменты
+ * и превращал результат в мусор.
+ */
+internal interface LineOcrEngine : OcrEngine {
+    suspend fun recognizeLine(image: Bitmap): String
+}

@@ -180,6 +180,7 @@ internal class OcrCacheStore(
     }
 
     private fun createDatabaseHandle(): DatabaseHandle {
+        dropCacheIfEngineChanged()
         deleteDatabaseIfSchemaOutdated()
         val driver = AndroidxSqliteDriver(
             driver = BundledSQLiteDriver(),
@@ -193,6 +194,20 @@ internal class OcrCacheStore(
             database = OcrCacheDatabase(driver),
             driver = driver,
         )
+    }
+
+    /**
+     * Локальный движок исправлен в v1.9.12 (шаг CTC по тензору, BGR, без
+     * повторного детектора на кропах): в старом кэше лежит мусор вида
+     * «0123456789», и без сброса карточка показывала бы его вечно.
+     */
+    private fun dropCacheIfEngineChanged() {
+        val meta = context.getSharedPreferences("ocr_cache_meta", Context.MODE_PRIVATE)
+        val stored = meta.getInt("engine_schema", 0)
+        if (stored != CACHE_SCHEMA_VERSION) {
+            deleteDatabaseFile()
+            meta.edit().putInt("engine_schema", CACHE_SCHEMA_VERSION).apply()
+        }
     }
 
     private fun deleteDatabaseIfSchemaOutdated() {
@@ -267,5 +282,6 @@ internal class OcrCacheStore(
 
     companion object {
         private const val DB_NAME = "ocr_cache.db"
+        private const val CACHE_SCHEMA_VERSION = 2
     }
 }
