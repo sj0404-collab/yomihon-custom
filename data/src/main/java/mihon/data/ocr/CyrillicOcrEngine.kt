@@ -477,14 +477,18 @@ internal class CyrillicOcrEngine(
         input.writeFloat(recognizerFloats)
         model.run(listOf(input), listOf(output))
         val values = output.readFloat()
-        // Шаг классов берём из тензора, а НЕ из словаря: у модели 165 классов
-        // (164 символа + blank), а в файле словаря 163 строки. Со старым шагом
-        // dict+1=164 окно чтения дрейфовало на один класс за шаг времени, и
-        // decode выдавал «лесенку» словаря — «0123456789», «ABCDEFGHIJKLM» —
-        // вместо текста. Это и был «баг кодировки» локального OCR.
-        val classes = runCatching { output.shape.last() }.getOrNull()
-            ?.takeIf { it in 2..values.size }
-            ?: (chars.size + 1)
+        // Число классов берём из фактического размера выхода: recognizer'ы
+        // пака отдают [1, 40, C] (README репозитория моделей: «для recognizer
+        // output — [1, 40, 165]»), то есть C = values.size / 40. Старый код
+        // брал C из словаря (163 строки + 1 = 164), окно чтения дрейфовало
+        // на один класс за шаг времени, и decode выдавал «лесенку» словаря —
+        // «0123456789», «ABCDEFGHIJKLM» — вместо текста. Это и был «баг
+        // кодировки» локального OCR.
+        val classes = if (values.size % RECOGNIZER_STEPS == 0 && values.size / RECOGNIZER_STEPS >= 2) {
+            values.size / RECOGNIZER_STEPS
+        } else {
+            chars.size + 1
+        }
         return decodeCtc(values, chars, classes)
     }
 
@@ -574,6 +578,8 @@ internal class CyrillicOcrEngine(
         private const val DETECTOR_SIZE = 736
         private const val RECOGNIZER_WIDTH = 320
         private const val RECOGNIZER_HEIGHT = 48
+        // Число шагов по времени в выходе recognizer'ов пака ([1, 40, C]).
+        private const val RECOGNIZER_STEPS = 40
         // Порог активации детектора. Понижен с 0.28: на тонком шрифте и
         // светлых баллонах часть строк не набирала 0.28 и терялась целиком.
         private const val DETECTOR_THRESHOLD = 0.20f
