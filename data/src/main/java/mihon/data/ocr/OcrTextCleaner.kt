@@ -3,20 +3,47 @@ package mihon.data.ocr
 /**
  * Постобработка текста после CTC-декодирования и онлайн-движков.
  *
- * Три независимые операции:
- * 1. [fixLookalikesPerWord] — латинско-кириллические омоглифы правятся только
- *    внутри слов, где уже есть кириллица: «cлишком» → «слишком», но чистая
- *    латынь («SOS», «Wi-Fi») остаётся нетронутой и TTS не читает её по буквам;
+ * 1. [fixLookalikesPerWord] — пословная правка: в словах С кириллицей
+ *    латинские омоглифы и похожие цифры заменяются на кириллицу (N→Н, I→И,
+ *    5→Б …), чтобы текст читался и TTS не диктовал буквы; слова из чистой
+ *    латыни транслитерируются в кириллицу (PEILENIE → ПЕИЛЕНИЕ), если это не
+ *    известный латинский токен из белого списка (SOS, BMW, Wi-Fi …);
  * 2. [joinLineHyphens] — переносы слов соединяются («пере-\nносится» →
- *    «переносится»): онлайн-модели отдают текст построчно и раньше разрыв
- *    оставался в карточке;
- * 3. [looksLikeDictionaryRamp] — фильтр мусора «словарной лесенкой»
- *    («0123456789», «ABCDEFGHIJKLM»): такие строки возникают, когда CTC-поток
- *    дрейфует по словарю, и показывать их пользователю нельзя.
+ *    «переносится»);
+ * 3. [looksLikeDictionaryRamp] — фильтр мусора «словарной лесенкой».
  */
 object OcrTextCleaner {
 
     private val HYPHEN_LINE_BREAK = Regex("([\\p{L}])-[ \\t]*\\n[ \\t]*([\\p{L}])")
+
+    private val LATIN_WHITELIST = setOf(
+        "sos", "bmw", "wi-fi", "ok", "tv", "dvd", "3d", "hp", "pc", "usb", "sim", "sd",
+    )
+
+    /**
+     * Расширенная таблица омоглифов и визуальных замен для слов, в которых
+     * уже есть кириллица. Собрана по реальным промахам модели на манге:
+     * N→Н, I→И, L→Л, D→Д, G→Г, W/V→В, Z→З, J→Й, S→С, 5→Б, 0→О, 4→Ч…
+     */
+    private val EXT_LOOKALIKE_MAP = mapOf(
+        'A' to 'А', 'a' to 'а',
+        'B' to 'В',
+        'C' to 'С', 'c' to 'с',
+        'E' to 'Е', 'e' to 'е',
+        'H' to 'Н',
+        'K' to 'К', 'k' to 'к',
+        'M' to 'М', 'm' to 'м',
+        'O' to 'О', 'o' to 'о',
+        'P' to 'Р', 'p' to 'р',
+        'T' to 'Т', 't' to 'т',
+        'X' to 'Х', 'x' to 'х',
+        'y' to 'у',
+        '3' to 'З', '6' to 'б',
+        'I' to 'И', 'L' to 'Л', 'N' to 'Н', 'D' to 'Д', 'G' to 'Г',
+        'W' to 'В', 'V' to 'В', 'Z' to 'З', 'J' to 'Й', 'S' to 'С',
+        's' to 'с',
+        '5' to 'Б', '0' to 'О', '4' to 'Ч',
+    )
 
     fun joinLineHyphens(text: String): String {
         if (!text.contains('-')) return text
@@ -28,12 +55,23 @@ object OcrTextCleaner {
     fun fixLookalikesPerWord(text: String): String {
         if (text.isEmpty()) return text
         return text.split(' ').joinToString(" ") { word ->
-            if (word.any { it.code in CYRILLIC_RANGE }) {
-                CyrillicTranslitFixer.fixLookalikes(word)
-            } else {
-                word
+            val hasCyrillic = word.any { it.code in CYRILLIC_RANGE }
+            val hasLatin = word.any { it.isLetter() && it.code < 0x80 }
+            when {
+                hasCyrillic -> mapChars(word, EXT_LOOKALIKE_MAP)
+                hasLatin -> {
+                    val bare = word.trimEnd('.', '!', ',', '?', '…').lowercase()
+                    if (bare in LATIN_WHITELIST) word else CyrillicTranslitFixer.translitToCyrillic(word)
+                }
+                else -> word
             }
         }
+    }
+
+    private fun mapChars(word: String, map: Map<Char, Char>): String {
+        val sb = StringBuilder(word.length)
+        for (char in word) sb.append(map[char] ?: char)
+        return sb.toString()
     }
 
     /**

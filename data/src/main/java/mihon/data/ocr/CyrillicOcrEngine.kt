@@ -23,6 +23,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
 
 /**
  * Downloadable Russian/Cyrillic OCR based on PaddleOCR mobile TFLite models.
@@ -218,7 +219,7 @@ internal class CyrillicOcrEngine(
                 if (padded.width() < 4 || padded.height() < 4) return@mapNotNull null
                 val crop = Bitmap.createBitmap(image, padded.left, padded.top, padded.width(), padded.height())
                 try {
-                    val result = recognizeCrop(crop)
+                    val result = recognizeLineBitmap(crop)
                     // Отбрасываем только совсем безнадёжное. Раньше нижней
                     // границей де-факто служил PRIMARY_CONFIDENCE (0.90), и
                     // верно прочитанные, но «неуверенные» слова молча
@@ -261,11 +262,132 @@ internal class CyrillicOcrEngine(
         return mutex.withLock {
             require(!image.isRecycled) { "Input bitmap is recycled" }
             if (image.width < 4 || image.height < 4) return@withLock ""
-            val result = recognizeCrop(image)
+            val result = recognizeLineBitmap(image)
             if (result.text.isBlank() || result.confidence < MIN_ACCEPT_CONFIDENCE) {
                 return@withLock ""
             }
             cleanRecognition(textPostprocessor.postprocess(result.text))
+        }
+    }
+
+    /**
+     * Распознаёт вырезанную детектором строку: сначала режет её на слова по
+     * вертикальной проекции «чернил» (как _split_horizontal_words в Python-
+     * пайплайне репозитория моделей), потом распознаёт каждое слово отдельно.
+     *
+     * Детектор PP-OCR склеивает короткую строку в один бокс, а распознаватель
+     * обучен на отдельных словах и на целой строке не выдаёт пробелов:
+     * «И ПАЛ ПОД ЛЕЗВИЕМ» выходило как «ИПАЛПОДЛЕЗВИЕМ».
+     */
+    private fun recognizeLineBitmap(crop: Bitmap): Recognition {
+        val words = splitWords(crop)
+        if (words.size == 1) return recognizeCrop(words[0])
+        val sb = StringBuilder()
+        var confSum = 0f
+        for (piece in words) {
+            try {
+                val r = recognizeCrop(piece)
+                confSum += r.confidence
+                if (r.text.isNotBlank()) {
+                    if (sb.isNotEmpty()) sb.append(' ')
+                    sb.append(r.text)
+                }
+            } finally {
+                piece.recycle()
+            }
+        }
+        return Recognition(sb.toString().trim(), confSum / words.size)
+    }
+
+    /**
+     * Вертикальная проекция чернил + порог Оцу: широкие пробелы между словами
+     * разделяют кроп. Если явной щели нет — кроп остаётся целым.
+     */
+    private fun splitWords(crop: Bitmap): List<Bitmap> {
+        if (crop.width < 32) return listOf(crop)
+        val w = crop.width
+        val h = crop.height
+        val pixels = IntArray(w * h)
+        crop.getPixels(pixels, 0, w, 0, 0, w, h)
+        val gray = IntArray(w * h)
+        val hist = IntArray(256)
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            val lum = (77 * ((p shr 16) and 0xFF) + 150 * ((p shr 8) and 0xFF) + 29 * (p and 0xFF)) shr 8
+            gray[i] = lum
+            hist[lum]++
+        }
+        // Порог Оцу по гистограмме яркости.
+        var sumAll = 0L
+        for (v in 0..255) sumAll += v * hist[v]
+        val total = (w * h).toLong()
+        var sumB = 0L
+        var wB = 0L
+        var maxBetween = -1.0
+        var otsu = 127
+        for (v in 0..255) {
+            wB += hist[v]
+            if (wB == 0L) continue
+            val wF = total - wB
+            if (wF == 0L) break
+            sumB += v * hist[v]
+            val mB = sumB.toDouble() / wB
+            val mF = (sumAll - sumB).toDouble() / wF
+            val between = wB.toDouble() * wF * (mB - mF) * (mB - mF)
+            if (between > maxBetween) {
+                maxBetween = between
+                otsu = v
+            }
+        }
+        fun inkColumns(lightInk: Boolean): IntArray {
+            val col = IntArray(w)
+            for (x in 0 until w) {
+                var c = 0
+                for (y in 0 until h) {
+                    val g = gray[y * w + x]
+                    if (if (lightInk) g > otsu else g < otsu) c++
+                }
+                col[x] = c
+            }
+            return col
+        }
+        // Тёмные чернила на светлом фоне; если фон тёмный (светлый текст) —
+        // большинство колонок «активны», тогда инвертируем.
+        var ink = inkColumns(false)
+        if (ink.count { it > 0 } > w * 7 / 10) ink = inkColumns(true)
+        val runs = mutableListOf<IntArray>()
+        var start = -1
+        for (x in 0 until w) {
+            if (ink[x] > 0) {
+                if (start < 0) start = x
+            } else if (start >= 0) {
+                runs.add(intArrayOf(start, x - 1))
+                start = -1
+            }
+        }
+        if (start >= 0) runs.add(intArrayOf(start, w - 1))
+        if (runs.size < 2) return listOf(crop)
+        val gaps = IntArray(runs.size - 1) { i -> runs[i + 1][0] - runs[i][1] - 1 }
+        val positive = gaps.filter { it > 0 }.sorted()
+        val median = if (positive.isEmpty()) 1.0 else positive[positive.size / 2].toDouble()
+        val threshold = max(5, round(median * 1.7).toInt())
+        var splitAfter = 0
+        val groups = mutableListOf<IntArray>()
+        var groupStart = runs[0][0]
+        for (i in gaps.indices) {
+            if (gaps[i] >= threshold) {
+                groups.add(intArrayOf(groupStart, runs[i][1]))
+                groupStart = runs[i + 1][0]
+                splitAfter++
+            }
+        }
+        if (splitAfter == 0) return listOf(crop)
+        groups.add(intArrayOf(groupStart, runs[runs.size - 1][1]))
+        if (groups.size <= 1) return listOf(crop)
+        return groups.map { g ->
+            val left = max(0, g[0] - 4)
+            val right = min(w, g[1] + 5)
+            Bitmap.createBitmap(crop, left, 0, max(1, right - left), h)
         }
     }
 

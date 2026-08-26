@@ -37,6 +37,17 @@ class OcrTextCleanerTest {
     }
 
     @Test
+    fun `non-whitelisted pure latin is transliterated to cyrillic`() {
+        OcrTextCleaner.fixLookalikesPerWord("PEILENIE") shouldBe "ПЕИЛЕНИЕ"
+    }
+
+    @Test
+    fun `mixed word gets the extended confusion map`() {
+        OcrTextCleaner.fixLookalikesPerWord("NОЖНО") shouldBe "НОЖНО"
+        OcrTextCleaner.fixLookalikesPerWord("ВАН5АСКЕРВWАВ") shouldBe "ВАНБАСКЕРВВАВ"
+    }
+
+    @Test
     fun `dictionary ramp is detected as garbage`() {
         OcrTextCleaner.looksLikeDictionaryRamp("0123456789:?LABCDEFGHIJKLM") shouldBe true
     }
