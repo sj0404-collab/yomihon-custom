@@ -5,9 +5,10 @@ package mihon.data.ocr
  *
  * 1. [fixLookalikesPerWord] — пословная правка: в словах С кириллицей
  *    латинские омоглифы и похожие цифры заменяются на кириллицу (N→Н, I→И,
- *    5→Б …), чтобы текст читался и TTS не диктовал буквы; слова из чистой
- *    латыни транслитерируются в кириллицу (PEILENIE → ПЕИЛЕНИЕ), если это не
- *    известный латинский токен из белого списка (SOS, BMW, Wi-Fi …);
+ *    5→Б …), чтобы текст читался и TTS не диктовал буквы. Чистая латынь не
+ *    транслитерируется автоматически: локальный CTC-модель часто выдаёт её
+ *    как мусор на декоративных шрифтах, и «исправление» превращало ошибку в
+ *    убедительную, но выдуманную русскую фразу;
  * 2. [joinLineHyphens] — переносы слов соединяются («пере-\nносится» →
  *    «переносится»);
  * 3. [looksLikeDictionaryRamp] — фильтр мусора «словарной лесенкой».
@@ -61,11 +62,46 @@ object OcrTextCleaner {
                 hasCyrillic -> mapChars(word, EXT_LOOKALIKE_MAP)
                 hasLatin -> {
                     val bare = word.trimEnd('.', '!', ',', '?', '…').lowercase()
-                    if (bare in LATIN_WHITELIST) word else CyrillicTranslitFixer.translitToCyrillic(word)
+                    if (bare in LATIN_WHITELIST) word else word
                 }
                 else -> word
             }
         }
+    }
+
+    /**
+     * Принимает только осмысленный результат русского локального движка.
+     * Пунктуация, корейские SFX и CTC-мусор с остаточной латиницей не должны
+     * попадать в переводчик как «русский» текст. Допускаются короткие
+     * общеупотребимые латинские токены из белого списка (`SOS`, `Wi-Fi`, `3D`).
+     */
+    fun isAcceptableCyrillicOcrText(text: String): Boolean {
+        val words = text.split(Regex("\\s+")).filter(String::isNotBlank)
+        if (words.isEmpty()) return false
+
+        return words.all { word ->
+            val lexical = word.filter(Char::isLetterOrDigit)
+            if (lexical.isEmpty()) return@all false
+
+            val cyrillicCount = lexical.count { it.code in CYRILLIC_RANGE }
+            val latinCount = lexical.count { it.isLetter() && it.code < 0x80 }
+            if (cyrillicCount > 0) {
+                latinCount == 0
+            } else {
+                word.trimEnd('.', '!', ',', '?', '…').lowercase() in LATIN_WHITELIST
+            }
+        }
+    }
+
+    /**
+     * Доля букв, которые уже можно безопасно читать как кириллицу. Нужна не
+     * для словарной подмены, а для выбора между двумя визуальными моделями.
+     */
+    fun cyrillicFitness(text: String): Float {
+        val repaired = fixLookalikesPerWord(text)
+        val letters = repaired.filter(Char::isLetter)
+        if (letters.isEmpty()) return 0f
+        return letters.count { it.code in CYRILLIC_RANGE }.toFloat() / letters.length
     }
 
     private fun mapChars(word: String, map: Map<Char, Char>): String {

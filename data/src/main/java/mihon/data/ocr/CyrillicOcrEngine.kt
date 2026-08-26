@@ -340,10 +340,34 @@ internal class CyrillicOcrEngine(
             }
         }
         fun inkColumns(lightInk: Boolean): IntArray {
+            // Balloon borders are often long solid black/white rows. Counting
+            // their pixels as ink marks every column as occupied and prevents
+            // spaces from being split. Exclude only near-full rows; glyph rows
+            // retain their normal sparse stroke pattern.
+            val usableRows = BooleanArray(h)
+            var usableRowCount = 0
+            for (y in 0 until h) {
+                var active = 0
+                for (x in 0 until w) {
+                    val g = gray[y * w + x]
+                    if (if (lightInk) g > otsu else g < otsu) active++
+                }
+                if (active in 1 until (w * 0.72f).toInt().coerceAtLeast(1)) {
+                    usableRows[y] = true
+                    usableRowCount++
+                }
+            }
+            // A crop can be a very bold word whose strokes occupy most rows.
+            // In that case retain the central band instead of discarding all
+            // signal, while still ignoring possible frame edges.
+            val useCentralBand = usableRowCount < max(2, h / 6)
+            val margin = max(1, h / 10)
             val col = IntArray(w)
             for (x in 0 until w) {
                 var c = 0
                 for (y in 0 until h) {
+                    if (useCentralBand && (y < margin || y >= h - margin)) continue
+                    if (!useCentralBand && !usableRows[y]) continue
                     val g = gray[y * w + x]
                     if (if (lightInk) g > otsu else g < otsu) c++
                 }
@@ -398,7 +422,15 @@ internal class CyrillicOcrEngine(
      */
     private fun cleanRecognition(text: String): String {
         val cleaned = OcrTextCleaner.fixLookalikesPerWord(text).trim()
-        return if (cleaned.isEmpty() || OcrTextCleaner.looksLikeDictionaryRamp(cleaned)) "" else cleaned
+        return if (
+            cleaned.isEmpty() ||
+            OcrTextCleaner.looksLikeDictionaryRamp(cleaned) ||
+            !OcrTextCleaner.isAcceptableCyrillicOcrText(cleaned)
+        ) {
+            ""
+        } else {
+            cleaned
+        }
     }
 
     private fun detectTextBoxes(image: Bitmap): List<TextBox> {
@@ -515,12 +547,12 @@ internal class CyrillicOcrEngine(
     }
 
     private fun recognizeCrop(crop: Bitmap): Recognition {
-        var best = runRecognizer(crop, primary, primaryInput, primaryOutput, primaryChars)
-        if (best.confidence < PRIMARY_CONFIDENCE) {
+        val candidates = mutableListOf(runRecognizer(crop, primary, primaryInput, primaryOutput, primaryChars))
+        if (candidates.last().confidence < PRIMARY_CONFIDENCE) {
             val contrast = createHighContrast(crop)
             try {
                 val alternate = runRecognizer(contrast, primary, primaryInput, primaryOutput, primaryChars)
-                if (alternate.confidence > best.confidence) best = alternate
+                candidates += alternate
             } finally {
                 contrast.recycle()
             }
@@ -529,17 +561,34 @@ internal class CyrillicOcrEngine(
         val secondInput = verifierInput
         val secondOutput = verifierOutput
         val secondChars = verifierChars
+        val primaryBest = candidates.maxByOrNull(::candidateQuality) ?: Recognition("", 0f)
         if (
-            best.confidence < VERIFIER_THRESHOLD && secondModel != null &&
+            (primaryBest.confidence < VERIFIER_THRESHOLD || candidateQuality(primaryBest) < VERIFIER_QUALITY_THRESHOLD) &&
+            secondModel != null &&
             secondInput != null && secondOutput != null && secondChars != null
         ) {
-            val second = runRecognizer(crop, secondModel, secondInput, secondOutput, secondChars)
-            // The verifier may disagree because its much larger multilingual
-            // alphabet is less calibrated for Russian. Replace only on a clear
-            // confidence win; otherwise preserve the primary visual result.
-            if (second.text.isNotBlank() && second.confidence > best.confidence + 0.08f) best = second
+            candidates += runRecognizer(crop, secondModel, secondInput, secondOutput, secondChars)
+            val contrast = createHighContrast(crop)
+            try {
+                candidates += runRecognizer(contrast, secondModel, secondInput, secondOutput, secondChars)
+            } finally {
+                contrast.recycle()
+            }
         }
-        return best
+        return candidates.maxByOrNull(::candidateQuality) ?: Recognition("", 0f)
+    }
+
+    /**
+     * PP-OCRv3 can report a high softmax score for Latin-shaped noise in comic
+     * fonts. Prefer a slightly less confident verifier result when it is
+     * actually Cyrillic after lookalike repair; this is ranking, not spelling
+     * replacement, so source glyphs remain the authority.
+     */
+    private fun candidateQuality(candidate: Recognition): Float {
+        if (candidate.text.isBlank()) return Float.NEGATIVE_INFINITY
+        val fitness = OcrTextCleaner.cyrillicFitness(candidate.text)
+        val lengthBonus = min(candidate.text.count(Char::isLetter) * 0.01f, 0.12f)
+        return candidate.confidence * fitness + lengthBonus
     }
 
     private fun createHighContrast(source: Bitmap): Bitmap {
@@ -716,6 +765,10 @@ internal class CyrillicOcrEngine(
 
         // Ниже этого — подключаем модель-верификатор PP-OCRv5.
         private const val VERIFIER_THRESHOLD = 0.82f
+
+        // Below this script-aware quality, run PP-OCRv5 even when v3's raw
+        // softmax score looks high. Decorative comic fonts are the key case.
+        private const val VERIFIER_QUALITY_THRESHOLD = 0.76f
 
         // Результат слабее этого порога отбрасывается совсем. Раньше такого
         // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:

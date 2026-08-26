@@ -37,8 +37,8 @@ class OcrTextCleanerTest {
     }
 
     @Test
-    fun `non-whitelisted pure latin is transliterated to cyrillic`() {
-        OcrTextCleaner.fixLookalikesPerWord("PEILENIE") shouldBe "ПЕИЛЕНИЕ"
+    fun `non-whitelisted pure latin is preserved instead of fabricated into russian`() {
+        OcrTextCleaner.fixLookalikesPerWord("PEILENIE") shouldBe "PEILENIE"
     }
 
     @Test
@@ -55,5 +55,19 @@ class OcrTextCleanerTest {
     @Test
     fun `normal russian text is not a ramp`() {
         OcrTextCleaner.looksLikeDictionaryRamp("Идиот! Бежит...") shouldBe false
+    }
+
+    @Test
+    fun `mixed visual lookalikes become acceptable cyrillic`() {
+        val repaired = OcrTextCleaner.fixLookalikesPerWord("УMНO,")
+        repaired shouldBe "УМНО,"
+        OcrTextCleaner.isAcceptableCyrillicOcrText(repaired) shouldBe true
+    }
+
+    @Test
+    fun `punctuation and latin-shaped garbage are rejected for russian local ocr`() {
+        OcrTextCleaner.isAcceptableCyrillicOcrText("?!") shouldBe false
+        OcrTextCleaner.isAcceptableCyrillicOcrText("Tele'axect.E") shouldBe false
+        OcrTextCleaner.isAcceptableCyrillicOcrText("SOS") shouldBe true
     }
 }

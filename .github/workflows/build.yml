@@ -22,8 +22,9 @@ permissions:
 
 jobs:
   build:
-    name: Build & Test App
+    name: Test OCR & Build APK
     runs-on: windows-2025
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -45,6 +46,10 @@ jobs:
       - name: Verify SQLDelight migrations
         shell: bash
         run: ./gradlew verifySqlDelightMigration
+
+      - name: Run local Cyrillic OCR regression tests
+        shell: bash
+        run: ./gradlew :data:testDebugUnitTest --tests mihon.data.ocr.OcrTextCleanerTest
 
       - name: Run unit tests
         shell: bash
