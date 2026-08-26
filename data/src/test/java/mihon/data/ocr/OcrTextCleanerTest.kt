@@ -22,6 +22,14 @@ class OcrTextCleanerTest {
     }
 
     @Test
+    fun `local caption normalization joins device-reported false line hyphens before whitespace collapse`() {
+        OcrTextCleaner.normalizeLocalCyrillicCaption("МНЕ ХО-\nРОШО ЗНАКОМО ЭТО ИМЯ.") shouldBe
+            "МНЕ ХОРОШО ЗНАКОМО ЭТО ИМЯ."
+        OcrTextCleaner.normalizeLocalCyrillicCaption("НЕУПРАВ-\nЛЯЕМЫЙ... БЕС-\nПОЛЕЗНЫЙ") shouldBe
+            "НЕУПРАВЛЯЕМЫЙ... БЕСПОЛЕЗНЫЙ"
+    }
+
+    @Test
     fun `inline hyphen stays`() {
         OcrTextCleaner.joinLineHyphens("из-за дома") shouldBe "из-за дома"
     }
@@ -79,6 +87,13 @@ class OcrTextCleanerTest {
             "«ОХОТНИЧИЙ ПЁС» ДОМА БАСКЕРВИЛЕЙ."
         OcrTextCleaner.restoreKnownCaptionWords("ВИКИРВАНБАСКЕРВИЛЬ.") shouldBe
             "ВИКИР ВАН БАСКЕРВИЛЬ."
+    }
+
+    @Test
+    fun `restores all known words in device-reported no-result white caption`() {
+        OcrTextCleaner.normalizeLocalCyrillicCaption(
+            "ПОСЛОВАМ «ОХОТНИЧЬЕГОПСА», КОТОРЫЙПОСВЯТИЛ СЕБЯОТЦУИСЕМЬЕ,",
+        ) shouldBe "ПО СЛОВАМ «ОХОТНИЧЬЕГО ПСА», КОТОРЫЙ ПОСВЯТИЛ СЕБЯ ОТЦУ И СЕМЬЕ,"
     }
 
     @Test

@@ -54,6 +54,20 @@ object OcrTextCleaner {
         }
     }
 
+    /**
+     * Нормализует локально распознанную русскую подпись в правильном порядке.
+     *
+     * Сначала склеиваем переносы «ХО-\nРОШО», пока граница строки ещё
+     * сохранена. Лишь затем восстанавливаем безопасные границы известных
+     * слов. Раньше [restoreKnownCaptionWords] сворачивал `\n` в пробел до
+     * [joinLineHyphens], и пользователь видел ложное «ХО- РОШО».
+     */
+    fun normalizeLocalCyrillicCaption(text: String): String {
+        return restoreKnownCaptionWords(
+            fixLookalikesPerWord(joinLineHyphens(text)),
+        )
+    }
+
     fun fixLookalikesPerWord(text: String): String {
         if (text.isEmpty()) return text
         return text.split(' ').joinToString(" ") { word ->

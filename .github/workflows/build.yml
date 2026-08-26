@@ -74,6 +74,31 @@ jobs:
           keyAlias: ${{ secrets.ALIAS }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
+      - name: Render OCR quality report
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-report
+          report="release-report/OCR-QUALITY-REPORT-${GITHUB_SHA}.md"
+          cat > "$report" <<EOF
+          # OCR quality report — ${GITHUB_SHA}
+
+          | Field | Value |
+          |---|---|
+          | Source commit | [\`${GITHUB_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |
+          | Remote build | [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |
+          | APK target | Signed \`arm64-v8a\` release candidate |
+          | Automated checks | Focused Cyrillic OCR tests, unit tests, and APK assembly completed before this report was created |
+
+          EOF
+          cat docs/ocr-releases/CURRENT.md >> "$report"
+
+      - name: Upload OCR quality report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ocr-quality-report-${{ github.sha }}
+          path: release-report/OCR-QUALITY-REPORT-${{ github.sha }}.md
+
       # Собирается один APK под arm64-v8a (см. splits в app/build.gradle.kts).
       - name: Upload APK (arm64)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -287,14 +287,21 @@ internal class CyrillicOcrEngine(
      */
     private fun recognizeLineBitmap(crop: Bitmap): Recognition {
         val words = splitWords(crop)
-        if (words.size == 1) return recognizeCrop(words[0])
+        // PP-OCRv5 надёжно читает многие компактные строковые подписи целиком,
+        // но в CTC-выходе не ставит пробелы. Не заменяем целую строку только
+        // нарезанными словами: на тонких буквах нарезка может обрезать край
+        // глифа и вернуть пустой результат, хотя полный кроп читается верно.
+        val wholeLine = recognizeCrop(crop)
+        if (words.size == 1) return wholeLine
         val sb = StringBuilder()
         var confSum = 0f
+        var recognizedCount = 0
         for (piece in words) {
             try {
                 val r = recognizeCrop(piece)
-                confSum += r.confidence
                 if (r.text.isNotBlank()) {
+                    confSum += r.confidence
+                    recognizedCount++
                     if (sb.isNotEmpty()) sb.append(' ')
                     sb.append(r.text)
                 }
@@ -302,7 +309,30 @@ internal class CyrillicOcrEngine(
                 piece.recycle()
             }
         }
-        return Recognition(sb.toString().trim(), confSum / words.size)
+        val segmented = Recognition(
+            text = sb.toString().trim(),
+            confidence = if (recognizedCount == 0) 0f else confSum / recognizedCount,
+            model = wholeLine.model,
+        )
+        return selectLineRecognition(wholeLine, segmented)
+    }
+
+    /**
+     * Выбирает между полной строкой и визуально разрезанными словами.
+     * Полный вариант допускается только если консервативная постобработка уже
+     * способна восстановить в нём реальные границы слов. Это не словарная
+     * подмена: неизвестные слитные последовательности не получают бонуса и
+     * остаются на пути с визуальными промежутками.
+     */
+    private fun selectLineRecognition(wholeLine: Recognition, segmented: Recognition): Recognition {
+        if (segmented.text.isBlank()) return wholeLine
+        if (wholeLine.text.isBlank()) return segmented
+
+        val restoredWhole = OcrTextCleaner.normalizeLocalCyrillicCaption(wholeLine.text)
+        val restoresBoundaries = restoredWhole.count(Char::isWhitespace) > wholeLine.text.count(Char::isWhitespace)
+        val wholeQuality = candidateQuality(wholeLine) + if (restoresBoundaries) WHOLE_LINE_BOUNDARY_BONUS else 0f
+        val segmentedQuality = candidateQuality(segmented)
+        return if (restoresBoundaries && wholeQuality >= segmentedQuality) wholeLine else segmented
     }
 
     /**
@@ -427,9 +457,10 @@ internal class CyrillicOcrEngine(
      * TTS не читал её по буквам внутри русских слов.
      */
     private fun cleanRecognition(text: String): String {
-        val cleaned = OcrTextCleaner.restoreKnownCaptionWords(
-            OcrTextCleaner.fixLookalikesPerWord(text),
-        ).trim()
+        // Склеиваем переносы с дефисом ДО того, как postprocessing превратит
+        // строковые границы в пробелы. Иначе «НЕУПРАВ-\nЛЯЕМЫЙ» остаётся в
+        // интерфейсе как ложное «НЕУПРАВ- ЛЯЕМЫЙ».
+        val cleaned = OcrTextCleaner.normalizeLocalCyrillicCaption(text).trim()
         return if (
             cleaned.isEmpty() ||
             OcrTextCleaner.looksLikeDictionaryRamp(cleaned) ||
@@ -818,6 +849,10 @@ internal class CyrillicOcrEngine(
         // Prefer valid Cyrillic from PP-OCRv5 over v3's raw-softmax-only
         // winner. Calibrated against device captures of compact text panels.
         private const val VERIFIER_CYRILLIC_BONUS = 0.20f
+
+        // Цельный кроп получает небольшое преимущество лишь когда его
+        // слитный CTC-вывод уже разделяется консервативным списком слов.
+        private const val WHOLE_LINE_BOUNDARY_BONUS = 0.08f
 
         // Результат слабее этого порога отбрасывается совсем. Раньше такого
         // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:
