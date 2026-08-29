@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -64,6 +65,7 @@ import eu.kanade.domain.dictionary.OcrResultPresentation
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OcrLoadingIndicator
 import eu.kanade.presentation.reader.OcrResultOverlay
+import eu.kanade.presentation.reader.OcrVoiceFloatingControls
 import eu.kanade.presentation.reader.OcrResultPopupSettings
 import eu.kanade.presentation.reader.OcrSelectionOverlay
 import eu.kanade.presentation.reader.OrientationSelectDialog
@@ -976,7 +978,8 @@ class ReaderActivity : BaseActivity() {
                                 },
                             )
                         }
-                        OcrResultOverlay(
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            OcrResultOverlay(
                             onDismissRequest = onDismissOcrResult,
                             presentation = when (dialog.origin) {
                                 ReaderViewModel.OcrResultOrigin.CachedPageTap -> ocrResultPresentation
@@ -1018,7 +1021,21 @@ class ReaderActivity : BaseActivity() {
                                 }
                             },
                             onPlayAudioClick = dictionarySearchScreenModel::fetchAndPlayAudio,
-                        )
+                            )
+                            OcrVoiceFloatingControls(
+                                enabled = dialog.queryText.isNotBlank(),
+                                onSpeak = {
+                                    eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(
+                                        this@ReaderActivity,
+                                        dialog.queryText,
+                                    )
+                                },
+                                onChooseVoice = { showTtsDialog = true },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .statusBarsPadding(),
+                            )
+                        }
                     }
                     null -> {}
                 }

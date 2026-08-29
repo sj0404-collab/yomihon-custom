@@ -49,3 +49,20 @@
 - [ ] Keep hyphens only for real orthographic hyphens or visual line-wraps that can be safely joined; never introduce a hyphen between recognized Cyrillic words.
 - [ ] Decide explicitly whether preprocessing plugins are safe; any plugin must be local, deterministic, UTF-8 aware, and disabled if it lowers OCR confidence.
 - [ ] Add a release report with positive and negative device examples before uploading the next APK candidate.
+
+## Final one-build gate
+
+- [ ] Cancel the in-progress intermediate GitHub Actions run before any further APK build.
+- [ ] Complete all requested OCR logic, safety filters, full-bubble rescue, short-utterance handling, hyphen handling, and plugin decision before triggering a release workflow.
+- [ ] Finish the complete regression suite and inspect its results before the final build; no APK is to be built from an unverified commit.
+- [ ] Trigger exactly one final GitHub Actions APK build after all tests and the release Markdown report are complete.
+- [ ] Upload only that final APK to GoFile and clearly report its single final commit, run, SHA-256, positive results, and remaining limitations.
+
+## Unified Yomihon APK: OCR and floating voice controls
+
+- [ ] Port only the working local OCR changes from the overlay branch into `yomihon-custom` without copying its standalone APK shell or cloud paths.
+- [x] Add Yomihon-native floating `Голос` and `Выбрать голос` controls outside the OCR result card, with the existing copy and close actions preserved.
+- [x] Connect the voice picker to installed Russian system TTS voices and persist the selected voice locally through the existing `TtsSettingsDialog` and `OcrPreferences.voiceName()` path.
+- [ ] Keep UTF-8/Cyrillic fidelity, full-bubble rescue, short utterances, safe line-wrap joining, and no pseudo-word hallucination as one shared quality gate.
+- [ ] Run the complete regression suite before triggering exactly one signed release APK build in GitHub Actions. Local sandbox compilation is blocked because Android SDK is unavailable; GitHub runner remains the authoritative build/test environment.
+- [ ] Upload only the verified Yomihon release APK and its Markdown quality report to GoFile.
