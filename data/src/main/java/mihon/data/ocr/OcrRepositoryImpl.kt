@@ -690,13 +690,37 @@ class OcrRepositoryImpl(
             }
         }
 
+        // Если детектор нашёл области, но каждая построчная попытка была
+        // отклонена, не превращаем видимое большое облачко в «Нет результатов».
+        // Выполняем один локальный цельностраничный rescue-проход; он проходит
+        // через тот же CyrillicOcrEngine и те же UTF-8/кириллические фильтры.
+        val finalRegions = if (regions.isNotEmpty()) {
+            regions
+        } else {
+            val text = submitTask(PrioritizedTaskQueue.Priority.NORMAL) {
+                recognizeWithEngine(type, image)
+            }.trim()
+            if (text.isBlank()) {
+                emptyList()
+            } else {
+                listOf(
+                    OcrRegion(
+                        order = 0,
+                        text = text,
+                        boundingBox = OcrBoundingBox(0f, 0f, 1f, 1f),
+                        textOrientation = OcrTextOrientation.Horizontal,
+                    ),
+                )
+            }
+        }
+
         return OcrPageResult(
             chapterId = chapterId,
             pageIndex = pageIndex,
             ocrModel = modelKey,
             imageWidth = image.width,
             imageHeight = image.height,
-            regions = regions,
+            regions = finalRegions,
         )
     }
 

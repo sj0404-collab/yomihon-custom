@@ -172,18 +172,15 @@ internal class CyrillicOcrEngine(
      * строку из «ромбиков», CTC-индексы указывали на мусор, и вместо
      * русского текста пользователь получал крякозябры.
      *
-     * Здесь UTF-8 декодируется строго (CharsetDecoder с REPORT), и только
-     * при реальной ошибке используется windows-1251.
+     * Здесь UTF-8 декодируется строго (CharsetDecoder с REPORT). При
+     * повреждённом словаре инициализация прекращается, а не создаётся
+     * визуально похожий, но неверный текст.
      */
     private fun decodeDictionaryBytes(raw: ByteArray): String {
         val strictUtf8 = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-        runCatching {
-            return strictUtf8.decode(java.nio.ByteBuffer.wrap(raw)).toString()
-        }
-        logcat(LogPriority.INFO) { "Dictionary is not valid UTF-8, decoding as windows-1251" }
-        return String(raw, java.nio.charset.Charset.forName("windows-1251"))
+        return strictUtf8.decode(java.nio.ByteBuffer.wrap(raw)).toString()
     }
 
     /**
@@ -218,7 +215,7 @@ internal class CyrillicOcrEngine(
         return mutex.withLock {
             require(!image.isRecycled) { "Input bitmap is recycled" }
             val boxes = detectTextBoxes(image)
-            if (boxes.isEmpty()) return@withLock ""
+            if (boxes.isEmpty()) return@withLock recognizeWholeImageFallback(image)
 
             val recognized = boxes.mapNotNull { box ->
                 val padded = pad(box.rect, image.width, image.height)
@@ -226,18 +223,18 @@ internal class CyrillicOcrEngine(
                 val crop = Bitmap.createBitmap(image, padded.left, padded.top, padded.width(), padded.height())
                 try {
                     val result = recognizeLineBitmap(crop)
-                    // Отбрасываем только совсем безнадёжное. Раньше нижней
-                    // границей де-факто служил PRIMARY_CONFIDENCE (0.90), и
-                    // верно прочитанные, но «неуверенные» слова молча
-                    // выпадали из текста.
+                    // Отбрасываем только совсем безнадёжное. Для коротких
+                    // реплик («а», «а!», «а-а-а») используется более мягкий
+                    // порог: длина сама по себе не является доказательством
+                    // мусора.
                     result.text
-                        .takeIf { it.isNotBlank() && result.confidence >= MIN_ACCEPT_CONFIDENCE }
+                        .takeIf { it.isNotBlank() && acceptsConfidence(result) }
                         ?.let { box to it }
                 } finally {
                     crop.recycle()
                 }
             }
-            if (recognized.isEmpty()) return@withLock ""
+            if (recognized.isEmpty()) return@withLock recognizeWholeImageFallback(image)
 
             val rows = mutableListOf<MutableList<Pair<TextBox, String>>>()
             recognized.forEach { item ->
@@ -257,6 +254,18 @@ internal class CyrillicOcrEngine(
     }
 
     /**
+     * Последний локальный rescue-проход для больших облачков и декоративных
+     * шрифтов, которые детектор видит, но построчный путь не принимает. Он
+     * возвращает только валидный кириллический результат; это не словарная
+     * генерация и не облачный fallback.
+     */
+    private fun recognizeWholeImageFallback(image: Bitmap): String {
+        val result = recognizeCrop(image)
+        if (result.text.isBlank() || !acceptsConfidence(result)) return ""
+        return cleanRecognition(textPostprocessor.postprocess(result.text))
+    }
+
+    /**
      * Распознавание ОДНОЙ вырезанной строки (кроп по боксу детектора).
      *
      * В отличие от [recognizeText] не запускает детектор повторно: строка уже
@@ -269,7 +278,7 @@ internal class CyrillicOcrEngine(
             require(!image.isRecycled) { "Input bitmap is recycled" }
             if (image.width < 4 || image.height < 4) return@withLock ""
             val result = recognizeLineBitmap(image)
-            if (result.text.isBlank() || result.confidence < MIN_ACCEPT_CONFIDENCE) {
+            if (result.text.isBlank() || !acceptsConfidence(result)) {
                 return@withLock ""
             }
             cleanRecognition(textPostprocessor.postprocess(result.text))
@@ -456,6 +465,12 @@ internal class CyrillicOcrEngine(
      * Пословная — чтобы чистая латынь («SOS», «Wi-Fi») оставалась латынью и
      * TTS не читал её по буквам внутри русских слов.
      */
+    private fun acceptsConfidence(result: Recognition): Boolean {
+        val letters = result.text.count(Char::isLetter)
+        val threshold = if (letters in 1..3) SHORT_TEXT_MIN_CONFIDENCE else MIN_ACCEPT_CONFIDENCE
+        return result.confidence >= threshold
+    }
+
     private fun cleanRecognition(text: String): String {
         // Склеиваем переносы с дефисом ДО того, как postprocessing превратит
         // строковые границы в пробелы. Иначе «НЕУПРАВ-\nЛЯЕМЫЙ» остаётся в
@@ -791,10 +806,10 @@ internal class CyrillicOcrEngine(
     private fun allowed(value: String): Boolean {
         if (value.length != 1) return false
         val char = value[0]
+        // Русский локальный режим не должен декодировать латинские омоглифы
+        // (`i`, `l`, `m`) и цифры как якобы русские буквы. При сомнении лучше
+        // получить пустой/слабый результат, чем «разiiiнение» или «мама-нама».
         return char in '\u0400'..'\u052F' ||
-            char in 'A'..'Z' ||
-            char in 'a'..'z' ||
-            char.isDigit() ||
             char.isWhitespace() ||
             char in ALLOWED_PUNCTUATION
     }
@@ -859,6 +874,7 @@ internal class CyrillicOcrEngine(
         // верно прочитанные, но неуверенные слова выпадали из текста.
         // Лучше показать слово с опечаткой, чем молча его потерять.
         private const val MIN_ACCEPT_CONFIDENCE = 0.25f
+        private const val SHORT_TEXT_MIN_CONFIDENCE = 0.12f
         private const val ALLOWED_PUNCTUATION = " .,!?;:-()[]{}\"'«»„“”%№+/=…—–"
     }
 }

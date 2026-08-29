@@ -100,4 +100,25 @@ class OcrTextCleanerTest {
     fun `unknown cyrillic run is never split or rewritten`() {
         OcrTextCleaner.restoreKnownCaptionWords("НЕИЗВЕСТНОЕСЛОВО") shouldBe "НЕИЗВЕСТНОЕСЛОВО"
     }
+
+    @Test
+    fun `short valid russian utterances are accepted`() {
+        OcrTextCleaner.isAcceptableCyrillicOcrText("а") shouldBe true
+        OcrTextCleaner.isAcceptableCyrillicOcrText("а-а-а") shouldBe true
+        OcrTextCleaner.isAcceptableCyrillicOcrText("а!") shouldBe true
+        OcrTextCleaner.isAcceptableCyrillicOcrText("а...") shouldBe true
+    }
+
+    @Test
+    fun `mixed latin lookalike garbage is never accepted as russian`() {
+        OcrTextCleaner.isAcceptableCyrillicOcrText("разiiiнение") shouldBe false
+        OcrTextCleaner.isAcceptableCyrillicOcrText("мама-naма") shouldBe false
+        OcrTextCleaner.isAcceptableCyrillicOcrText("сахар-samaар") shouldBe false
+    }
+
+    @Test
+    fun `uncertain cyrillic text is preserved rather than rewritten`() {
+        OcrTextCleaner.normalizeLocalCyrillicCaption("сахар-самаар") shouldBe "сахар-самаар"
+        OcrTextCleaner.normalizeLocalCyrillicCaption("цвет-свек") shouldBe "цвет-свек"
+    }
 }

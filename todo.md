@@ -26,4 +26,26 @@
 
 ## Release documentation
 
-- [ ] Create a versioned Markdown release report for every future GitHub Actions APK candidate, documenting source commit, build link, improvements, known limitations, test evidence, and unresolved device-validation examples.
+- [x] Create a versioned Markdown release report for every future GitHub Actions APK candidate, documenting source commit, build link, improvements, known limitations, test evidence, and unresolved device-validation examples.
+- [x] Validate candidate `9a8e4f8` remotely in GitHub Actions run `33007959697`: focused Cyrillic OCR tests, complete unit tests, signed arm64 APK assembly, and quality-report artifact all succeeded.
+- [x] Upload candidate `9a8e4f8` from GitHub Actions run `33007959697` to GoFile for device testing: `https://gofile.io/d/s7HstrXp`.
+- [ ] Install and device-test candidate `9a8e4f8` against the reported false line-wrap hyphens and missing-result captions before treating the fix as accepted.
+
+## Standalone local OCR overlay APK
+
+- [ ] Inspect the requested Overlay Translator repository and confirm a compatible Android source baseline.
+- [ ] Create a separate Android overlay APK instead of modifying the reader UI: the user explicitly launches it over another app.
+- [ ] Request Android screen-capture and draw-over-other-apps permissions only after an explicit user action, and explain their purpose in-app.
+- [ ] Let the user place and resize one capture frame over the actual page content; crop to that frame before local OCR so status bars, overlay controls, and content outside the frame are excluded.
+- [ ] Run local Russian/Cyrillic OCR on the selected screen crop, render editable text in the overlay, and add optional Russian text-to-speech controls.
+- [ ] Add a Markdown quality report for every overlay APK candidate and build the APK only through GitHub Actions.
+
+## New quality gate: Russian text fidelity
+
+- [ ] Enforce UTF-8 end-to-end and add a regression that rejects mojibake and non-Cyrillic lookalike output when the source text is Russian.
+- [ ] Prevent hallucinated pseudo-words such as `разiiiнение`, `сахар-самаар`, and `мама-нама`; retain the raw OCR or return a clearly low-confidence/no-result state instead of inventing a correction.
+- [ ] Preserve whole detected sentences and large speech bubbles instead of returning a partial word result or `Нет результатов` when usable text exists.
+- [ ] Preserve short valid utterances such as `а`, `а-а-а`, `а!`, and `а...`; do not reject them solely because they are short.
+- [ ] Keep hyphens only for real orthographic hyphens or visual line-wraps that can be safely joined; never introduce a hyphen between recognized Cyrillic words.
+- [ ] Decide explicitly whether preprocessing plugins are safe; any plugin must be local, deterministic, UTF-8 aware, and disabled if it lowers OCR confidence.
+- [ ] Add a release report with positive and negative device examples before uploading the next APK candidate.
