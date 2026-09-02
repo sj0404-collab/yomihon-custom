@@ -204,6 +204,24 @@ jobs:
           merge-multiple: true
           path: downloaded
 
+      # merge-multiple раскрывает артефакты в один каталог, поэтому отчёт лежит
+      # прямо в downloaded/, а не в downloaded/release-report/. Пути ищем
+      # поиском и проверяем существование: softprops/action-gh-release на
+      # несуществующий файл лишь пишет «does not match any files» и релиз
+      # уходит без отчёта (так случилось в run 33641491513).
+      - name: Resolve release payload
+        id: payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find downloaded -type f -name '*.apk' | head -1)
+          report=$(find downloaded -type f -name 'OCR-QUALITY-REPORT-*.md' | head -1)
+          [ -n "$apk" ] || { echo "::error::APK не найден среди артефактов"; exit 1; }
+          [ -n "$report" ] || { echo "::error::отчёт качества OCR не найден среди артефактов"; exit 1; }
+          echo "Найдено: $apk и $report"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          echo "report=$report" >> "$GITHUB_OUTPUT"
+
       - name: Delete all artifacts
         uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
         with:
@@ -229,10 +247,10 @@ jobs:
             | Размер | ${{ needs.build.outputs.size }} bytes |
 
             Прошлые релизные заметки: [yomihon/yomihon releases](https://github.com/yomihon/yomihon/releases).
-            Отчёт качества OCR лежит рядом с APK (`OCR-QUALITY-REPORT-*.md`).
+            Отчёт качества OCR прикреплён к релизу вторым файлом (`OCR-QUALITY-REPORT-*.md`).
           files: |
-            downloaded/yomihon-${{ needs.get_tag.outputs.tag }}.apk
-            downloaded/release-report/OCR-QUALITY-REPORT-${{ github.sha }}.md
+            ${{ steps.payload.outputs.apk }}
+            ${{ steps.payload.outputs.report }}
           draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
