@@ -72,6 +72,17 @@ import tachiyomi.source.local.LocalSource
 data class BrowseSourceScreen(
     val sourceId: Long,
     private val listingQuery: String?,
+    /**
+     * Ключ папки сторонней библиотеки.
+     *
+     * `LocalSource` фильтрует корни через `StorageManager.getExternalLibraryRoots()`,
+     * который уже учитывает активную папку, но сам экран о ней ничего не знал:
+     * ключ Voyager и `rememberScreenModel` оставались прежними, поэтому
+     * `BrowseSourceScreenModel` не пересоздавался и список не перезапрашивался.
+     * Чипы папок выглядели нерабочими. Поле входит в `equals`/`hashCode`
+     * data-класса, поэтому смена папки даёт новый ключ и новый скрин-модель.
+     */
+    private val folderKey: String = "",
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null

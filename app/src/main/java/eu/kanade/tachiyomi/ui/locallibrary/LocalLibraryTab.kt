@@ -103,6 +103,9 @@ data object LocalLibraryTab : Tab {
         var roots by remember { mutableStateOf(storagePreferences.externalLibraryRoots.get().toList()) }
         var activeRoot by remember { mutableStateOf(storagePreferences.externalLibraryActiveRoot.get()) }
         var manageMode by remember { mutableStateOf(false) }
+        // Сортировка списка: false — по алфавиту (OrderBy.Popular в LocalSource
+        // сортирует по названию A→Я), true — сначала новые (OrderBy.Latest).
+        var sortByNewest by remember { mutableStateOf(false) }
 
         val addFolderLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocumentTree(),
@@ -252,12 +255,40 @@ data object LocalLibraryTab : Tab {
                             }
                         }
                     }
+                    LazyRow(
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                    ) {
+                        item(key = "__sort_az__") {
+                            FilterChip(
+                                selected = !sortByNewest,
+                                onClick = { sortByNewest = false },
+                                label = { Text("А–Я") },
+                                modifier = Modifier.padding(end = 6.dp),
+                            )
+                        }
+                        item(key = "__sort_new__") {
+                            FilterChip(
+                                selected = sortByNewest,
+                                onClick = { sortByNewest = true },
+                                label = { Text("Сначала новые") },
+                                modifier = Modifier.padding(end = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
+            // folderKey и listingQuery входят в data-класс экрана: при смене
+            // папки или сортировки Voyager пересоздаёт ScreenModel и список
+            // перезапрашивается у LocalSource.
             Navigator(
                 screen = BrowseSourceScreen(
                     sourceId = LocalSource.ID,
-                    listingQuery = GetRemoteManga.QUERY_POPULAR,
+                    listingQuery = if (sortByNewest) {
+                        GetRemoteManga.QUERY_LATEST
+                    } else {
+                        GetRemoteManga.QUERY_POPULAR
+                    },
+                    folderKey = if (sortByNewest) "latest|$activeRoot" else "az|$activeRoot",
                 ),
             )
         }
