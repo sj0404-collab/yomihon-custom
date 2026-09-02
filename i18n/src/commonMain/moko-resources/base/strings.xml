@@ -1395,4 +1395,5 @@
     <string name="pref_ai_http_server_summary">Applies after restarting the app</string>
     <string name="pref_voice_system_engine">Android TTS engine</string>
     <string name="pref_voice_system_engine_info">Engines installed on the device are listed here; the voice inside the engine is chosen separately</string>
+    <string name="pref_ocr_content_type_reading_mode">Reading mode follows the preset: %1$s</string>
 </resources>

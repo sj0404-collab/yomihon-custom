@@ -9,6 +9,8 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import mihon.data.ocr.OcrContentType
 import mihon.data.ocr.OcrPluginAvailability
 import mihon.data.ocr.OcrPlugins
@@ -77,6 +79,7 @@ object SettingsOcrScreen : SearchableSettings {
         contentType: String,
     ): Preference.PreferenceGroup {
         val current = OcrContentType.fromId(contentType)
+        val readerPrefs = remember { Injekt.get<ReaderPreferences>() }
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_ocr_content_type_group),
             preferenceItems = listOf(
@@ -85,9 +88,21 @@ object SettingsOcrScreen : SearchableSettings {
                     entries = OcrContentType.entries.associate { it.id to it.title },
                     title = stringResource(MR.strings.pref_ocr_content_type),
                     subtitleProvider = { _, _ -> current.hint },
+                    onValueChanged = { value ->
+                        // Пресет типа контента задаёт и режим чтения: порядок
+                        // распознавания и направление листания обязаны совпадать.
+                        // BALANCED (KEEP) выбор пользователя не трогает.
+                        val mode = ReadingMode.fromOcrHint(OcrContentType.fromId(value).viewer)
+                        if (mode != null) readerPrefs.defaultReadingMode.set(mode.flagValue)
+                        true
+                    },
                 ),
                 Preference.PreferenceItem.InfoPreference(
                     title = stringResource(MR.strings.pref_ocr_content_type_info),
+                ),
+                Preference.PreferenceItem.InfoPreference(
+                    title = stringResource(MR.strings.pref_ocr_content_type_reading_mode)
+                        .format(current.viewer.title),
                 ),
             ),
         )

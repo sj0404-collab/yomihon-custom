@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.pager.L2RPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.VerticalPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
+import mihon.data.ocr.OcrViewerHint
 import tachiyomi.i18n.MR
 
 enum class ReadingMode(
@@ -60,6 +61,19 @@ enum class ReadingMode(
         const val MASK = 0x00000007
 
         fun fromPreference(preference: Int?): ReadingMode = entries.find { it.flagValue == preference } ?: DEFAULT
+
+        /**
+         * Режим чтения, который предписывает пресет типа контента OCR.
+         *
+         * `null` означает «пресет не трогает вьюер» ([OcrViewerHint.KEEP],
+         * то есть BALANCED): выбор пользователя остаётся за ним.
+         */
+        fun fromOcrHint(hint: OcrViewerHint): ReadingMode? = when (hint) {
+            OcrViewerHint.KEEP -> null
+            OcrViewerHint.PAGER_RTL -> RIGHT_TO_LEFT
+            OcrViewerHint.PAGER_LTR -> LEFT_TO_RIGHT
+            OcrViewerHint.WEBTOON -> WEBTOON
+        }
 
         fun isPagerType(preference: Int): Boolean {
             val mode = fromPreference(preference)
