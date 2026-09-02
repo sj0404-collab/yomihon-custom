@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.data.ai
 
+import android.app.Application
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
@@ -39,6 +41,14 @@ object AiAssistant {
     const val PROVIDER_OPENROUTER = "openrouter"
 
     /**
+     * Базовые URL встроенных провайдеров. Вынесены в константы, потому что их
+     * читает реестр [AiProviders]: список в настройках обязан показывать те же
+     * адреса, куда реально уходит запрос.
+     */
+    const val ZEN_BASE_URL = "https://opencode.ai/zen/v1"
+    const val OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+    /**
      * Модели Zen, проверенные без ключа. Порядок = приоритет ротации:
      * первыми идут БЫСТРЫЕ без тяжёлого reasoning (laguna отвечает «жмн»
      * за долю секунды), reasoning-модели — в хвосте. При FreeUsageLimitError
@@ -65,6 +75,53 @@ object AiAssistant {
     )
 
     private fun prefs(): OcrPreferences = Injekt.get()
+
+    /**
+     * Контекст приложения для реестров, которые читают файлы пользователя
+     * (`AiProviders`, `AiPlugins`). Зарегистрирован в Injekt через
+     * `AppModule.addSingleton(app)`.
+     */
+    private fun appContext(): Context = Injekt.get<Application>()
+
+    /**
+     * Запрос к провайдеру пользователя (любой OpenAI-совместимый endpoint:
+     * Ollama, LM Studio, llama.cpp server, корпоративный прокси).
+     *
+     * Временные сбои ретраятся на том же адресе, как в ветке OpenRouter.
+     * Автосмены на Zen здесь НАМЕРЕНО нет: пользователь явно выбрал свой
+     * endpoint, и тихая отправка его промпта стороннему сервису была бы
+     * неверной. Ошибка возвращается как `null` — вызывающий код деградирует
+     * мягко, как и при недоступности встроенных провайдеров.
+     */
+    private suspend fun customProviderChat(
+        spec: AiProviders.Spec,
+        userPrompt: String,
+        systemPrompt: String?,
+        maxTokens: Int,
+    ): ChatReply? {
+        val url = AiProviders.chatCompletionsUrl(spec.baseUrl)
+        if (url == null) {
+            lastFailureMessage = "${spec.id}: некорректный baseUrl «${spec.baseUrl}»"
+            logcat(LogPriority.WARN) { "Custom provider ${spec.id} has an invalid baseUrl" }
+            return null
+        }
+        var reply: ChatReply? = null
+        for (delayMs in longArrayOf(0, 1_200, 2_500)) {
+            if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+            when (val outcome = chatRawOutcome(url, spec.model, spec.apiKey, userPrompt, systemPrompt, maxTokens)) {
+                is Outcome.Ok -> {
+                    reply = outcome.reply
+                    break
+                }
+                Outcome.Transient -> continue
+                else -> break
+            }
+        }
+        if (reply == null) {
+            logcat(LogPriority.WARN) { "Custom provider ${spec.id} (${spec.model}) did not answer" }
+        }
+        return reply
+    }
 
     private val modelCooldownUntil = ConcurrentHashMap<String, Long>()
 
@@ -139,7 +196,7 @@ object AiAssistant {
     /** Живой список бесплатных моделей OpenRouter (":free"). */
     suspend fun fetchOpenRouterFreeModels(): List<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val conn = openConnection("https://openrouter.ai/api/v1/models")
+            val conn = openConnection("$OPENROUTER_BASE_URL/models")
             conn.connectTimeout = 10_000
             conn.readTimeout = 20_000
             val body = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -181,6 +238,15 @@ object AiAssistant {
         withContext(Dispatchers.IO) {
             val p = prefs()
             val provider = p.aiProvider().get()
+
+            // Провайдер пользователя из реестра AiProviders (свой base URL,
+            // модель и ключ). Проверяется первым: id у него свой, поэтому ветки
+            // Zen/OpenRouter ниже не затрагиваются.
+            val custom = AiProviders.userProvider(appContext(), provider)
+            if (custom != null) {
+                return@withContext customProviderChat(custom, userPrompt, systemPrompt, maxTokens)
+            }
+
             val key = p.openrouterApiKey().get()
             if (provider == PROVIDER_OPENROUTER && key.isNotBlank()) {
                 val model = p.openrouterFreeModel().get().ifBlank { OPENROUTER_FREE_FALLBACK.first() }
@@ -194,7 +260,7 @@ object AiAssistant {
                 for (delayMs in longArrayOf(0, 1_200, 2_500)) {
                     if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
                     val outcome = chatRawOutcome(
-                        "https://openrouter.ai/api/v1/chat/completions",
+                        "$OPENROUTER_BASE_URL/chat/completions",
                         model, key, userPrompt, systemPrompt, maxTokens,
                     )
                     lastOutcome = outcome
@@ -257,7 +323,7 @@ object AiAssistant {
             var attempt = 0
             while (true) {
                 when (val res = chatRawOutcome(
-                    "https://opencode.ai/zen/v1/chat/completions",
+                    "$ZEN_BASE_URL/chat/completions",
                     m, "", userPrompt, systemPrompt, maxTokens,
                 )) {
                     is Outcome.Ok -> {
