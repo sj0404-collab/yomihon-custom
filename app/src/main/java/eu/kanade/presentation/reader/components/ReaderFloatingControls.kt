@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.Card
@@ -48,6 +49,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import eu.kanade.tachiyomi.data.ui.UiActionRegistry
+import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import mihon.data.ui.UiPlacement
 import mihon.domain.ocr.service.ScanRegion
 
 /**
@@ -84,6 +93,17 @@ fun ReaderFloatingControls(
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+
+    // Действия, которые пользователь добавил плагинами (workspace/ui). Список
+    // читается не в композиции, а в LaunchedEffect на IO: это файлы на общем
+    // хранилище. Ошибки не роняют меню — реестр возвращает пустой список.
+    val context = LocalContext.current
+    var userActions by remember { mutableStateOf<List<mihon.data.ui.UiActionSpec>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        userActions = withContext(Dispatchers.IO) {
+            UiActionRegistry.list(context).filter { it.placement == UiPlacement.FLOATING_MENU }
+        }
+    }
 
     // Короткий SAO-подобный "бип" на открытие/закрытие меню и действия
     val tone = remember { runCatching { ToneGenerator(AudioManager.STREAM_SYSTEM, 55) }.getOrNull() }
@@ -280,6 +300,46 @@ fun ReaderFloatingControls(
                                         onOpenOcrSettings()
                                     }) {
                                         Icon(Icons.Outlined.RecordVoiceOver, contentDescription = "Озвучка")
+                                    }
+                                }
+
+                                // Пользовательские действия из реестра плагинов.
+                                // Эффект ограничен переключением настроек, поэтому
+                                // пункт не может уронить читалку.
+                                if (userActions.isNotEmpty()) {
+                                    Text(
+                                        "Свои действия",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                userActions.forEach { action ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.End,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            action.title,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        SmallFloatingActionButton(onClick = {
+                                            beepAction()
+                                            val result = UiActionRegistry.apply(context, action)
+                                            context.toast(result)
+                                            menuOpen = false
+                                            // Пресет и область влияют на OCR: сразу
+                                            // запускаем распознавание, как это
+                                            // делают встроенные кнопки областей.
+                                            if (action.effect == mihon.data.ui.UiEffect.OCR_PRESET ||
+                                                action.effect == mihon.data.ui.UiEffect.SCAN_REGION
+                                            ) {
+                                                onTriggerOcr()
+                                            }
+                                        }) {
+                                            Icon(Icons.Outlined.Tune, contentDescription = action.title)
+                                        }
                                     }
                                 }
                             }
