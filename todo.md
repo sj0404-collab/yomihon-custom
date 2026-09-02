@@ -75,6 +75,20 @@
 - [x] Fail the build unless exactly one release APK exists, its `versionName` matches the tag, `versionCode` is not below the 10907 floor and arm64-v8a native code is present.
 - [x] Publish SHA-256 and size in the release body and in the rendered quality report; the release is no longer a draft.
 
+## Модульные плагины OCR/голосов и пресеты областей
+
+- [x] Описать OCR-движки декларативно (`OcrPlugins`): id, модель, требования (сеть, пак моделей, LiteRT, ключ, адрес сервера), порядок во fallback-цепочке, поддержка областей. Реестр не создаёт движки и не трогает мьютексы `OcrEngineLocks`, поэтому кэш моделей и блокировки остались прежними.
+- [x] Перенести семантику пресетов `pref_fallback_preset` (auto/online/offline/single) из зашитых списков `OcrRepositoryImpl` в данные реестра и покрыть их тестами.
+- [x] Зафиксировать миграционные значения enum (`LEGACY`, `FAST`, `TESSERACT`) как алиасы локального кириллического плагина.
+- [x] Описать голосовые движки декларативно (`VoicePlugins`): системный TTS, Google Web, ElevenLabs, ONNX (sherpa-onnx/Piper) с требованиями и признаком доступности; голоса ONNX берутся из реального `OnnxTts.CATALOG` и помечаются по факту установки модели.
+- [x] Вынести числовые параметры детектора и признания результата из констант `CyrillicOcrEngine` в `OcrTuning` и добавить пресеты типа контента: манга, манхва/вебтун, комикс, сбалансированный.
+- [x] Гарантировать, что пресет `BALANCED` побайтово повторяет прежние константы (отдельный тест), поэтому без явного выбора пресета поведение приложения не меняется.
+- [x] Добавить точные переопределения пресета (`OcrTuningOverrides`) с клампингом диапазонов: сохранённая старой версией настройка не может сломать распознавание.
+- [x] Подключить профиль к движку через провайдер `() -> OcrTuning`, чтобы смена пресета применялась без пересоздания движка и без повторной загрузки моделей.
+- [ ] Экран настроек с деревом разделов (плагины OCR, плагины голосов, пресеты областей и точная подстройка) — требует строк в `i18n`, поэтому идёт отдельным этапом.
+- [ ] Пресеты областей в UI читалки: быстрый выбор манга/манхва/комикс и отображение зон страницы.
+- [ ] Подключение AI-чата к контексту страницы и инструменты агента для OCR/пресетов.
+
 ## Unified Yomihon APK: OCR and floating voice controls
 
 - [x] Port only the working local OCR changes from the overlay branch into `yomihon-custom` without copying its standalone APK shell or cloud paths.

@@ -50,6 +50,46 @@ class OcrRepositoryImpl(
     private val cacheStore by lazy { OcrCacheStore(context) }
     private val ocrPreferences by lazy { mihon.domain.ocr.service.OcrPreferences(preferenceStore) }
 
+    /**
+     * Профиль распознавания: пресет типа контента + область + ручные
+     * переопределения. Пересобирается на каждый вызов, поэтому смена пресета в
+     * настройках применяется сразу и не требует пересоздания движка.
+     */
+    private fun regionProfile(): OcrRegionProfile = OcrRegionProfile(
+        contentType = OcrContentType.fromId(ocrPreferences.contentType().get()),
+        scanRegion = presetScanRegion(),
+        overrides = tuningOverrides(),
+    )
+
+    private fun currentTuning(): OcrTuning = regionProfile().tuning()
+
+    /** Область из пресета; `pref_scan_region` остаётся быстрым переопределением. */
+    private fun presetScanRegion(): mihon.domain.ocr.service.ScanRegion {
+        val fromPreset = when (ocrPreferences.presetScanRegion().get()) {
+            "top" -> mihon.domain.ocr.service.ScanRegion.TOP_HALF
+            "bottom" -> mihon.domain.ocr.service.ScanRegion.BOTTOM_HALF
+            "full" -> mihon.domain.ocr.service.ScanRegion.FULL_PAGE
+            else -> null
+        }
+        return fromPreset ?: ocrPreferences.scanRegion().get()
+    }
+
+    /**
+     * Ручные переопределения пресета. Незаполненное или нечисловое поле
+     * означает «как в пресете»: настройка, сохранённая старой версией, не
+     * должна ломать распознавание.
+     */
+    private fun tuningOverrides(): OcrTuningOverrides = OcrTuningOverrides(
+        detectorThreshold = ocrPreferences.detectorThresholdOverride().get().toFloatOrNull(),
+        minComponentArea = ocrPreferences.minComponentAreaOverride().get().toIntOrNull(),
+        maxTextBoxes = ocrPreferences.maxTextBoxesOverride().get().toIntOrNull(),
+        wordGapFactor = ocrPreferences.wordGapFactorOverride().get().toFloatOrNull(),
+        minAcceptConfidence = ocrPreferences.minAcceptConfidenceOverride().get().toFloatOrNull(),
+        shortTextMinConfidence = ocrPreferences.shortTextConfidenceOverride().get().toFloatOrNull(),
+        minCoverage = ocrPreferences.minCoverageOverride().get().toFloatOrNull(),
+        rescueMaxLines = ocrPreferences.rescueMaxLinesOverride().get().toIntOrNull(),
+    )
+
     private var cyrillicEngine: CyrillicOcrEngine? = null
     private var legacyEngine: LegacyOcrEngine? = null
     private var fastEngine: FastOcrEngine? = null
@@ -177,6 +217,7 @@ class OcrRepositoryImpl(
                     context,
                     requireEnvironment(),
                     textPostprocessor,
+                    ::currentTuning,
                 ).also { cyrillicEngine = it }
             }
             EngineType.FAST -> {
