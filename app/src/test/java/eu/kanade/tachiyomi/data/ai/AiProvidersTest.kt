@@ -80,6 +80,14 @@ class AiProvidersTest {
     }
 
     @Test
+    fun `ui action tool names are reserved from developer plugins`() {
+        // Иначе самодельный плагин с именем ui_action_create перехватил бы
+        // вызов, и кнопка в читалке не появилась.
+        listOf("ui_action_create", "ui_action_edit", "ui_action_delete", "ui_action_list")
+            .forEach { name -> (name in AiPlugins.RESERVED_TOOL_NAMES) shouldBe true }
+    }
+
+    @Test
     fun `provider tool names are reserved from developer plugins`() {
         // Иначе самодельный плагин с именем provider_create перехватил бы вызов.
         listOf("provider_create", "provider_edit", "provider_delete", "provider_list")

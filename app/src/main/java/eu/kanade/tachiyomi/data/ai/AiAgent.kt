@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.ui.UiActionRegistry
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
@@ -110,6 +111,15 @@ object AiAgent {
             "@tool provider_edit {\"id\":\"ollama\",\"model\":\"новая-модель\"} — изменить провайдер (любое поле)\n" +
             "@tool provider_delete {\"id\":\"ollama\"} — отключить провайдер\n" +
             "@tool provider_list {} — список провайдеров: встроенные и свои\n" +
+            "КНОПКИ В UI ЧИТАЛКИ (пользовательские действия, без исполняемого кода):\n" +
+            "@tool ui_action_create {\"id\":\"my_manhwa\",\"title\":\"Манхва одним тапом\"," +
+            "\"placement\":\"floating_menu|reader_top_bar|ocr_card\"," +
+            "\"effect\":\"ocr_preset|scan_region|reading_mode|voice_engine|ai_provider\"," +
+            "\"value\":\"manhwa\",\"order\":100} — добавить свою кнопку в меню читалки; " +
+            "значение выбирается из списка эффекта (для ocr_preset — manga|manhwa|comic|balanced)\n" +
+            "@tool ui_action_edit {\"id\":\"my_manhwa\",\"title\":\"новое название\"} — изменить кнопку\n" +
+            "@tool ui_action_delete {\"id\":\"my_manhwa\"} — убрать кнопку\n" +
+            "@tool ui_action_list {} — все кнопки: встроенные и пользовательские\n" +
             "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
             "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
             "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
@@ -312,6 +322,7 @@ object AiAgent {
             "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
             "runner_chat", "runner_start", "github_api",
             "provider_create", "provider_edit", "provider_delete", "provider_list",
+            "ui_action_create", "ui_action_edit", "ui_action_delete", "ui_action_list",
         ) + AiReaderTools.TOOL_NAMES + AiPlugins.list(context).map { it.name }
 
     /**
@@ -698,6 +709,89 @@ object AiAgent {
                         appendLine()
                     }
                 }.trim(),
+            )
+        }
+
+        "ui_action_create", "ui_action_edit" -> {
+            val id = call.args.optString("id")
+            if (id.isBlank()) {
+                ToolResult(call.name, "ОШИБКА: нужен id кнопки", status = "error")
+            } else {
+                val existing = UiActionRegistry.list(context).firstOrNull { it.id == id }
+                if (call.name == "ui_action_edit" && existing == null) {
+                    ToolResult(call.name, "Кнопка «$id» не найдена — сначала ui_action_create", status = "error")
+                } else {
+                    val placement = mihon.data.ui.UiPlacement.fromId(
+                        call.args.optString("placement").ifBlank { existing?.placement?.id.orEmpty() },
+                    )
+                    val effect = mihon.data.ui.UiEffect.fromId(
+                        call.args.optString("effect").ifBlank { existing?.effect?.id.orEmpty() },
+                    )
+                    when {
+                        placement == null -> ToolResult(
+                            call.name,
+                            "ОШИБКА: неизвестное placement. Можно: " +
+                                mihon.data.ui.UiPlacement.entries.joinToString { it.id },
+                            status = "error",
+                        )
+                        effect == null -> ToolResult(
+                            call.name,
+                            "ОШИБКА: неизвестный effect. Можно: " +
+                                mihon.data.ui.UiEffect.entries.joinToString { it.id },
+                            status = "error",
+                        )
+                        else -> {
+                            val spec = mihon.data.ui.UiActionSpec(
+                                id = id,
+                                title = call.args.optString("title").ifBlank { existing?.title ?: id },
+                                placement = placement,
+                                effect = effect,
+                                value = call.args.optString("value").ifBlank { existing?.value.orEmpty() },
+                                order = if (call.args.has("order")) call.args.optInt("order") else existing?.order ?: 100,
+                            )
+                            val error = mihon.data.ui.UiActions.validate(spec)
+                            when {
+                                error != null -> ToolResult(call.name, "ОШИБКА: $error", status = "error")
+                                UiActionRegistry.save(context, spec) -> ToolResult(
+                                    call.name,
+                                    "Кнопка «${spec.title}» добавлена (${placement.title}, " +
+                                        "эффект ${effect.title} = ${spec.value}). Откройте меню читалки.",
+                                )
+                                else -> ToolResult(call.name, "ОШИБКА: не удалось записать кнопку", status = "error")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "ui_action_delete" -> {
+            val id = call.args.optString("id")
+            when {
+                id.isBlank() -> ToolResult(call.name, "ОШИБКА: нужен id кнопки", status = "error")
+                UiActionRegistry.delete(context, id) -> ToolResult(call.name, "Кнопка «$id» убрана")
+                else -> ToolResult(
+                    call.name,
+                    "ОШИБКА: кнопка «$id» не найдена (встроенные не удаляются)",
+                    status = "error",
+                )
+            }
+        }
+
+        "ui_action_list" -> {
+            val actions = UiActionRegistry.all(context)
+            ToolResult(
+                "ui_action_list",
+                buildString {
+                    appendLine("Кнопок: ${actions.size}")
+                    actions.forEach { a ->
+                        append("• ${a.id} — ${a.title}: ${a.placement.id}/${a.effect.id}=${a.value}")
+                        if (a.builtIn) append(" [встроенная]")
+                        appendLine()
+                    }
+                    appendLine("Эффекты: " + mihon.data.ui.UiEffect.entries.joinToString { "${it.id} (${it.title})" })
+                    append("Размещения: " + mihon.data.ui.UiPlacement.entries.joinToString { it.id })
+                },
             )
         }
 

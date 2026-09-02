@@ -90,6 +90,9 @@ object AiPlugins {
         // Инструменты реестра провайдеров (AiProviders): плагин разработчика не
         // может занять их имена и перехватить подключение стороннего AI.
         "provider_create", "provider_edit", "provider_delete", "provider_list",
+        // Инструменты реестра действий пользовательского UI (UiActions):
+        // плагин разработчика не может занять их имена.
+        "ui_action_create", "ui_action_edit", "ui_action_delete", "ui_action_list",
     ) + AiReaderTools.TOOL_NAMES
 
     private fun toJson(p: Plugin) = JSONObject()
