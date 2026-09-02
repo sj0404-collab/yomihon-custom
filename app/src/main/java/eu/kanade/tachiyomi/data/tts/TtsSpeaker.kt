@@ -35,7 +35,7 @@ import kotlin.coroutines.resume
  *    Services, RHVoice и любые установленные движки; включая офлайн-голоса).
  * 2. GOOGLE_WEB — озвучка с сайта Google Translate: БЕЗ API-ключа, берётся
  *    напрямую с их публичного endpoint. Работает всегда при интернете.
- * 3. ELEVENLABS — премиальные нейgolосовые через API-ключ (elevenlabs.io).
+ * 3. ELEVENLABS — премиальные нейроголосые через API-ключ (elevenlabs.io).
  *
  * Выбор движка/голоса хранится в OcrPreferences и применяется везде:
  * читалка, карточка перевода, диалог настроек.

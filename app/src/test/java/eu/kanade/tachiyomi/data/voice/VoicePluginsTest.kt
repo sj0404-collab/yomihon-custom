@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.voice
 
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -27,6 +28,9 @@ class VoicePluginsTest {
         VoiceBackend.fromId("system_tts") shouldBe VoiceBackend.SYSTEM_TTS
         VoiceBackend.fromId("google_web") shouldBe VoiceBackend.GOOGLE_WEB
         VoiceBackend.fromId("eleven_api") shouldBe VoiceBackend.ELEVEN_API
+        // Значение, которое реально пишет UI озвучки (TtsSpeaker.ENGINE_ONNX).
+        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.ONNX
+        // Наследие сборок, где ONNX был объявлен как "onnx".
         VoiceBackend.fromId("onnx") shouldBe VoiceBackend.ONNX
         // Пустое или неизвестное значение читается как системный TTS.
         VoiceBackend.fromId("") shouldBe VoiceBackend.SYSTEM_TTS
@@ -77,7 +81,7 @@ class VoicePluginsTest {
     @Test
     fun `offline flags are declared for the engines that work without network`() {
         VoicePlugins.ALL.filter { it.offline }.map { it.id } shouldContainExactly
-            listOf("system_tts", "onnx")
+            listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.ONNX.id)
         VoicePlugins.ALL.filterNot { it.offline }.map { it.id } shouldContainExactly
             listOf("google_web", "eleven_api")
     }
@@ -85,7 +89,7 @@ class VoicePluginsTest {
     @Test
     fun `gender aware engines are marked so auto-voicing can use them`() {
         VoicePlugins.ALL.filter { it.supportsGender }.map { it.id } shouldContainExactly
-            listOf("system_tts", "onnx")
+            listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.ONNX.id)
     }
 
     @Test
@@ -94,5 +98,24 @@ class VoicePluginsTest {
         // а у ONNX его выставляет реальная проверка модели на диске.
         VoicePlugins.SYSTEM_TTS.backend shouldBe VoiceBackend.SYSTEM_TTS
         VoicePlugins.ONNX.requirements.contains(VoiceRequirement.MODEL_DOWNLOAD) shouldBe true
+    }
+
+    @Test
+    fun `backend ids are exactly the values TtsSpeaker routes on`() {
+        // Единственный источник истины для pref_voice_engine: если id реестра
+        // разойдётся с константами маршрутизатора, озвучка молча уйдёт в
+        // системный TTS.
+        VoiceBackend.SYSTEM_TTS.id shouldBe TtsSpeaker.ENGINE_SYSTEM
+        VoiceBackend.GOOGLE_WEB.id shouldBe TtsSpeaker.ENGINE_GOOGLE_WEB
+        VoiceBackend.ELEVEN_API.id shouldBe TtsSpeaker.ENGINE_ELEVENLABS
+        VoiceBackend.ONNX.id shouldBe TtsSpeaker.ENGINE_ONNX
+    }
+
+    @Test
+    fun `unknown and legacy engine values fall back to the system engine`() {
+        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.ONNX
+        VoiceBackend.fromId("  onnx_tts  ") shouldBe VoiceBackend.ONNX
+        VoiceBackend.fromId("ONNX_TTS") shouldBe VoiceBackend.SYSTEM_TTS
+        VoiceBackend.fromId("plugin:my-voice") shouldBe VoiceBackend.SYSTEM_TTS
     }
 }
