@@ -139,7 +139,7 @@ object AiReaderTools {
         val viewerHint = contentType.viewer
         val readingMode = ReadingMode.fromOcrHint(viewerHint)
         if (readingMode != null) {
-            Injekt.get<ReaderPreferences>().defaultReadingMode().set(readingMode.flagValue)
+            Injekt.get<ReaderPreferences>().defaultReadingMode.set(readingMode.flagValue)
         }
 
         val profile = OcrRegionRules.profileOf(prefs)

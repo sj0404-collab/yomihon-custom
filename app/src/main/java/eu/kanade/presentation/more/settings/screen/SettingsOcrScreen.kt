@@ -93,7 +93,7 @@ object SettingsOcrScreen : SearchableSettings {
                         // распознавания и направление листания обязаны совпадать.
                         // BALANCED (KEEP) выбор пользователя не трогает.
                         val mode = ReadingMode.fromOcrHint(OcrContentType.fromId(value).viewer)
-                        if (mode != null) readerPrefs.defaultReadingMode().set(mode.flagValue)
+                        if (mode != null) readerPrefs.defaultReadingMode.set(mode.flagValue)
                         true
                     },
                 ),
