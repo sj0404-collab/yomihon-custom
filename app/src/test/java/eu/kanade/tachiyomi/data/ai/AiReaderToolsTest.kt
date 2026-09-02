@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.ai
 
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.data.voice.VoiceBackend
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -50,8 +51,15 @@ class AiReaderToolsTest {
     fun `report sources still match the registries`() {
         // Отчёты строятся из реестров; если реестр изменится, эти проверки
         // укажут на рассинхрон между инструментами агента и настройками.
+        // id бэкендов обязаны совпадать со значениями, на которых маршрутизируется
+        // TtsSpeaker: иначе выбор движка в настройках молча не применялся бы.
         VoiceBackend.entries.map { it.id } shouldContainExactly
-            listOf("system_tts", "google_web", "eleven_api", "onnx")
+            listOf(
+                TtsSpeaker.ENGINE_SYSTEM,
+                TtsSpeaker.ENGINE_GOOGLE_WEB,
+                TtsSpeaker.ENGINE_ELEVENLABS,
+                TtsSpeaker.ENGINE_ONNX,
+            )
         AiBackends.ALL.map { it.id } shouldContainExactly listOf("online", "local", "runner")
     }
 }

@@ -84,6 +84,21 @@ object SettingsVoicePluginsScreen : SearchableSettings {
                         },
                         title = stringResource(MR.strings.pref_voice_name),
                     ),
+                    // Движок и голос — разные настройки: пакет движка уходит в
+                    // pref_system_tts_engine, а имя голоса — в pref_voice_name.
+                    // Список движков берётся из PackageManager, поэтому здесь
+                    // видны любые установленные сторонние TTS-приложения.
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.systemTtsEngine(),
+                        entries = remember(context, prefs) {
+                            VoicePlugins.systemEngineOptions(
+                                context = context,
+                                prefs = prefs,
+                                defaultLabel = "Как в системе (по умолчанию)",
+                            ).toMap()
+                        },
+                        title = stringResource(MR.strings.pref_voice_system_engine),
+                    ),
                 ),
             ),
         )

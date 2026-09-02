@@ -1,31 +1,66 @@
 package eu.kanade.tachiyomi.data.voice
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.speech.tts.TextToSpeech
 import eu.kanade.tachiyomi.data.tts.OnnxTts
+import eu.kanade.tachiyomi.data.tts.TtsSpeaker
+import eu.kanade.tachiyomi.data.tts.VoiceHelper
+import eu.kanade.tachiyomi.data.tts.VoiceKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import logcat.LogPriority
 import mihon.domain.ocr.service.OcrPreferences
+import tachiyomi.core.common.util.system.logcat
 
 /**
  * Тип голосового бэкенда. Совпадает со значениями `pref_voice_engine`
  * ("system_tts", "google_web", "eleven_api") и расширяется локальными
  * нейросетевыми движками, которые раньше выбирались отдельными настройками.
  */
+/**
+ * Id совпадают с константами [TtsSpeaker], потому что именно эти строки
+ * сохраняются в `pref_voice_engine` и именно по ним [TtsSpeaker.speakAs]
+ * выбирает, чем озвучивать реплику.
+ *
+ * Раньше ONNX был объявлен как `"onnx"`, а весь UI писал `"onnx_tts"`. Из-за
+ * этого расхождения реестр считал выбранным системный TTS, а выбор ONNX в
+ * настройках плагинов сохранял значение, которое маршрутизатор озвучки не
+ * знал, — реплика молча уходила в системный голос.
+ */
 enum class VoiceBackend(val id: String) {
     /** Системные и сторонние Android TTS-движки. */
-    SYSTEM_TTS("system_tts"),
+    SYSTEM_TTS(TtsSpeaker.ENGINE_SYSTEM),
 
     /** Веб-озвучка Google Translate: без ключа, но нужен интернет. */
-    GOOGLE_WEB("google_web"),
+    GOOGLE_WEB(TtsSpeaker.ENGINE_GOOGLE_WEB),
 
     /** ElevenLabs по API-ключу. */
-    ELEVEN_API("eleven_api"),
+    ELEVEN_API(TtsSpeaker.ENGINE_ELEVENLABS),
 
     /** Офлайн нейросетевые голоса sherpa-onnx (VITS/Piper). */
-    ONNX("onnx"),
+    ONNX(TtsSpeaker.ENGINE_ONNX),
     ;
 
     companion object {
-        fun fromId(id: String?): VoiceBackend =
-            entries.firstOrNull { it.id == id } ?: SYSTEM_TTS
+        /** Значения из сборок, где ONNX ещё был объявлен как `onnx`. */
+        private val LEGACY_IDS = mapOf("onnx" to ONNX)
+
+        /**
+         * Точное распознавание id, включая legacy-написания. `null`, если
+         * значение не соответствует ни одному движку — в отличие от [fromId]
+         * здесь нет молчаливого отката, поэтому `byId()` не обязан выдавать
+         * системный плагин на любой мусор.
+         */
+        fun matchOrNull(id: String?): VoiceBackend? {
+            val key = id?.trim().orEmpty()
+            if (key.isEmpty()) return null
+            return entries.firstOrNull { it.id == key } ?: LEGACY_IDS[key]
+        }
+
+        fun fromId(id: String?): VoiceBackend = matchOrNull(id) ?: SYSTEM_TTS
     }
 }
 
@@ -96,7 +131,7 @@ object VoicePlugins {
     )
 
     val SYSTEM_TTS = VoicePluginDescriptor(
-        id = "system_tts",
+        id = VoiceBackend.SYSTEM_TTS.id,
         backend = VoiceBackend.SYSTEM_TTS,
         title = "Системный TTS",
         summary = "Голоса установленных Android-движков (Google, RHVoice, Acapela и любые другие).",
@@ -106,7 +141,7 @@ object VoicePlugins {
     )
 
     val GOOGLE_WEB = VoicePluginDescriptor(
-        id = "google_web",
+        id = VoiceBackend.GOOGLE_WEB.id,
         backend = VoiceBackend.GOOGLE_WEB,
         title = "Google Web (без ключа)",
         summary = "Веб-озвучка Google Translate: работает без API-ключа, но требует интернет.",
@@ -115,7 +150,7 @@ object VoicePlugins {
     )
 
     val ELEVEN_API = VoicePluginDescriptor(
-        id = "eleven_api",
+        id = VoiceBackend.ELEVEN_API.id,
         backend = VoiceBackend.ELEVEN_API,
         title = "ElevenLabs",
         summary = "Нейросетевая озвучка по API-ключу ElevenLabs.",
@@ -125,7 +160,7 @@ object VoicePlugins {
     )
 
     val ONNX = VoicePluginDescriptor(
-        id = "onnx",
+        id = VoiceBackend.ONNX.id,
         backend = VoiceBackend.ONNX,
         title = "ONNX-голоса (офлайн)",
         summary = "sherpa-onnx и русские Piper-голоса: модели скачиваются один раз, дальше работают без сети.",
@@ -138,7 +173,13 @@ object VoicePlugins {
 
     private val BY_ID = ALL.associateBy { it.id }
 
-    fun byId(id: String?): VoicePluginDescriptor? = id?.let { BY_ID[it] }
+    /**
+     * Поиск плагина по сохранённому значению `pref_voice_engine`. Проходит
+     * через [VoiceBackend.matchOrNull], поэтому legacy-запись `"onnx"` из
+     * старых сборок находит тот же плагин, что и `"onnx_tts"`.
+     */
+    fun byId(id: String?): VoicePluginDescriptor? =
+        VoiceBackend.matchOrNull(id)?.let { backend -> BY_ID[backend.id] }
 
     fun byBackend(backend: VoiceBackend): VoicePluginDescriptor? =
         ALL.firstOrNull { it.backend == backend }
@@ -179,17 +220,7 @@ object VoicePlugins {
                 )
             }
 
-            VoiceBackend.SYSTEM_TTS -> listOfNotNull(
-                prefs.voiceFemale().get().takeIf(String::isNotBlank)?.let {
-                    Voice(id = it, name = "Женский пресет", gender = "female")
-                },
-                prefs.voiceMale().get().takeIf(String::isNotBlank)?.let {
-                    Voice(id = it, name = "Мужской пресет", gender = "male")
-                },
-                prefs.voiceName().get().takeIf(String::isNotBlank)?.let {
-                    Voice(id = it, name = "Выбранный голос", gender = "neutral")
-                },
-            ).distinctBy { it.id }
+            VoiceBackend.SYSTEM_TTS -> systemVoiceSources(prefs)
 
             VoiceBackend.ELEVEN_API -> listOfNotNull(
                 prefs.elevenVoiceId().get().takeIf(String::isNotBlank)?.let {
@@ -212,4 +243,114 @@ object VoicePlugins {
      */
     fun current(prefs: OcrPreferences): VoicePluginDescriptor =
         byId(prefs.voiceEngine().get()) ?: SYSTEM_TTS
+
+    /**
+     * Сохранённые пресеты голосов. Список намеренно короткий: полный перечень
+     * голосов устройства требует живой `TextToSpeech` (см. [systemVoices]), а
+     * реестр вызывается прямо из Compose и не должен блокировать UI.
+     */
+    fun systemVoiceSources(prefs: OcrPreferences): List<Voice> = listOfNotNull(
+        prefs.voiceFemale().get().takeIf(String::isNotBlank)?.let {
+            Voice(id = it, name = "Женский пресет", gender = "female")
+        },
+        prefs.voiceMale().get().takeIf(String::isNotBlank)?.let {
+            Voice(id = it, name = "Мужской пресет", gender = "male")
+        },
+        prefs.voiceName().get().takeIf(String::isNotBlank)?.let {
+            Voice(id = it, name = "Выбранный голос", gender = "neutral")
+        },
+    ).distinctBy { it.id }
+
+    /**
+     * Все Android TTS-движки устройства: пакет → имя. Пустой id — «движок по
+     * умолчанию системы».
+     *
+     * Это и есть «голоса из APK»: любой установленный сторонний TTS-движок
+     * является отдельным приложением и виден здесь. Список идёт в
+     * `pref_system_tts_engine`, а не в `pref_voice_name`: движок и голос внутри
+     * движка — разные настройки, и их смешение ломало бы выбор голоса.
+     *
+     * Здесь намеренно НЕ используется `TtsSpeaker.installedEngines()`: вторая
+     * половина того метода до трёх секунд ждёт `onInit` на `CountDownLatch`, а
+     * реестр вызывается из Compose. `queryIntentServices` отдаёт тот же список
+     * пакетов мгновенно и без инициализации движка.
+     */
+    fun systemEngineOptions(
+        context: Context,
+        prefs: OcrPreferences,
+        defaultLabel: String,
+    ): List<Pair<String, String>> {
+        val engines = installedSystemEngines(context)
+        val selected = runCatching { prefs.systemTtsEngine().get().trim() }.getOrDefault("")
+        val fallback = selected
+            .takeIf { it.isNotBlank() && engines.none { (pkg, _) -> pkg == selected } }
+            ?.let { pkg -> listOf(pkg to "Выбранный движок ($pkg)") }
+            .orEmpty()
+        return listOf("" to defaultLabel) + engines + fallback
+    }
+
+    /**
+     * Android TTS-движки, установленные в системе: пакет → человекочитаемое имя.
+     */
+    fun installedSystemEngines(context: Context): List<Pair<String, String>> {
+        val app = context.applicationContext
+        return runCatching {
+            val pm = app.packageManager
+            val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)
+            val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentServices(intent, 0)
+            }
+            val found = LinkedHashMap<String, String>()
+            services.forEach { info ->
+                val pkg = info.serviceInfo?.packageName ?: return@forEach
+                val label = runCatching { info.serviceInfo.loadLabel(pm).toString() }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: pkg
+                found.putIfAbsent(pkg, label)
+            }
+            found.toList()
+        }.onFailure { error ->
+            logcat(LogPriority.WARN, error) { "Не удалось перечислить системные TTS-движки" }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Голоса конкретного системного движка по языку. Тяжёлая операция: нужен
+     * живой `TextToSpeech`, поэтому вызывается из корутины, а не из Compose.
+     */
+    suspend fun systemVoices(
+        context: Context,
+        enginePackage: String?,
+        language: String,
+    ): List<Voice> = withContext(Dispatchers.IO) {
+        val tts = runCatching {
+            TextToSpeech(
+                context.applicationContext,
+                {},
+                enginePackage?.takeIf { it.isNotBlank() },
+            )
+        }.getOrNull() ?: return@withContext emptyList()
+        try {
+            VoiceHelper.prepareForLanguage(tts, language)
+            VoiceHelper.voicesFor(tts, language, enginePackage).map { voice ->
+                Voice(
+                    id = voice.name,
+                    name = voice.name,
+                    gender = when (VoiceHelper.classify(voice)) {
+                        VoiceKind.FEMALE -> "female"
+                        VoiceKind.MALE -> "male"
+                        else -> "neutral"
+                    },
+                    language = runCatching { voice.locale.toLanguageTag() }.getOrNull(),
+                    installed = true,
+                )
+            }
+        } finally {
+            runCatching { tts.shutdown() }
+        }
+    }
 }

@@ -1393,4 +1393,6 @@
     <string name="pref_ai_tab_visible_summary">When hidden, the agent stays available through the built-in server</string>
     <string name="pref_ai_http_server">Built-in AI server</string>
     <string name="pref_ai_http_server_summary">Applies after restarting the app</string>
+    <string name="pref_voice_system_engine">Android TTS engine</string>
+    <string name="pref_voice_system_engine_info">Engines installed on the device are listed here; the voice inside the engine is chosen separately</string>
 </resources>
