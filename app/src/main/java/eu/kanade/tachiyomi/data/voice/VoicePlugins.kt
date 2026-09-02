@@ -48,13 +48,19 @@ enum class VoiceBackend(val id: String) {
         /** Значения из сборок, где ONNX ещё был объявлен как `onnx`. */
         private val LEGACY_IDS = mapOf("onnx" to ONNX)
 
-        fun fromId(id: String?): VoiceBackend {
+        /**
+         * Точное распознавание id, включая legacy-написания. `null`, если
+         * значение не соответствует ни одному движку — в отличие от [fromId]
+         * здесь нет молчаливого отката, поэтому `byId()` не обязан выдавать
+         * системный плагин на любой мусор.
+         */
+        fun matchOrNull(id: String?): VoiceBackend? {
             val key = id?.trim().orEmpty()
-            if (key.isEmpty()) return SYSTEM_TTS
-            return entries.firstOrNull { it.id == key }
-                ?: LEGACY_IDS[key]
-                ?: SYSTEM_TTS
+            if (key.isEmpty()) return null
+            return entries.firstOrNull { it.id == key } ?: LEGACY_IDS[key]
         }
+
+        fun fromId(id: String?): VoiceBackend = matchOrNull(id) ?: SYSTEM_TTS
     }
 }
 
@@ -125,7 +131,7 @@ object VoicePlugins {
     )
 
     val SYSTEM_TTS = VoicePluginDescriptor(
-        id = "system_tts",
+        id = VoiceBackend.SYSTEM_TTS.id,
         backend = VoiceBackend.SYSTEM_TTS,
         title = "Системный TTS",
         summary = "Голоса установленных Android-движков (Google, RHVoice, Acapela и любые другие).",
@@ -135,7 +141,7 @@ object VoicePlugins {
     )
 
     val GOOGLE_WEB = VoicePluginDescriptor(
-        id = "google_web",
+        id = VoiceBackend.GOOGLE_WEB.id,
         backend = VoiceBackend.GOOGLE_WEB,
         title = "Google Web (без ключа)",
         summary = "Веб-озвучка Google Translate: работает без API-ключа, но требует интернет.",
@@ -144,7 +150,7 @@ object VoicePlugins {
     )
 
     val ELEVEN_API = VoicePluginDescriptor(
-        id = "eleven_api",
+        id = VoiceBackend.ELEVEN_API.id,
         backend = VoiceBackend.ELEVEN_API,
         title = "ElevenLabs",
         summary = "Нейросетевая озвучка по API-ключу ElevenLabs.",
@@ -154,7 +160,7 @@ object VoicePlugins {
     )
 
     val ONNX = VoicePluginDescriptor(
-        id = "onnx",
+        id = VoiceBackend.ONNX.id,
         backend = VoiceBackend.ONNX,
         title = "ONNX-голоса (офлайн)",
         summary = "sherpa-onnx и русские Piper-голоса: модели скачиваются один раз, дальше работают без сети.",
@@ -167,7 +173,13 @@ object VoicePlugins {
 
     private val BY_ID = ALL.associateBy { it.id }
 
-    fun byId(id: String?): VoicePluginDescriptor? = id?.let { BY_ID[it] }
+    /**
+     * Поиск плагина по сохранённому значению `pref_voice_engine`. Проходит
+     * через [VoiceBackend.matchOrNull], поэтому legacy-запись `"onnx"` из
+     * старых сборок находит тот же плагин, что и `"onnx_tts"`.
+     */
+    fun byId(id: String?): VoicePluginDescriptor? =
+        VoiceBackend.matchOrNull(id)?.let { backend -> BY_ID[backend.id] }
 
     fun byBackend(backend: VoiceBackend): VoicePluginDescriptor? =
         ALL.firstOrNull { it.backend == backend }

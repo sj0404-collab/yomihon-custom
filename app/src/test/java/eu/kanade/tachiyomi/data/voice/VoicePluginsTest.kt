@@ -83,7 +83,7 @@ class VoicePluginsTest {
         VoicePlugins.ALL.filter { it.offline }.map { it.id } shouldContainExactly
             listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.ONNX.id)
         VoicePlugins.ALL.filterNot { it.offline }.map { it.id } shouldContainExactly
-            listOf("google_web", "eleven_api")
+            listOf(VoiceBackend.GOOGLE_WEB.id, VoiceBackend.ELEVEN_API.id)
     }
 
     @Test
@@ -109,6 +109,19 @@ class VoicePluginsTest {
         VoiceBackend.GOOGLE_WEB.id shouldBe TtsSpeaker.ENGINE_GOOGLE_WEB
         VoiceBackend.ELEVEN_API.id shouldBe TtsSpeaker.ENGINE_ELEVENLABS
         VoiceBackend.ONNX.id shouldBe TtsSpeaker.ENGINE_ONNX
+    }
+
+    @Test
+    fun `a legacy engine value still resolves to the onnx plugin`() {
+        // На устройствах с прежней сборкой в pref_voice_engine лежит "onnx".
+        // Без legacy-разбора such пользователь потерял бы выбранный движок.
+        VoicePlugins.byId("onnx") shouldBe VoicePlugins.ONNX
+        VoicePlugins.byId("onnx_tts") shouldBe VoicePlugins.ONNX
+        VoicePlugins.byId("  onnx_tts  ") shouldBe VoicePlugins.ONNX
+        // Мусор не должен молча превращаться в системный плагин.
+        VoicePlugins.byId("несуществующий") shouldBe null
+        VoicePlugins.byId("") shouldBe null
+        VoicePlugins.byId(null) shouldBe null
     }
 
     @Test
