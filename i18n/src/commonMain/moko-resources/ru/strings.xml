@@ -1059,4 +1059,5 @@
     <string name="pref_ai_http_server_summary">Вступает в силу после перезапуска приложения</string>
     <string name="pref_voice_system_engine">Системный движок TTS (Android)</string>
     <string name="pref_voice_system_engine_info">Здесь перечислены движки, установленные на устройстве; голос внутри движка выбирается отдельно</string>
+    <string name="pref_ocr_content_type_reading_mode">Режим чтения следует пресету: %1$s</string>
 </resources>

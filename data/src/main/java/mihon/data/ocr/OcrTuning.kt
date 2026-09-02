@@ -9,7 +9,16 @@ import mihon.domain.ocr.service.ScanRegion
  * модель и не включает словарную коррекцию. Значения подобраны под форму
  * кадров, а не под конкретный тайтл.
  */
-enum class OcrContentType(val id: String, val title: String, val hint: String) {
+enum class OcrContentType(
+    val id: String,
+    val title: String,
+    val hint: String,
+    /**
+     * Режим чтения, который соответствует пресету. Совпадает с порядком чтения
+     * OCR ([OcrTuning.readingOrder]) — связь проверяет `OcrViewerHintTest`.
+     */
+    val viewer: OcrViewerHint = OcrViewerHint.KEEP,
+) {
     /**
      * Универсальный профиль. В точности повторяет значения, которые раньше
      * были зашиты константами в [CyrillicOcrEngine], поэтому поведение
@@ -29,6 +38,7 @@ enum class OcrContentType(val id: String, val title: String, val hint: String) {
         id = "manga",
         title = "Манга",
         hint = "Мелкий плотный текст в баллонах, чтение справа налево.",
+        viewer = OcrViewerHint.PAGER_RTL,
     ),
 
     /**
@@ -39,6 +49,7 @@ enum class OcrContentType(val id: String, val title: String, val hint: String) {
         id = "manhwa",
         title = "Манхва / вебтун",
         hint = "Вертикальные полосы, крупные надписи, широкие пробелы.",
+        viewer = OcrViewerHint.WEBTOON,
     ),
 
     /**
@@ -49,6 +60,7 @@ enum class OcrContentType(val id: String, val title: String, val hint: String) {
         id = "comic",
         title = "Комикс",
         hint = "Плотный леттеринг и заголовки, чтение слева направо.",
+        viewer = OcrViewerHint.PAGER_LTR,
     ),
     ;
 

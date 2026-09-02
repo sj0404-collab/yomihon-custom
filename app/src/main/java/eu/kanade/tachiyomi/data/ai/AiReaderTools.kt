@@ -4,6 +4,8 @@ import android.content.Context
 import eu.kanade.tachiyomi.data.tts.OnnxTts
 import eu.kanade.tachiyomi.data.voice.VoiceBackend
 import eu.kanade.tachiyomi.data.voice.VoicePlugins
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import mihon.data.ocr.OcrContentType
 import mihon.data.ocr.OcrPluginAvailability
 import mihon.data.ocr.OcrPlugins
@@ -72,6 +74,7 @@ object AiReaderTools {
             appendLine("Пресет типа контента: ${profile.contentType.id} (${profile.contentType.title})")
             appendLine("Область сканирования: ${OcrRegionRules.regionTitle(profile.scanRegion)}")
             appendLine("Порядок чтения: ${OcrRegionRules.orderTitle(tuning.readingOrder)}")
+            appendLine("Режим чтения по пресету: ${profile.contentType.viewer.title}")
             appendLine(
                 "Точная подстройка: " +
                     if (profile.overrides.isEmpty) "не задана, все параметры из пресета"
@@ -131,12 +134,21 @@ object AiReaderTools {
         // детектора при этом всё равно следуют за типом контента.
         prefs.contentType().set(contentType.id)
 
+        // Пресет задаёт и вьюер: порядок чтения OCR и направление листания —
+        // одна сущность. BALANCED (KEEP) выбор пользователя не трогает.
+        val viewerHint = contentType.viewer
+        val readingMode = ReadingMode.fromOcrHint(viewerHint)
+        if (readingMode != null) {
+            Injekt.get<ReaderPreferences>().defaultReadingMode().set(readingMode.flagValue)
+        }
+
         val profile = OcrRegionRules.profileOf(prefs)
         val tuning = profile.tuning()
         return buildString {
             appendLine("Пресет применён: ${contentType.id} (${contentType.title})")
             appendLine("Область: ${OcrRegionRules.regionTitle(profile.scanRegion)}")
             appendLine("Порядок чтения: ${OcrRegionRules.orderTitle(tuning.readingOrder)}")
+            appendLine("Режим чтения: ${viewerHint.title}")
             appendLine(
                 "Параметры: порог=${tuning.detectorThreshold}, мин. площадь=${tuning.minComponentArea}, " +
                     "макс. блоков=${tuning.maxTextBoxes}, зазор слов=${tuning.wordGapFactor}, " +
