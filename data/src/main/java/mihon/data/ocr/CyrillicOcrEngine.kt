@@ -38,7 +38,15 @@ internal class CyrillicOcrEngine(
     private val context: Context,
     private val environment: Environment,
     private val textPostprocessor: TextPostprocessor,
+    /**
+     * Параметры детектора и признания результата. Провайдер, а не значение:
+     * пресет типа контента и ручные переопределения меняются в настройках без
+     * пересоздания движка и без повторной загрузки моделей.
+     */
+    private val tuningProvider: () -> OcrTuning = { OcrTuning.DEFAULT },
 ) : LineOcrEngine {
+
+    private fun tuning(): OcrTuning = tuningProvider()
 
     private lateinit var detector: CompiledModel
     private lateinit var primary: CompiledModel
@@ -291,7 +299,7 @@ internal class CyrillicOcrEngine(
             .map { (box, recognition) -> box to recognition.text.trim() }
             .filter { (_, text) -> text.isNotBlank() }
             .sortedByDescending { (_, text) -> text.count(Char::isLetter) }
-            .take(RESCUE_MAX_LINES)
+            .take(tuning().rescueMaxLines)
         if (candidates.isEmpty()) return ""
 
         val rows = mutableListOf<MutableList<Pair<TextBox, String>>>()
@@ -397,7 +405,7 @@ internal class CyrillicOcrEngine(
 
         val restoredWhole = OcrTextCleaner.normalizeLocalCyrillicCaption(wholeLine.text)
         val restoresBoundaries = restoredWhole.count(Char::isWhitespace) > wholeLine.text.count(Char::isWhitespace)
-        val wholeQuality = candidateQuality(wholeLine) + if (restoresBoundaries) WHOLE_LINE_BOUNDARY_BONUS else 0f
+        val wholeQuality = candidateQuality(wholeLine) + if (restoresBoundaries) tuning().wholeLineBoundaryBonus else 0f
         val segmentedQuality = candidateQuality(segmented)
         return if (restoresBoundaries && wholeQuality >= segmentedQuality) wholeLine else segmented
     }
@@ -407,7 +415,7 @@ internal class CyrillicOcrEngine(
      * разделяют кроп. Если явной щели нет — кроп остаётся целым.
      */
     private fun splitWords(crop: Bitmap): List<Bitmap> {
-        if (crop.width < 32) return listOf(crop)
+        if (crop.width < tuning().splitMinWidthPx) return listOf(crop)
         val w = crop.width
         val h = crop.height
         val pixels = IntArray(w * h)
@@ -497,7 +505,7 @@ internal class CyrillicOcrEngine(
         val gaps = IntArray(runs.size - 1) { i -> runs[i + 1][0] - runs[i][1] - 1 }
         val positive = gaps.filter { it > 0 }.sorted()
         val median = if (positive.isEmpty()) 1.0 else positive[positive.size / 2].toDouble()
-        val threshold = max(5, round(median * 1.7).toInt())
+        val threshold = max(tuning().minWordGapPx, round(median * tuning().wordGapFactor).toInt())
         var splitAfter = 0
         val groups = mutableListOf<IntArray>()
         var groupStart = runs[0][0]
@@ -525,11 +533,15 @@ internal class CyrillicOcrEngine(
      */
     private fun acceptsConfidence(result: Recognition): Boolean {
         val letters = result.text.count(Char::isLetter)
-        val threshold = if (letters in 1..3) SHORT_TEXT_MIN_CONFIDENCE else MIN_ACCEPT_CONFIDENCE
+        val threshold = if (letters in 1..3) {
+            tuning().shortTextMinConfidence
+        } else {
+            tuning().minAcceptConfidence
+        }
         // Пропущенные в середине слова шаги (blank) понижают уверенность:
         // «лжн вбинен» вместо «ЛОЖНО ОБВИНЁН» больше не проходит как хороший
         // результат только потому, что уцелевшие буквы были прочитаны чётко.
-        val discounted = CtcScoring.coveragePenalty(result.confidence, result.coverage, MIN_COVERAGE)
+        val discounted = CtcScoring.coveragePenalty(result.confidence, result.coverage, tuning().minCoverage)
         return discounted >= threshold
     }
 
@@ -580,7 +592,7 @@ internal class CyrillicOcrEngine(
         val boxes = mutableListOf<Rect>()
         val limit = DETECTOR_SIZE * DETECTOR_SIZE
         for (start in 0 until limit) {
-            if (visited[start] || probability[start] < DETECTOR_THRESHOLD) continue
+            if (visited[start] || probability[start] < tuning().detectorThreshold) continue
             var head = 0
             var tail = 0
             componentQueue[tail++] = start
@@ -605,13 +617,13 @@ internal class CyrillicOcrEngine(
                     val ny = y + dy
                     if (nx !in 0 until DETECTOR_SIZE || ny !in 0 until DETECTOR_SIZE) continue
                     val next = ny * DETECTOR_SIZE + nx
-                    if (!visited[next] && probability[next] >= DETECTOR_THRESHOLD) {
+                    if (!visited[next] && probability[next] >= tuning().detectorThreshold) {
                         visited[next] = true
                         componentQueue[tail++] = next
                     }
                 }
             }
-            if (area < MIN_COMPONENT_AREA || maxX - minX < 3 || maxY - minY < 3) continue
+            if (area < tuning().minComponentArea || maxX - minX < 3 || maxY - minY < 3) continue
             val expandX = max(3, ((maxX - minX) * 0.16f).toInt())
             val expandY = max(2, ((maxY - minY) * 0.20f).toInt())
             val left = (((minX - expandX - offsetX) / scale).toInt()).coerceIn(0, image.width - 1)
@@ -620,10 +632,10 @@ internal class CyrillicOcrEngine(
             val bottom = (ceil((maxY + expandY - offsetY) / scale).toInt()).coerceIn(top + 1, image.height)
             if (right - left >= 6 && bottom - top >= 6) boxes += Rect(left, top, right, bottom)
         }
-        return mergeBoxes(boxes).take(MAX_TEXT_BOXES).map(::TextBox)
+        return mergeBoxes(boxes, tuning()).take(tuning().maxTextBoxes).map(::TextBox)
     }
 
-    private fun mergeBoxes(source: List<Rect>): List<Rect> {
+    private fun mergeBoxes(source: List<Rect>, tuning: OcrTuning): List<Rect> {
         val boxes = source.sortedWith(compareBy({ it.top }, { it.left })).map(::Rect).toMutableList()
         var changed = true
         while (changed) {
@@ -635,7 +647,10 @@ internal class CyrillicOcrEngine(
                     val overlapY = max(0, min(a.bottom, b.bottom) - max(a.top, b.top))
                     val minHeight = min(a.height(), b.height()).coerceAtLeast(1)
                     val gapX = max(0, max(a.left, b.left) - min(a.right, b.right))
-                    if (overlapY >= minHeight * 0.55f && gapX <= max(a.height(), b.height()) * 0.55f) {
+                    if (
+                        overlapY >= minHeight * tuning.mergeOverlapYFactor &&
+                        gapX <= max(a.height(), b.height()) * tuning.mergeGapXFactor
+                    ) {
                         a.union(b)
                         boxes.removeAt(j)
                         changed = true
@@ -662,7 +677,7 @@ internal class CyrillicOcrEngine(
         val candidates = mutableListOf(
             runRecognizer(crop, primary, primaryInput, primaryOutput, primaryChars, RecognitionModel.V3),
         )
-        if (candidates.last().confidence < PRIMARY_CONFIDENCE) {
+        if (candidates.last().confidence < tuning().contrastRetryConfidence) {
             val contrast = createHighContrast(crop)
             try {
                 val alternate = runRecognizer(
@@ -698,7 +713,7 @@ internal class CyrillicOcrEngine(
                 RecognitionModel.V5,
             )
             candidates += verifierResult
-            if (verifierResult.confidence < PRIMARY_CONFIDENCE) {
+            if (verifierResult.confidence < tuning().contrastRetryConfidence) {
                 val contrast = createHighContrast(crop)
                 try {
                     candidates += runRecognizer(
@@ -733,7 +748,7 @@ internal class CyrillicOcrEngine(
                 OcrTextCleaner.fixLookalikesPerWord(candidate.text),
             )
         ) {
-            VERIFIER_CYRILLIC_BONUS
+            tuning().verifierCyrillicBonus
         } else {
             0f
         }
@@ -923,40 +938,12 @@ internal class CyrillicOcrEngine(
         private const val RECOGNIZER_HEIGHT = 48
         // Число шагов по времени в выходе recognizer'ов пака ([1, 40, C]).
         private const val RECOGNIZER_STEPS = 40
-        // Порог активации детектора. Понижен с 0.28: на тонком шрифте и
-        // светлых баллонах часть строк не набирала 0.28 и терялась целиком.
-        private const val DETECTOR_THRESHOLD = 0.20f
+        // Числовые параметры детектора и признания результата перенесены в
+        // OcrTuning: ими управляет пресет типа контента (манга / манхва /
+        // комикс) и точные переопределения из настроек. Значения по умолчанию
+        // в OcrTuning совпадают с прежними константами этого companion object,
+        // поэтому BALANCED не меняет поведение приложения.
 
-        // Минимальная площадь связной области. Понижена с 28: короткие
-        // реплики («Да!», «Что?..») не дотягивали и пропускались.
-        private const val MIN_COMPONENT_AREA = 16
-        private const val MAX_TEXT_BOXES = 96
-
-        // Ниже этого — пробуем распознать ещё раз с повышенным контрастом.
-        private const val PRIMARY_CONFIDENCE = 0.90f
-
-        // Prefer valid Cyrillic from PP-OCRv5 over v3's raw-softmax-only
-        // winner. Calibrated against device captures of compact text panels.
-        private const val VERIFIER_CYRILLIC_BONUS = 0.20f
-
-        // Цельный кроп получает небольшое преимущество лишь когда его
-        // слитный CTC-вывод уже разделяется консервативным списком слов.
-        private const val WHOLE_LINE_BOUNDARY_BONUS = 0.08f
-
-        // Результат слабее этого порога отбрасывается совсем. Раньше такого
-        // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:
-        // верно прочитанные, но неуверенные слова выпадали из текста.
-        // Лучше показать слово с опечаткой, чем молча его потерять.
-        // Доля пропущенных шагов, после которой уверенность начинает
-        // снижаться. 12 % — это примерно один выпавший символ на восемь
-        // прочитанных: нормальный шум тонкого шрифта ещё не штрафуется.
-        private const val MIN_COVERAGE = 0.12f
-
-        // Сколько лучших отклонённых строк поднимает второй rescue-эшелон.
-        // Ограничение защищает от склейки длинного «шума» из десятков боксов.
-        private const val RESCUE_MAX_LINES = 6
-        private const val MIN_ACCEPT_CONFIDENCE = 0.25f
-        private const val SHORT_TEXT_MIN_CONFIDENCE = 0.12f
         private const val ALLOWED_PUNCTUATION = " .,!?;:-()[]{}\"'«»„“”%№+/=…—–"
     }
 }

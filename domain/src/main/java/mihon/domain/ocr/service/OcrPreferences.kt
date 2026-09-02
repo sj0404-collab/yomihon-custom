@@ -18,6 +18,25 @@ class OcrPreferences(
 
     fun scanRegion() = preferenceStore.getEnum("pref_scan_region", ScanRegion.FULL_PAGE)
 
+    // ---- Пресеты областей и типа контента ----
+    // Тип контента (манга / манхва / комикс / сбалансированный) задаёт пресет
+    // параметров детектора и порядок чтения. См. mihon.data.ocr.OcrTuning.
+    fun contentType() = preferenceStore.getString("pref_ocr_content_type", "balanced")
+
+    // Область, которую пресет применяет по умолчанию. Хранится отдельно от
+    // scanRegion(): пользователь может переопределить область, не теряя пресет.
+    fun presetScanRegion() = preferenceStore.getString("pref_ocr_preset_region", "full")
+
+    // Точные переопределения пресета. Пустая строка = «как в пресете».
+    fun detectorThresholdOverride() = preferenceStore.getString("pref_ocr_detector_threshold", "")
+    fun minComponentAreaOverride() = preferenceStore.getString("pref_ocr_min_area", "")
+    fun maxTextBoxesOverride() = preferenceStore.getString("pref_ocr_max_boxes", "")
+    fun wordGapFactorOverride() = preferenceStore.getString("pref_ocr_word_gap", "")
+    fun minAcceptConfidenceOverride() = preferenceStore.getString("pref_ocr_min_confidence", "")
+    fun shortTextConfidenceOverride() = preferenceStore.getString("pref_ocr_short_confidence", "")
+    fun minCoverageOverride() = preferenceStore.getString("pref_ocr_min_coverage", "")
+    fun rescueMaxLinesOverride() = preferenceStore.getString("pref_ocr_rescue_lines", "")
+
     fun autoOcrOnDownload() = preferenceStore.getBoolean("auto_ocr_on_download", false)
 
     fun owocrAddress() = preferenceStore.getString("pref_owocr_address", "ws://10.0.2.2:7331")
