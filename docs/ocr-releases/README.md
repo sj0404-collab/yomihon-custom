@@ -8,8 +8,10 @@ The source files in this directory preserve the human-reviewed report for a cand
 |---|---:|---|---|
 | `50a0c9e` | [32997836681][1] | Rejected: important clean Russian captions still failed | [2026-08-26-50a0c9e.md](2026-08-26-50a0c9e.md) |
 | `9d19650` | [33002206845][2] | Partial improvement; further issues reported | [2026-08-26-9d19650.md](2026-08-26-9d19650.md) |
+| `f6b4e01` | [33642798206][3] | Accepted for release: shipped as `v1.9.14`; device validation is the acceptance gate | [2026-08-26-f6b4e01.md](2026-08-26-f6b4e01.md) |
 
 ## References
 
 [1]: https://github.com/sj0404-collab/yomihon-custom/actions/runs/32997836681 "GitHub Actions build 32997836681"
 [2]: https://github.com/sj0404-collab/yomihon-custom/actions/runs/33002206845 "GitHub Actions build 33002206845"
+[3]: https://github.com/sj0404-collab/yomihon-custom/actions/runs/33642798206 "GitHub Actions build 33642798206"
