@@ -1591,7 +1591,10 @@ data object AiChatTab : Tab {
     private fun WorkspaceBody(modifier: Modifier = Modifier) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var files by remember { mutableStateOf(AiWorkspace.listAll(context)) }
+        // Список не читается в композиции: обход общего хранилища — это
+        // дисковый ввод на главном потоке. Первое состояние пустое, данные
+        // приносит LaunchedEffect ниже (и он же обновляет список по кнопке).
+        var files by remember { mutableStateOf(emptyList<File>()) }
         var refreshKey by remember { mutableStateOf(0) }
 
         androidx.compose.runtime.LaunchedEffect(refreshKey) {
@@ -1620,7 +1623,13 @@ data object AiChatTab : Tab {
                         scope.launch(Dispatchers.IO) {
                             val zip = AiWorkspace.zipAll(context)
                             withContext(Dispatchers.Main) {
-                                context.toast("Архив: ${zip.name}")
+                                context.toast(
+                                    if (zip != null) {
+                                        "Архив: ${zip.name}"
+                                    } else {
+                                        "Не удалось собрать архив: нет места или хранилище недоступно"
+                                    },
+                                )
                                 refreshKey++
                             }
                         }

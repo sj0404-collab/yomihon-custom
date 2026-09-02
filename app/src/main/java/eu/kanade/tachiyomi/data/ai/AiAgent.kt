@@ -617,7 +617,15 @@ object AiAgent {
 
         "zip_workspace" -> {
             val f = AiWorkspace.zipAll(context)
-            ToolResult("zip_workspace", "Архив: ${AiWorkspace.relPath(context, f)} (${f.length() / 1024} КБ)", f)
+            if (f == null) {
+                ToolResult(
+                    "zip_workspace",
+                    "ОШИБКА: не удалось собрать архив (нет места или хранилище недоступно)",
+                    status = "error",
+                )
+            } else {
+                ToolResult("zip_workspace", "Архив: ${AiWorkspace.relPath(context, f)} (${f.length() / 1024} КБ)", f)
+            }
         }
 
         else -> {
