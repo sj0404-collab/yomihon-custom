@@ -29,12 +29,21 @@ jobs:
     if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
     name: Build
     runs-on: 'ubuntu-24.04'
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [get_tag]
+    outputs:
+      version_name: ${{ steps.version.outputs.version_name }}
+      version_code: ${{ steps.version.outputs.version_code }}
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      size: ${{ steps.digest.outputs.size }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Версия приложения вычисляется из git-истории, поэтому нужен
+          # полный клон, а не depth=1.
+          fetch-depth: 0
 
       - name: Set up JDK
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
@@ -45,7 +54,29 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
-      - name: Build
+      - name: Verify SQLDelight migrations
+        run: ./gradlew verifySqlDelightMigration
+
+      - name: Run local Cyrillic OCR regression tests
+        run: ./gradlew :data:testDebugUnitTest --tests mihon.data.ocr.OcrTextCleanerTest
+
+      - name: Run CTC scoring regression tests
+        run: ./gradlew :data:testDebugUnitTest --tests mihon.data.ocr.CtcScoringTest
+
+      - name: Run unit tests
+        run: ./gradlew test
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-report-${{ github.sha }}
+          path: |
+            app/build/reports/tests
+            data/build/reports/tests
+            domain/build/reports/tests
+
+      - name: Build the single release APK
         run: ./gradlew assembleRelease -Penable-updater --stacktrace
         env:
           RELEASE_TAG: ${{ needs.get_tag.outputs.tag }}
@@ -62,12 +93,96 @@ jobs:
           mv app/build/outputs/apk/release/app-arm64-v8a-release.apk \
             yomihon-${{ needs.get_tag.outputs.tag }}.apk
 
-      - name: Show version
+      - name: Assert the delivery is a single APK
         shell: bash
         run: |
-          echo "tag: ${{ needs.get_tag.outputs.tag }}"
-          ls -la yomihon-${{ needs.get_tag.outputs.tag }}.apk
-          md5sum yomihon-${{ needs.get_tag.outputs.tag }}.apk
+          set -euo pipefail
+          delivered="app/build/outputs/apk/release/app-arm64-v8a-release.apk"
+          [ -f "$delivered" ] || { echo "::error::нет единственного релизного APK arm64-v8a"; exit 1; }
+          release_count=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | wc -l | tr -d ' ')
+          echo "Релизный вариант собрал APK: $release_count (доставляется один: $delivered)"
+          ls -l app/build/outputs/apk/*/*.apk 2>/dev/null || true
+          if [ "$release_count" != "1" ]; then
+            echo "::error::В релизном варианте ожидался ровно один APK, найдено $release_count"
+            exit 1
+          fi
+
+      - name: Verify version baked into the APK
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="yomihon-${{ needs.get_tag.outputs.tag }}.apk"
+          tag="${{ needs.get_tag.outputs.tag }}"
+          expected_name="${tag#v}"
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          aapt=$(find "$sdk/build-tools" -maxdepth 2 -type f -name 'aapt2' 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$aapt" ]; then
+            aapt=$(find "$sdk/build-tools" -maxdepth 2 -type f -name 'aapt' 2>/dev/null | sort -V | tail -1 || true)
+          fi
+          [ -n "$aapt" ] || { echo "::error::aapt2 не найден в $sdk/build-tools"; exit 1; }
+          echo "Используется $aapt"
+          info=$("$aapt" dump badging "$apk")
+          version_name=$(printf '%s' "$info" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")
+          version_code=$(printf '%s' "$info" | sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p")
+          abi=$(printf '%s' "$info" | grep -c "arm64-v8a" || true)
+          echo "APK versionName=$version_name versionCode=$version_code"
+          if [ "$version_name" != "$expected_name" ]; then
+            echo "::error::versionName=$version_name, а тег требует $expected_name"
+            exit 1
+          fi
+          if ! [ "${version_code:-0}" -ge 10907 ]; then
+            echo "::error::versionCode=$version_code ниже планки 10907 — APK не встанет поверх установленного"
+            exit 1
+          fi
+          if [ "${abi:-0}" -lt 1 ]; then
+            echo "::error::в APK не найдена нативная библиотека arm64-v8a"
+            exit 1
+          fi
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+      - name: Compute APK digest
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="yomihon-${{ needs.get_tag.outputs.tag }}.apk"
+          ls -la "$apk"
+          sha256=$(sha256sum "$apk" | cut -d' ' -f1)
+          size=$(stat -c%s "$apk")
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          echo "$apk  $sha256"
+
+      - name: Render OCR quality report
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-report
+          report="release-report/OCR-QUALITY-REPORT-${GITHUB_SHA}.md"
+          {
+            echo "# OCR quality report — ${GITHUB_SHA}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Source commit | [\`${GITHUB_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
+            echo "| Tag | \`${{ needs.get_tag.outputs.tag }}\` |"
+            echo "| Remote build | [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |"
+            echo "| APK | \`yomihon-${{ needs.get_tag.outputs.tag }}.apk\` (arm64-v8a, единственный артефакт) |"
+            echo "| versionName / versionCode | \`${{ steps.version.outputs.version_name }}\` / \`${{ steps.version.outputs.version_code }}\` |"
+            echo "| SHA-256 | \`${{ steps.digest.outputs.sha256 }}\` |"
+            echo "| Size | ${{ steps.digest.outputs.size }} bytes |"
+            echo "| Automated checks | SQLDelight migrations, focused Cyrillic OCR tests, CTC scoring tests, full unit tests, single-APK and version assertions |"
+            echo
+            cat docs/ocr-releases/CURRENT.md
+          } > "$report"
+
+      - name: Upload OCR quality report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ocr-quality-report-${{ github.sha }}
+          path: release-report/OCR-QUALITY-REPORT-${{ github.sha }}.md
 
       - name: Upload APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -87,12 +202,15 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           merge-multiple: true
+          path: downloaded
 
       - name: Delete all artifacts
         uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
         with:
           failOnError: false
-          name: yomihon
+          name: |
+            yomihon
+            ocr-quality-report-${{ github.sha }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
@@ -100,18 +218,21 @@ jobs:
           tag_name: ${{ needs.get_tag.outputs.tag }}
           name: Yomihon ${{ needs.get_tag.outputs.tag }}
           body: |
-            Check out the [past release notes](https://github.com/yomihon/yomihon/releases) if you’re upgrading from an earlier version.
+            ### Один APK: `yomihon-${{ needs.get_tag.outputs.tag }}.apk` (arm64-v8a)
 
-            <!-->
+            | Поле | Значение |
+            |---|---|
+            | Коммит | `${{ github.sha }}` |
+            | Сборка | [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+            | versionName / versionCode | `${{ needs.build.outputs.version_name }}` / `${{ needs.build.outputs.version_code }}` |
+            | SHA-256 | `${{ needs.build.outputs.sha256 }}` |
+            | Размер | ${{ needs.build.outputs.size }} bytes |
 
-
-
-            <!-->
-
-            > [!TIP]
-            >
-            > ### Один APK: `yomihon-${{ needs.get_tag.outputs.tag }}.apk` (arm64-v8a)
-          files: yomihon-${{ needs.get_tag.outputs.tag }}.apk
-          draft: true
+            Прошлые релизные заметки: [yomihon/yomihon releases](https://github.com/yomihon/yomihon/releases).
+            Отчёт качества OCR лежит рядом с APK (`OCR-QUALITY-REPORT-*.md`).
+          files: |
+            downloaded/yomihon-${{ needs.get_tag.outputs.tag }}.apk
+            downloaded/release-report/OCR-QUALITY-REPORT-${{ github.sha }}.md
+          draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
