@@ -103,6 +103,13 @@ object AiAgent {
             "@tool plugin_edit {\"name\":\"имя\",\"template\":\"новый шаблон\"} — исправить плагин (менять можно любое поле)\n" +
             "@tool plugin_delete {\"name\":\"имя\"} — удалить плагин\n" +
             "@tool plugin_list {} — список своих плагинов\n" +
+            "ПРОВАЙДЕРЫ AI (сторонние сервисы и локальные LLM пользователя):\n" +
+            "@tool provider_create {\"id\":\"ollama\",\"title\":\"название\",\"baseUrl\":\"http://192.168.1.10:11434/v1\"," +
+            "\"model\":\"qwen2.5:7b\",\"apiKey\":\"\"} — подключить свой OpenAI-совместимый провайдер " +
+            "(Ollama, LM Studio, llama.cpp, корпоративный прокси); baseUrl без /chat/completions\n" +
+            "@tool provider_edit {\"id\":\"ollama\",\"model\":\"новая-модель\"} — изменить провайдер (любое поле)\n" +
+            "@tool provider_delete {\"id\":\"ollama\"} — отключить провайдер\n" +
+            "@tool provider_list {} — список провайдеров: встроенные и свои\n" +
             "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
             "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
             "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
@@ -304,6 +311,7 @@ object AiAgent {
             "check_site", "list_ext", "filter_ext", "find_manga", "zip_workspace",
             "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
             "runner_chat", "runner_start", "github_api",
+            "provider_create", "provider_edit", "provider_delete", "provider_list",
         ) + AiReaderTools.TOOL_NAMES + AiPlugins.list(context).map { it.name }
 
     /**
@@ -626,6 +634,71 @@ object AiAgent {
             } else {
                 ToolResult("zip_workspace", "Архив: ${AiWorkspace.relPath(context, f)} (${f.length() / 1024} КБ)", f)
             }
+        }
+
+        "provider_create", "provider_edit" -> {
+            val id = call.args.optString("id")
+            if (id.isBlank()) {
+                ToolResult(call.name, "ОШИБКА: нужен id провайдера (например, ollama)", status = "error")
+            } else {
+                val existing = AiProviders.userProvider(context, id)
+                if (call.name == "provider_edit" && existing == null) {
+                    ToolResult(call.name, "Провайдер «$id» не найден — сначала provider_create", status = "error")
+                } else {
+                    // Правка меняет только переданные поля: иначе edit затирал бы
+                    // ключ и модель, которые пользователь не трогал.
+                    val spec = AiProviders.Spec(
+                        id = id,
+                        title = call.args.optString("title").ifBlank { existing?.title ?: id },
+                        summary = call.args.optString("summary").ifBlank { existing?.summary.orEmpty() },
+                        baseUrl = call.args.optString("baseUrl").ifBlank { existing?.baseUrl.orEmpty() },
+                        model = call.args.optString("model").ifBlank { existing?.model.orEmpty() },
+                        apiKey = if (call.args.has("apiKey")) call.args.optString("apiKey") else existing?.apiKey.orEmpty(),
+                    )
+                    val error = AiProviders.validate(spec)
+                    when {
+                        error != null -> ToolResult(call.name, "ОШИБКА: $error", status = "error")
+                        AiProviders.save(context, spec) -> ToolResult(
+                            call.name,
+                            "Провайдер «${spec.title}» (${spec.model} @ ${spec.baseUrl}) сохранён. " +
+                                "Выберите его в настройках озвучки/AI-чата.",
+                        )
+                        else -> ToolResult(call.name, "ОШИБКА: не удалось записать провайдер", status = "error")
+                    }
+                }
+            }
+        }
+
+        "provider_delete" -> {
+            val id = call.args.optString("id")
+            when {
+                id.isBlank() -> ToolResult(call.name, "ОШИБКА: нужен id провайдера", status = "error")
+                AiProviders.delete(context, id) ->
+                    ToolResult(call.name, "Провайдер «$id» отключён")
+                else -> ToolResult(
+                    call.name,
+                    "ОШИБКА: провайдер «$id» не найден (встроенные zen/openrouter не удаляются)",
+                    status = "error",
+                )
+            }
+        }
+
+        "provider_list" -> {
+            val specs = AiProviders.all(context)
+            val prefsR = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+            val selected = prefsR.aiProvider().get()
+            ToolResult(
+                "provider_list",
+                buildString {
+                    appendLine("Провайдеров: ${specs.size} (выбран: $selected)")
+                    specs.forEach { spec ->
+                        append("• ${spec.id} — ${spec.title}: ${spec.model} @ ${spec.baseUrl}")
+                        if (spec.builtIn) append(" [встроенный]")
+                        if (spec.apiKey.isNotBlank()) append(" [ключ задан]")
+                        appendLine()
+                    }
+                }.trim(),
+            )
         }
 
         else -> {

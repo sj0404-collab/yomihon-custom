@@ -327,6 +327,38 @@ fun TtsSettingsDialog(
                             label = { Text("OpenRouter") },
                         )
                     }
+                    // Провайдеры пользователя из реестра AiProviders: свой
+                    // endpoint (Ollama, LM Studio, прокси). Создаются файлом в
+                    // workspace/providers или через AI-чат (provider_create).
+                    val userProviders = remember(context) {
+                        eu.kanade.tachiyomi.data.ai.AiProviders.list(context)
+                    }
+                    if (userProviders.isNotEmpty()) {
+                        Text(
+                            "Свои провайдеры:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        userProviders.forEach { spec ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 2.dp),
+                            ) {
+                                FilterChip(
+                                    selected = aiProvider == spec.id,
+                                    onClick = { aiProvider = spec.id },
+                                    label = { Text(spec.title.ifBlank { spec.id }) },
+                                )
+                            }
+                            Text(
+                                "${spec.model} • ${spec.baseUrl}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                     if (aiProvider == eu.kanade.tachiyomi.data.ai.AiAssistant.PROVIDER_ZEN) {
                         Text(
                             "Модель Zen (бесплатно, без регистрации):",

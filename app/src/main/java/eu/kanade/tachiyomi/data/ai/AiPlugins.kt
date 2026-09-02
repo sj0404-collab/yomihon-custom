@@ -87,6 +87,9 @@ object AiPlugins {
         // агента есть: плагин разработчика с именем runner_chat перехватывал
         // бы вызов. Теперь закрыто.
         "runner_chat", "runner_start", "github_api",
+        // Инструменты реестра провайдеров (AiProviders): плагин разработчика не
+        // может занять их имена и перехватить подключение стороннего AI.
+        "provider_create", "provider_edit", "provider_delete", "provider_list",
     ) + AiReaderTools.TOOL_NAMES
 
     private fun toJson(p: Plugin) = JSONObject()
