@@ -90,6 +90,44 @@ object OcrTextCleaner {
      * попадать в переводчик как «русский» текст. Допускаются короткие
      * общеупотребимые латинские токены из белого списка (`SOS`, `Wi-Fi`, `3D`).
      */
+    /**
+     * Пословный salvage распознанной строки.
+     *
+     * Раньше [isAcceptableCyrillicOcrText] требовала, чтобы ВСЕ слова строки
+     * были чистыми: один латинский мусорный токен (`Tele'axect.E`) обнулял всю
+     * подпись, и пользователь получал «Нет результатов» вместо готовой фразы.
+     * Именно так на device-проверке пропала белая подпись
+     * «ПО СЛОВАМ «ОХОТНИЧЬЕГО ПСА»…».
+     *
+     * Правила намеренно консервативны:
+     *  * строка без единой кириллической буквы возвращается как есть — это
+     *    латинская надпись или звукоподражание, терять её нельзя;
+     *  * если в строке осталось смешанное или сомнительное кириллическое
+     *    слово, возвращается вся строка целиком: частичный salvage мог бы
+     *    собрать фразу, которой в оригинале не было;
+     *  * иначе отбрасываются только токены без кириллицы, не входящие в
+     *    [LATIN_WHITELIST] (`SOS`, `Wi-Fi`, `3D` сохраняются).
+     *
+     * Это не словарная коррекция: ничего не придумывается и не заменяется.
+     */
+    fun filterGarbageTokens(text: String): String {
+        if (text.isBlank()) return text
+        val tokens = text.split(' ').filter(String::isNotEmpty)
+        if (tokens.isEmpty()) return text
+        val hasCyrillic = tokens.any { token -> token.any { it.code in CYRILLIC_RANGE } }
+        if (!hasCyrillic) return text
+        val suspicious = tokens.any { token ->
+            token.any { it.code in CYRILLIC_RANGE } &&
+                token.any { it.isLetter() && it.code < 0x80 }
+        }
+        if (suspicious) return text
+        val kept = tokens.filter { token ->
+            token.any { it.code in CYRILLIC_RANGE } ||
+                token.trimEnd('.', '!', ',', '?', '…').lowercase() in LATIN_WHITELIST
+        }
+        return if (kept.isEmpty()) "" else kept.joinToString(" ")
+    }
+
     fun isAcceptableCyrillicOcrText(text: String): Boolean {
         val words = text.split(Regex("\\s+")).filter(String::isNotBlank)
         if (words.isEmpty()) return false
