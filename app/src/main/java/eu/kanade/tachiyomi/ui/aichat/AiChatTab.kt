@@ -72,6 +72,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import eu.kanade.presentation.util.Tab
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.tachiyomi.data.ai.AiAgent
+import eu.kanade.tachiyomi.data.ai.AiBackends
 import eu.kanade.tachiyomi.data.ai.AiWorkspace
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.util.storage.getUriCompat
@@ -229,16 +230,16 @@ data object AiChatTab : Tab {
                     }
                     parts.joinToString("\n")
                 }
-                // Роутинг бэкенда. ВАЖНО (жалоба пользователя «почему для
-                // локальной АИ недоступны инструменты»): агентский цикл с
-                // @tool-инструментами теперь ОБЩИЙ — инструменты исполняет
-                // само приложение, а модель (онлайн/локальная/ранер) только
-                // пишет текст. Поэтому у локальной модели ЕСТЬ файлы,
-                // картинки, проверка сайтов и всё остальное.
-                // Маршрутизация бэкенда вынесена в реестр AiBackends: та же
-                // проверка готовности, но одна на чат и на экран настроек.
+                // Роутинг бэкенда — через реестр AiBackends (одна проверка
+                // готовности на чат и на экран настроек). ВАЖНО (жалоба
+                // пользователя «почему для локальной АИ недоступны
+                // инструменты»): агентский цикл с @tool-инструментами ОБЩИЙ —
+                // инструменты исполняет само приложение, а модель
+                // (онлайн/локальная/ранер) только пишет текст. Поэтому у
+                // локальной модели ЕСТЬ файлы, картинки, проверка сайтов,
+                // reader_status и ocr_preset.
                 val prefsBk = Injekt.get<OcrPreferences>()
-                val resolution = eu.kanade.tachiyomi.data.ai.AiBackends.resolve(
+                val resolution = AiBackends.resolve(
                     context = context,
                     backendId = prefsBk.aiBackend().get(),
                 )
