@@ -222,6 +222,9 @@ internal class CyrillicOcrEngine(
             val boxes = detectTextBoxes(image)
             if (boxes.isEmpty()) return@withLock recognizeWholeImageFallback(image)
 
+            // Отклонённые по уверенности строки запоминаются: это второй
+            // rescue-эшелон (см. ниже).
+            val rejected = mutableListOf<Pair<TextBox, Recognition>>()
             val recognized = boxes.mapNotNull { box ->
                 val padded = pad(box.rect, image.width, image.height)
                 if (padded.width() < 4 || padded.height() < 4) return@mapNotNull null
@@ -232,14 +235,25 @@ internal class CyrillicOcrEngine(
                     // реплик («а», «а!», «а-а-а») используется более мягкий
                     // порог: длина сама по себе не является доказательством
                     // мусора.
-                    result.text
-                        .takeIf { it.isNotBlank() && acceptsConfidence(result) }
-                        ?.let { box to it }
+                    if (result.text.isNotBlank() && acceptsConfidence(result)) {
+                        box to result.text
+                    } else {
+                        if (result.text.isNotBlank()) rejected += box to result
+                        null
+                    }
                 } finally {
                     crop.recycle()
                 }
             }
-            if (recognized.isEmpty()) return@withLock recognizeWholeImageFallback(image)
+            if (recognized.isEmpty()) {
+                // Цельностраничный rescue почти бесполезен для обычной подписи:
+                // весь лист уменьшается до 320x48 и текст становится
+                // нечитаемым. Поэтому сначала пробуем лучшие из отклонённых
+                // строк — их детектор уже нашёл и вырезал по размеру.
+                val rescued = rescueRejectedLines(rejected)
+                if (rescued.isNotEmpty()) return@withLock rescued
+                return@withLock recognizeWholeImageFallback(image)
+            }
 
             val rows = mutableListOf<MutableList<Pair<TextBox, String>>>()
             recognized.forEach { item ->
@@ -256,6 +270,44 @@ internal class CyrillicOcrEngine(
             }
             cleanRecognition(textPostprocessor.postprocess(text))
         }
+    }
+
+    /**
+     * Второй rescue-эшелон: лучшие из строк, отклонённых по уверенности.
+     *
+     * Устройство сообщало о подписях, которые не дают никакого результата,
+     * хотя детектор их видел. Первый эшелон ([recognizeWholeImageFallback])
+     * здесь почти не помогает: он уменьшает весь лист до 320x48, и компактная
+     * подпись становится нечитаемой. Здесь же берутся уже вырезанные по боксам
+     * кропы — тот же материал, который не прошёл порог уверенности.
+     *
+     * Возвращается результат только если он проходит все текстовые фильтры
+     * (кириллица, «словарная лесенка», пословный salvage). Ничего не
+     * додумывается: это выбор лучшего из уже распознанного.
+     */
+    private fun rescueRejectedLines(rejected: List<Pair<TextBox, Recognition>>): String {
+        if (rejected.isEmpty()) return ""
+        val candidates = rejected
+            .map { (box, recognition) -> box to recognition.text.trim() }
+            .filter { (_, text) -> text.isNotBlank() }
+            .sortedByDescending { (_, text) -> text.count(Char::isLetter) }
+            .take(RESCUE_MAX_LINES)
+        if (candidates.isEmpty()) return ""
+
+        val rows = mutableListOf<MutableList<Pair<TextBox, String>>>()
+        candidates.forEach { item ->
+            val row = rows.firstOrNull { existing ->
+                val center = existing.map { it.first.centerY }.average().toFloat()
+                val height = existing.map { it.first.height }.average().toFloat()
+                abs(item.first.centerY - center) <= max(item.first.height.toFloat(), height) * 0.60f
+            }
+            if (row != null) row += item else rows += mutableListOf(item)
+        }
+        rows.sortBy { row -> row.minOf { it.first.rect.top } }
+        val text = rows.joinToString("\n") { row ->
+            row.sortedBy { it.first.rect.left }.joinToString(" ") { it.second }
+        }
+        return cleanRecognition(textPostprocessor.postprocess(text))
     }
 
     /**
@@ -899,6 +951,10 @@ internal class CyrillicOcrEngine(
         // снижаться. 12 % — это примерно один выпавший символ на восемь
         // прочитанных: нормальный шум тонкого шрифта ещё не штрафуется.
         private const val MIN_COVERAGE = 0.12f
+
+        // Сколько лучших отклонённых строк поднимает второй rescue-эшелон.
+        // Ограничение защищает от склейки длинного «шума» из десятков боксов.
+        private const val RESCUE_MAX_LINES = 6
         private const val MIN_ACCEPT_CONFIDENCE = 0.25f
         private const val SHORT_TEXT_MIN_CONFIDENCE = 0.12f
         private const val ALLOWED_PUNCTUATION = " .,!?;:-()[]{}\"'«»„“”%№+/=…—–"
