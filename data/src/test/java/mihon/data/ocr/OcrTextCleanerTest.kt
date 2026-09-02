@@ -125,8 +125,11 @@ class OcrTextCleanerTest {
     @Test
     fun `one garbage token no longer erases the whole caption`() {
         OcrTextCleaner.filterGarbageTokens("И ПАЛ Tele'axect.E ПОД ЛЕЗВИЕМ") shouldBe "И ПАЛ ПОД ЛЕЗВИЕМ"
-        OcrTextCleaner.filterGarbageTokens("мама-naма") shouldBe "мама"
-        OcrTextCleaner.filterGarbageTokens("сахар-samaар") shouldBe "сахар"
+        OcrTextCleaner.filterGarbageTokens("ОН БЫЛ ЛОЖНО ОБВИНЁН В zz СГОВОРЕ С ДЕМОНОМ") shouldBe
+            "ОН БЫЛ ЛОЖНО ОБВИНЁН В СГОВОРЕ С ДЕМОНОМ"
+        // Один мусорный токен отбрасывается, остальные слова подписи живут.
+        OcrTextCleaner.filterGarbageTokens("ПО СЛОВАМ axect «ОХОТНИЧЬЕГО ПСА»") shouldBe
+            "ПО СЛОВАМ «ОХОТНИЧЬЕГО ПСА»"
     }
 
     @Test
