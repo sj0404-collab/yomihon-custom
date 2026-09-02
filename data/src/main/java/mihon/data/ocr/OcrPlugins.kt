@@ -181,8 +181,14 @@ object OcrPlugins {
     /**
      * Цепочка фолбэков без первичного движка.
      *
-     * @param preset auto | online | offline | single — префиксы прежних
-     *   значений `pref_fallback_preset`, неизвестное значение читается как auto.
+     * Порядок воспроизводит прежний `fallbackChain()` из `OcrRepositoryImpl`:
+     * сначала онлайн-движки, затем локальные, внутри группы — по
+     * [OcrPluginDescriptor.fallbackPriority]. Локальный движок намеренно
+     * последний: он медленный, а онлайн обычно даёт лучший результат, поэтому
+     * «авто» не должно начинаться с него.
+     *
+     * @param preset auto | online | offline | single — значения прежнего
+     *   `pref_fallback_preset`, неизвестное значение читается как auto.
      */
     fun fallbackChain(
         primary: OcrPluginDescriptor,
@@ -197,7 +203,7 @@ object OcrPlugins {
         }
         return pool
             .filter { it.id != primary.id }
-            .sortedBy { it.fallbackPriority }
+            .sortedWith(compareByDescending<OcrPluginDescriptor> { it.online }.thenBy { it.fallbackPriority })
     }
 }
 
