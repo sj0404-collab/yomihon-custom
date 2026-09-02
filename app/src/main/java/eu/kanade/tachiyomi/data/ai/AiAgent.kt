@@ -80,7 +80,9 @@ object AiAgent {
     private val sourceManager: SourceManager by lazy { Injekt.get() }
     private val sourcePrefs: SourcePreferences by lazy { Injekt.get() }
 
-    private const val SYSTEM_PROMPT =
+    // Не const: в промпт подставляется документация инструментов читалки
+    // из AiReaderTools, а это выражение, а не литерал.
+    private val SYSTEM_PROMPT =
         "Ты — встроенный AI-агент манга-читалки Yomikai (как arena.ai agent, но внутри приложения). " +
             "Отвечай кратко и по-русски. У тебя есть ИНСТРУМЕНТЫ. Чтобы вызвать инструмент, " +
             "напиши отдельной строкой: @tool имя {json-аргументы}. Доступные инструменты:\n" +

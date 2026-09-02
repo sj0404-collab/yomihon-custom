@@ -550,7 +550,7 @@ class MainActivity : BaseActivity() {
         // навигации, поэтому идём тем же путём, что и ярлыки рабочего стола.
         if (intent.getBooleanExtra(EXTRA_OPEN_AI_CHAT, false)) {
             intent.removeExtra(EXTRA_OPEN_AI_CHAT)
-            if (Injekt.get<mihon.domain.ocr.service.OcrPreferences>().aiTabVisible().get()) {
+            if (uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().aiTabVisible().get()) {
                 navigator.popUntilRoot()
                 lifecycleScope.launch { HomeScreen.openTab(HomeScreen.Tab.AiChat) }
                 ready = true

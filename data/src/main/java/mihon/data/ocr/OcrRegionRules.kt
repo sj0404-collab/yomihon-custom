@@ -39,6 +39,28 @@ object OcrRegionRules {
         regionOf(presetKey) ?: legacy
 
     /**
+     * Число с плавающей точкой из поля настройки.
+     *
+     * Запятая принимается как десятичный разделитель: приложение русское, и
+     * «0,19» обязано значить то же, что «0.19». Приводим к точке сами, потому
+     * что `String.toFloatOrNull()` трактует запятую как разделитель групп
+     * разрядов: «12,5f» у него превращается в 1.25 — пользователь увидел бы
+     * значение, которого не вводил. Суффиксы Java-литералов (f, d) отвергаем.
+     */
+    private fun floatOrNull(value: String): Float? {
+        val text = value.trim().replace(',', '.')
+        if (text.isEmpty()) return null
+        return text.takeIf { it.all { c -> c.isDigit() || c in ".-+eE" } }?.toFloatOrNull()
+    }
+
+    /** Целое из поля настройки: пустая строка или опечатка = «как в пресете». */
+    private fun intOrNull(value: String): Int? {
+        val text = value.trim()
+        if (text.isEmpty()) return null
+        return text.takeIf { it.all { c -> c.isDigit() || c in "+-" } }?.toIntOrNull()
+    }
+
+    /**
      * Переопределения пресета из строк настройки.
      *
      * Пустое или нечисловое поле означает «как в пресете»: значение,
@@ -55,14 +77,14 @@ object OcrRegionRules {
         minCoverage: String,
         rescueMaxLines: String,
     ): OcrTuningOverrides = OcrTuningOverrides(
-        detectorThreshold = detectorThreshold.toFloatOrNull(),
-        minComponentArea = minComponentArea.toIntOrNull(),
-        maxTextBoxes = maxTextBoxes.toIntOrNull(),
-        wordGapFactor = wordGapFactor.toFloatOrNull(),
-        minAcceptConfidence = minAcceptConfidence.toFloatOrNull(),
-        shortTextMinConfidence = shortTextMinConfidence.toFloatOrNull(),
-        minCoverage = minCoverage.toFloatOrNull(),
-        rescueMaxLines = rescueMaxLines.toIntOrNull(),
+        detectorThreshold = floatOrNull(detectorThreshold),
+        minComponentArea = intOrNull(minComponentArea),
+        maxTextBoxes = intOrNull(maxTextBoxes),
+        wordGapFactor = floatOrNull(wordGapFactor),
+        minAcceptConfidence = floatOrNull(minAcceptConfidence),
+        shortTextMinConfidence = floatOrNull(shortTextMinConfidence),
+        minCoverage = floatOrNull(minCoverage),
+        rescueMaxLines = intOrNull(rescueMaxLines),
     )
 
     /** Профиль распознавания, который движок применит к следующей странице. */

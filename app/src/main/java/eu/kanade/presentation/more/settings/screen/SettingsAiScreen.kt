@@ -187,10 +187,13 @@ object SettingsAiScreen : SearchableSettings {
         append('\n')
         append(status.detail)
         if (status.missing.isNotEmpty()) {
+            // Подписи требований готовим до joinToString: внутри его лямбды
+            // @Composable вызывать нельзя.
+            val labels = status.missing.associateWith { requirementLabel(it) }
             append('\n')
             append(stringResource(MR.strings.pref_ai_requires))
             append(": ")
-            append(status.missing.joinToString(", ") { requirementLabel(it) })
+            append(status.missing.joinToString(", ") { labels.getValue(it) })
         }
     }
 

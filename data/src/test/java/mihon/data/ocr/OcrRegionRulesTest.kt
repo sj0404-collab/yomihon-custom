@@ -44,13 +44,26 @@ class OcrRegionRulesTest {
     @Test
     fun `blank or malformed overrides mean -as in preset-`() {
         OcrRegionRules.overridesOf("", "", "", "", "", "", "", "").isEmpty shouldBe true
-        // Опечатка пользователя не должна ни ломать распознавание, ни молча
-        // применять мусор: поле остаётся «как в пресете».
-        OcrRegionRules.overridesOf("abc", "1.5", "12,5", "", "", "", "", "").isEmpty shouldBe false
-        OcrRegionRules.overridesOf("abc", "1.5", "12,5", "", "", "", "", "").detectorThreshold shouldBe null
-        OcrRegionRules.overridesOf("abc", "1.5", "12,5", "", "", "", "", "").minComponentArea shouldBe null
-        OcrRegionRules.overridesOf("abc", "1.5", "12,5", "", "", "", "", "").maxTextBoxes shouldBe null
-        OcrRegionRules.overridesOf("abc", "1.5", "12,5", "", "", "", "", "").wordGapFactor shouldBe 1.5f
+
+        val garbage = OcrRegionRules.overridesOf("abc", "12px", "0.2f", "", "", "", "", "")
+        garbage.isEmpty shouldBe true
+        garbage.detectorThreshold shouldBe null
+        garbage.minComponentArea shouldBe null
+        garbage.maxTextBoxes shouldBe null
+    }
+
+    @Test
+    fun `comma decimal separator is accepted and means the same as a dot`() {
+        // Приложение русское: «0,19» и «0.19» обязаны давать одно значение.
+        // Без приведения разделителя toFloatOrNull() читает запятую как
+        // разделитель групп разрядов, и «12,5f» превращается в 1.25.
+        OcrRegionRules.overridesOf("0,19", "", "", "", "", "", "", "").detectorThreshold shouldBe 0.19f
+        OcrRegionRules.overridesOf("0.19", "", "", "", "", "", "", "").detectorThreshold shouldBe 0.19f
+        OcrRegionRules.overridesOf("", "", "", "1,5", "", "", "", "").wordGapFactor shouldBe 1.5f
+        OcrRegionRules.overridesOf("", "", "", "", "", "", "", " 8 ").rescueMaxLines shouldBe 8
+        OcrRegionRules.overridesOf("", "12", "", "", "", "", "", "").minComponentArea shouldBe 12
+        // Пробелы по краям не ломают значение.
+        OcrRegionRules.overridesOf(" 0.22 ", "", "", "", "", "", "", "").detectorThreshold shouldBe 0.22f
     }
 
     @Test
