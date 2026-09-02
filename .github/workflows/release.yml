@@ -85,14 +85,6 @@ jobs:
           keyAlias: ${{ secrets.ALIAS }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Rename APK
-        shell: bash
-        run: |
-          set -e
-          # Собирается один APK под arm64-v8a (см. splits в app/build.gradle.kts).
-          mv app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            yomihon-${{ needs.get_tag.outputs.tag }}.apk
-
       - name: Assert the delivery is a single APK
         shell: bash
         run: |
@@ -106,6 +98,14 @@ jobs:
             echo "::error::В релизном варианте ожидался ровно один APK, найдено $release_count"
             exit 1
           fi
+
+      - name: Rename APK
+        shell: bash
+        run: |
+          set -e
+          # Собирается один APK под arm64-v8a (см. splits в app/build.gradle.kts).
+          mv app/build/outputs/apk/release/app-arm64-v8a-release.apk \
+            yomihon-${{ needs.get_tag.outputs.tag }}.apk
 
       - name: Verify version baked into the APK
         id: version
