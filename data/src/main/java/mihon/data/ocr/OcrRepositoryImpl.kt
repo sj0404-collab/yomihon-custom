@@ -64,30 +64,26 @@ class OcrRepositoryImpl(
     private fun currentTuning(): OcrTuning = regionProfile().tuning()
 
     /** Область из пресета; `pref_scan_region` остаётся быстрым переопределением. */
-    private fun presetScanRegion(): mihon.domain.ocr.service.ScanRegion {
-        val fromPreset = when (ocrPreferences.presetScanRegion().get()) {
-            "top" -> mihon.domain.ocr.service.ScanRegion.TOP_HALF
-            "bottom" -> mihon.domain.ocr.service.ScanRegion.BOTTOM_HALF
-            "full" -> mihon.domain.ocr.service.ScanRegion.FULL_PAGE
-            else -> null
-        }
-        return fromPreset ?: ocrPreferences.scanRegion().get()
-    }
+    private fun presetScanRegion(): mihon.domain.ocr.service.ScanRegion =
+        OcrRegionRules.effectiveRegion(
+            presetKey = ocrPreferences.presetScanRegion().get(),
+            legacy = ocrPreferences.scanRegion().get(),
+        )
 
     /**
      * Ручные переопределения пресета. Незаполненное или нечисловое поле
      * означает «как в пресете»: настройка, сохранённая старой версией, не
      * должна ломать распознавание.
      */
-    private fun tuningOverrides(): OcrTuningOverrides = OcrTuningOverrides(
-        detectorThreshold = ocrPreferences.detectorThresholdOverride().get().toFloatOrNull(),
-        minComponentArea = ocrPreferences.minComponentAreaOverride().get().toIntOrNull(),
-        maxTextBoxes = ocrPreferences.maxTextBoxesOverride().get().toIntOrNull(),
-        wordGapFactor = ocrPreferences.wordGapFactorOverride().get().toFloatOrNull(),
-        minAcceptConfidence = ocrPreferences.minAcceptConfidenceOverride().get().toFloatOrNull(),
-        shortTextMinConfidence = ocrPreferences.shortTextConfidenceOverride().get().toFloatOrNull(),
-        minCoverage = ocrPreferences.minCoverageOverride().get().toFloatOrNull(),
-        rescueMaxLines = ocrPreferences.rescueMaxLinesOverride().get().toIntOrNull(),
+    private fun tuningOverrides(): OcrTuningOverrides = OcrRegionRules.overridesOf(
+        detectorThreshold = ocrPreferences.detectorThresholdOverride().get(),
+        minComponentArea = ocrPreferences.minComponentAreaOverride().get(),
+        maxTextBoxes = ocrPreferences.maxTextBoxesOverride().get(),
+        wordGapFactor = ocrPreferences.wordGapFactorOverride().get(),
+        minAcceptConfidence = ocrPreferences.minAcceptConfidenceOverride().get(),
+        shortTextMinConfidence = ocrPreferences.shortTextConfidenceOverride().get(),
+        minCoverage = ocrPreferences.minCoverageOverride().get(),
+        rescueMaxLines = ocrPreferences.rescueMaxLinesOverride().get(),
     )
 
     private var cyrillicEngine: CyrillicOcrEngine? = null

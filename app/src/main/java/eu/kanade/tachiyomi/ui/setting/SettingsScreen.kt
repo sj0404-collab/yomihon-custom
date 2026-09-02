@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.presentation.more.settings.screen.SettingsAiScreen
 import eu.kanade.presentation.more.settings.screen.SettingsAppearanceScreen
 import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
 import eu.kanade.presentation.more.settings.screen.SettingsDictionaryScreen
@@ -37,6 +38,7 @@ class SettingsScreen(
             Navigator(
                 screen = when (destination) {
                     Destination.About.id -> AboutScreen
+                    Destination.Ai.id -> SettingsAiScreen
                     Destination.DataAndStorage.id -> SettingsDataScreen
                     Destination.Dictionary.id -> SettingsDictionaryScreen
                     Destination.Tracking.id -> SettingsTrackingScreen
@@ -59,6 +61,7 @@ class SettingsScreen(
             Navigator(
                 screen = when (destination) {
                     Destination.About.id -> AboutScreen
+                    Destination.Ai.id -> SettingsAiScreen
                     Destination.DataAndStorage.id -> SettingsDataScreen
                     Destination.Dictionary.id -> SettingsDictionaryScreen
                     Destination.Tracking.id -> SettingsTrackingScreen
@@ -84,6 +87,9 @@ class SettingsScreen(
 
     sealed class Destination(val id: Int) {
         data object About : Destination(0)
+
+        /** Настройки AI-ассистента: открывается из MainActivity, когда вкладка AI скрыта. */
+        data object Ai : Destination(4)
         data object DataAndStorage : Destination(1)
         data object Dictionary : Destination(3)
         data object Tracking : Destination(2)

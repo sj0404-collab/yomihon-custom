@@ -292,6 +292,7 @@ private val settingScreens = listOf(
     SettingsOcrScreen,
     SettingsOcrPluginsScreen,
     SettingsVoicePluginsScreen,
+    SettingsAiScreen,
     SettingsDownloadScreen,
     SettingsTrackingScreen,
     SettingsBrowseScreen,

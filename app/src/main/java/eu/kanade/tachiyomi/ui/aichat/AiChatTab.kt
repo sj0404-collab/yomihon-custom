@@ -72,6 +72,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import eu.kanade.presentation.util.Tab
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.tachiyomi.data.ai.AiAgent
+import eu.kanade.tachiyomi.data.ai.AiBackends
 import eu.kanade.tachiyomi.data.ai.AiWorkspace
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.util.storage.getUriCompat
@@ -229,57 +230,30 @@ data object AiChatTab : Tab {
                     }
                     parts.joinToString("\n")
                 }
-                // Роутинг бэкенда. ВАЖНО (жалоба пользователя «почему для
-                // локальной АИ недоступны инструменты»): агентский цикл с
-                // @tool-инструментами теперь ОБЩИЙ — инструменты исполняет
-                // само приложение, а модель (онлайн/локальная/ранер) только
-                // пишет текст. Поэтому у локальной модели ЕСТЬ файлы,
-                // картинки, проверка сайтов и всё остальное.
+                // Роутинг бэкенда — через реестр AiBackends (одна проверка
+                // готовности на чат и на экран настроек). ВАЖНО (жалоба
+                // пользователя «почему для локальной АИ недоступны
+                // инструменты»): агентский цикл с @tool-инструментами ОБЩИЙ —
+                // инструменты исполняет само приложение, а модель
+                // (онлайн/локальная/ранер) только пишет текст. Поэтому у
+                // локальной модели ЕСТЬ файлы, картинки, проверка сайтов,
+                // reader_status и ocr_preset.
                 val prefsBk = Injekt.get<OcrPreferences>()
-                val backendKey = prefsBk.aiBackend().get()
-                val chatFn: (suspend (String, String) -> eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply?)? =
-                    when (backendKey) {
-                        "local" -> {
-                            val modelId = prefsBk.localLlmModel().get()
-                            val model = eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.firstOrNull { it.id == modelId }
-                            if (model != null && eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, model)) {
-                                { p, sys ->
-                                    eu.kanade.tachiyomi.data.ai.LocalLlm
-                                        .chat(context, model, "$sys\n\n$p")
-                                        ?.let {
-                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, model.name)
-                                        }
-                                }
-                            } else {
-                                null // не готова — ниже честное сообщение
-                            }
-                        }
-                        "runner" -> {
-                            val session = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context).firstOrNull()
-                            if (session?.url != null) {
-                                { p, sys ->
-                                    eu.kanade.tachiyomi.data.ai.RunnerLlm
-                                        .chat(context, session, "$sys\n\n$p")
-                                        ?.let {
-                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, session.model)
-                                        }
-                                }
-                            } else {
-                                null
-                            }
-                        }
-                        else -> { p, sys -> eu.kanade.tachiyomi.data.ai.AiAssistant.chatFull(p, sys, maxTokens = 1800) }
-                    }
+                val resolution = AiBackends.resolve(
+                    context = context,
+                    backendId = prefsBk.aiBackend().get(),
+                )
+                val backendKey = resolution.backendId
+                val chatFn = resolution.chat
                 if (chatFn == null) {
                     withContext(Dispatchers.Main) {
                         pushMsg(
                             Msg(
                                 "ai",
-                                if (backendKey == "local") {
-                                    "Локальная модель не готова: скачайте её в ⚙ → Локальные LLM и прогоните «Тест»"
-                                } else {
-                                    "Нет живой ранер-сессии: запустите её в ⚙ → Полу-онлайн LLM"
-                                },
+                                // Текст объяснения даёт реестр — он же показывается
+                                // в настройках, поэтому формулировки не расходятся.
+                                resolution.message
+                                    ?: "Бэкенд «$backendKey» не готов к запросу",
                                 model = backendKey,
                             ),
                         )

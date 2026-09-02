@@ -128,6 +128,7 @@ class MainActivity : BaseActivity() {
 
     private val libraryPreferences: LibraryPreferences by injectLazy()
     private val preferences: BasePreferences by injectLazy()
+    private val ocrPreferences: mihon.domain.ocr.service.OcrPreferences by injectLazy()
 
     private val downloadCache: DownloadCache by injectLazy()
     private val chapterCache: ChapterCache by injectLazy()
@@ -546,6 +547,24 @@ class MainActivity : BaseActivity() {
             return true
         }
 
+        // Кнопка «Открыть AI-чат» в настройках: вкладка живёт в нижней
+        // навигации, поэтому идём тем же путём, что и ярлыки рабочего стола.
+        if (intent.getBooleanExtra(EXTRA_OPEN_AI_CHAT, false)) {
+            intent.removeExtra(EXTRA_OPEN_AI_CHAT)
+            if (ocrPreferences.aiTabVisible().get()) {
+                navigator.popUntilRoot()
+                lifecycleScope.launch { HomeScreen.openTab(HomeScreen.Tab.AiChat) }
+                ready = true
+                return true
+            }
+            // Вкладка скрыта — показываем раздел настроек AI, где её можно
+            // включить; открывать несуществующую вкладку нельзя.
+            navigator.popUntilRoot()
+            navigator.push(SettingsScreen(SettingsScreen.Destination.Ai))
+            ready = true
+            return true
+        }
+
         val tabToOpen = when (intent.action) {
             Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_MANGA -> {
@@ -619,6 +638,9 @@ class MainActivity : BaseActivity() {
     }
 
     companion object {
+        /** Extra: открыть вкладку «AI» (кнопка «Открыть AI-чат» в настройках). */
+        const val EXTRA_OPEN_AI_CHAT = "open_ai_chat"
+
         const val INTENT_SEARCH = "eu.kanade.tachiyomi.SEARCH"
         const val INTENT_SEARCH_QUERY = "query"
         const val INTENT_SEARCH_FILTER = "filter"
