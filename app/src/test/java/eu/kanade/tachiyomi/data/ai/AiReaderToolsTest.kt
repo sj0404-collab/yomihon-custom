@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.data.ai
 
 import eu.kanade.tachiyomi.data.voice.VoiceBackend
-import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import mihon.data.ocr.OcrContentType
@@ -27,7 +26,7 @@ class AiReaderToolsTest {
     fun `reader tools cannot be shadowed by a developer plugin`() {
         // AiPlugins.save() отвергает имя из этого набора, поэтому плагин
         // разработчика не может перехватить вызов инструмента читалки.
-        AiReaderTools.TOOL_NAMES.forEach { AiPlugins.RESERVED_TOOL_NAMES shouldContain it }
+        AiReaderTools.TOOL_NAMES.forEach { (it in AiPlugins.RESERVED_TOOL_NAMES) shouldBe true }
     }
 
     @Test

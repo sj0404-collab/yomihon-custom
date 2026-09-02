@@ -60,7 +60,7 @@ class AiBackendsTest {
         AiBackends.ALL.forEach { plugin ->
             val status = AiBackends.statusOf(plugin, readyState)
             status.available shouldBe true
-            status.missing shouldBe emptyList()
+            status.missing shouldBe emptyList<AiRequirement>()
             status.detail.isNotBlank() shouldBe true
         }
     }
