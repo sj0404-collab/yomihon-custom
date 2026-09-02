@@ -84,12 +84,20 @@ class AiBackendsTest {
         noKey.available shouldBe false
         noKey.missing shouldContainExactly listOf(AiRequirement.OPENROUTER_KEY)
 
-        // Ключ есть, но сети нет → оба требования.
-        val offline = AiBackends.statusOf(
+        // Ключ есть, но сети нет → только сеть: ключ никуда не делся.
+        AiBackends.statusOf(
             AiBackends.ONLINE,
             readyState.copy(networkAvailable = false),
             provider = AiAssistant.PROVIDER_OPENROUTER,
+        ).missing shouldContainExactly listOf(AiRequirement.NETWORK)
+
+        // Нет ни сети, ни ключа → оба требования, сеть первой.
+        val offline = AiBackends.statusOf(
+            AiBackends.ONLINE,
+            readyState.copy(networkAvailable = false, hasOpenRouterKey = false),
+            provider = AiAssistant.PROVIDER_OPENROUTER,
         )
+        offline.available shouldBe false
         offline.missing shouldContainExactly listOf(AiRequirement.NETWORK, AiRequirement.OPENROUTER_KEY)
     }
 
