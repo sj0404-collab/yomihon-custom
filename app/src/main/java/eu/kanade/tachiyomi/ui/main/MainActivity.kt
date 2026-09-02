@@ -128,6 +128,7 @@ class MainActivity : BaseActivity() {
 
     private val libraryPreferences: LibraryPreferences by injectLazy()
     private val preferences: BasePreferences by injectLazy()
+    private val ocrPreferences: mihon.domain.ocr.service.OcrPreferences by injectLazy()
 
     private val downloadCache: DownloadCache by injectLazy()
     private val chapterCache: ChapterCache by injectLazy()
@@ -550,15 +551,16 @@ class MainActivity : BaseActivity() {
         // навигации, поэтому идём тем же путём, что и ярлыки рабочего стола.
         if (intent.getBooleanExtra(EXTRA_OPEN_AI_CHAT, false)) {
             intent.removeExtra(EXTRA_OPEN_AI_CHAT)
-            if (uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().aiTabVisible().get()) {
+            if (ocrPreferences.aiTabVisible().get()) {
                 navigator.popUntilRoot()
                 lifecycleScope.launch { HomeScreen.openTab(HomeScreen.Tab.AiChat) }
                 ready = true
                 return true
             }
-            // Вкладка скрыта — показываем настройки AI, где её можно включить.
+            // Вкладка скрыта — показываем раздел настроек AI, где её можно
+            // включить; открывать несуществующую вкладку нельзя.
             navigator.popUntilRoot()
-            navigator.push(SettingsScreen(SettingsScreen.Destination.About))
+            navigator.push(SettingsScreen(SettingsScreen.Destination.Ai))
             ready = true
             return true
         }
