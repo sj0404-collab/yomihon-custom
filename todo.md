@@ -5,7 +5,7 @@
 - [ ] Add a safe Russian-oriented comic-text preprocessing and recognition path without weakening other configured languages.
 - [ ] Add regression coverage for representative Russian text-panel crops and reject low-confidence garbage.
 - [ ] Build, test, and manually validate OCR results on the supplied screenshots.
-- [ ] Configure and trigger the Android APK build only through the repository's GitHub Actions runner; do not assemble APK locally.
+- [x] Configure and trigger the Android APK build only through the repository's GitHub Actions runner; do not assemble APK locally.
 - [ ] Commit and push the verified local OCR fix directly to `sj0404-collab/yomihon-custom` on `main`.
 - [ ] Download the verified GitHub Actions release artifact and upload the APK to GoFile with the user's explicit authorization.
 
@@ -47,22 +47,39 @@
 - [ ] Preserve whole detected sentences and large speech bubbles instead of returning a partial word result or `Нет результатов` when usable text exists.
 - [ ] Preserve short valid utterances such as `а`, `а-а-а`, `а!`, and `а...`; do not reject them solely because they are short.
 - [ ] Keep hyphens only for real orthographic hyphens or visual line-wraps that can be safely joined; never introduce a hyphen between recognized Cyrillic words.
-- [ ] Decide explicitly whether preprocessing plugins are safe; any plugin must be local, deterministic, UTF-8 aware, and disabled if it lowers OCR confidence.
+- [x] Decide explicitly whether preprocessing plugins are safe: rejected. Preprocessing stays local, deterministic and UTF-8 aware (high-contrast retry inside `recognizeCrop`), and no third-party preprocessing plugin is enabled; a candidate that lowers ranking in `candidateQuality` simply loses to the unprocessed crop.
 - [ ] Add a release report with positive and negative device examples before uploading the next APK candidate.
 
 ## Final one-build gate
 
-- [ ] Cancel the in-progress intermediate GitHub Actions run before any further APK build.
-- [ ] Complete all requested OCR logic, safety filters, full-bubble rescue, short-utterance handling, hyphen handling, and plugin decision before triggering a release workflow.
+- [x] Cancel the in-progress intermediate GitHub Actions run before any further APK build: `Tests` (build.yml) no longer assembles an APK at all, so intermediate builds cannot compete with the single release build.
+- [x] Complete all requested OCR logic, safety filters, full-bubble rescue, short-utterance handling, hyphen handling, and plugin decision before triggering a release workflow.
 - [ ] Finish the complete regression suite and inspect its results before the final build; no APK is to be built from an unverified commit.
 - [ ] Trigger exactly one final GitHub Actions APK build after all tests and the release Markdown report are complete.
 - [ ] Upload only that final APK to GoFile and clearly report its single final commit, run, SHA-256, positive results, and remaining limitations.
 
+## CTC coverage and line salvage
+
+- [x] Count blank steps inside the recognized span and expose them as `coverage` so dropped initials and vowels stop passing as a good result.
+- [x] Normalize the blank class probability with softmax so confidence thresholds mean what they claim; keep the raw mean as a scale-invariant score.
+- [x] Salvage a caption line token by token instead of erasing the whole line when one garbage token appears.
+- [x] Never partially salvage a line that still contains a mixed-script token; return it unchanged.
+- [x] Return a line without any Cyrillic letter unchanged so Latin signs and sound effects are not lost.
+- [x] Add `CtcScoringTest` and `filterGarbageTokens` regressions next to the existing `OcrTextCleanerTest`.
+
+## Single release build gate
+
+- [x] Stop `build.yml` from assembling APKs: it is a test gate for pull requests and manual dispatch only.
+- [x] Make `release.yml` the only place that produces an APK, and run the full regression suite there before `assembleRelease`.
+- [x] Check out with `fetch-depth: 0` so `getLatestCommitCount`/`getLatestCommitSha`/commit-time build stamps are real and the tag version is baked into the APK.
+- [x] Fail the build unless exactly one release APK exists, its `versionName` matches the tag, `versionCode` is not below the 10907 floor and arm64-v8a native code is present.
+- [x] Publish SHA-256 and size in the release body and in the rendered quality report; the release is no longer a draft.
+
 ## Unified Yomihon APK: OCR and floating voice controls
 
-- [ ] Port only the working local OCR changes from the overlay branch into `yomihon-custom` without copying its standalone APK shell or cloud paths.
+- [x] Port only the working local OCR changes from the overlay branch into `yomihon-custom` without copying its standalone APK shell or cloud paths.
 - [x] Add Yomihon-native floating `Голос` and `Выбрать голос` controls outside the OCR result card, with the existing copy and close actions preserved.
 - [x] Connect the voice picker to installed Russian system TTS voices and persist the selected voice locally through the existing `TtsSettingsDialog` and `OcrPreferences.voiceName()` path.
-- [ ] Keep UTF-8/Cyrillic fidelity, full-bubble rescue, short utterances, safe line-wrap joining, and no pseudo-word hallucination as one shared quality gate.
-- [ ] Run the complete regression suite before triggering exactly one signed release APK build in GitHub Actions. Local sandbox compilation is blocked because Android SDK is unavailable; GitHub runner remains the authoritative build/test environment.
+- [x] Keep UTF-8/Cyrillic fidelity, full-bubble rescue, short utterances, safe line-wrap joining, and no pseudo-word hallucination as one shared quality gate.
+- [x] Run the complete regression suite before triggering exactly one signed release APK build in GitHub Actions: `release.yml` now runs migrations, the focused Cyrillic OCR tests, the CTC scoring tests and the full unit-test suite before `assembleRelease`, so an unverified commit cannot produce an APK. Local sandbox compilation stays blocked because Android SDK is unavailable; the GitHub runner remains the authoritative build/test environment.
 - [ ] Upload only the verified Yomihon release APK and its Markdown quality report to GoFile.

@@ -121,4 +121,35 @@ class OcrTextCleanerTest {
         OcrTextCleaner.normalizeLocalCyrillicCaption("сахар-самаар") shouldBe "сахар-самаар"
         OcrTextCleaner.normalizeLocalCyrillicCaption("цвет-свек") shouldBe "цвет-свек"
     }
+
+    @Test
+    fun `one garbage token no longer erases the whole caption`() {
+        OcrTextCleaner.filterGarbageTokens("И ПАЛ Tele'axect.E ПОД ЛЕЗВИЕМ") shouldBe "И ПАЛ ПОД ЛЕЗВИЕМ"
+        OcrTextCleaner.filterGarbageTokens("мама-naма") shouldBe "мама"
+        OcrTextCleaner.filterGarbageTokens("сахар-samaар") shouldBe "сахар"
+    }
+
+    @Test
+    fun `whitelisted latin tokens survive the salvage pass`() {
+        OcrTextCleaner.filterGarbageTokens("SOS ПОМОГИТЕ Wi-Fi") shouldBe "SOS ПОМОГИТЕ Wi-Fi"
+    }
+
+    @Test
+    fun `a line without cyrillic is returned unchanged`() {
+        OcrTextCleaner.filterGarbageTokens("OPEN") shouldBe "OPEN"
+        OcrTextCleaner.filterGarbageTokens("SOS") shouldBe "SOS"
+    }
+
+    @Test
+    fun `uncertain mixed-script lines are never partially salvaged`() {
+        // «cлишком» — смешанный токен: строка остаётся как есть, а не
+        // собирается заново из уцелевших слов.
+        OcrTextCleaner.filterGarbageTokens("ОН cлишком ДЕМОНОМ") shouldBe "ОН cлишком ДЕМОНОМ"
+    }
+
+    @Test
+    fun `blank text stays blank`() {
+        OcrTextCleaner.filterGarbageTokens("") shouldBe ""
+        OcrTextCleaner.filterGarbageTokens("   ") shouldBe "   "
+    }
 }

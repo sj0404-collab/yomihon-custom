@@ -84,6 +84,11 @@ internal class CyrillicOcrEngine(
         val text: String,
         val confidence: Float,
         val model: RecognitionModel = RecognitionModel.V3,
+        /**
+         * Доля «пустых» шагов внутри распознанной подстроки: признак выпавших
+         * букв. См. [CtcScoring.innerBlankCoverage].
+         */
+        val coverage: Float = 0f,
     )
 
     suspend fun ensureInitialized() {
@@ -322,6 +327,7 @@ internal class CyrillicOcrEngine(
             text = sb.toString().trim(),
             confidence = if (recognizedCount == 0) 0f else confSum / recognizedCount,
             model = wholeLine.model,
+            coverage = wholeLine.coverage,
         )
         return selectLineRecognition(wholeLine, segmented)
     }
@@ -468,7 +474,11 @@ internal class CyrillicOcrEngine(
     private fun acceptsConfidence(result: Recognition): Boolean {
         val letters = result.text.count(Char::isLetter)
         val threshold = if (letters in 1..3) SHORT_TEXT_MIN_CONFIDENCE else MIN_ACCEPT_CONFIDENCE
-        return result.confidence >= threshold
+        // Пропущенные в середине слова шаги (blank) понижают уверенность:
+        // «лжн вбинен» вместо «ЛОЖНО ОБВИНЁН» больше не проходит как хороший
+        // результат только потому, что уцелевшие буквы были прочитаны чётко.
+        val discounted = CtcScoring.coveragePenalty(result.confidence, result.coverage, MIN_COVERAGE)
+        return discounted >= threshold
     }
 
     private fun cleanRecognition(text: String): String {
@@ -476,15 +486,11 @@ internal class CyrillicOcrEngine(
         // строковые границы в пробелы. Иначе «НЕУПРАВ-\nЛЯЕМЫЙ» остаётся в
         // интерфейсе как ложное «НЕУПРАВ- ЛЯЕМЫЙ».
         val cleaned = OcrTextCleaner.normalizeLocalCyrillicCaption(text).trim()
-        return if (
-            cleaned.isEmpty() ||
-            OcrTextCleaner.looksLikeDictionaryRamp(cleaned) ||
-            !OcrTextCleaner.isAcceptableCyrillicOcrText(cleaned)
-        ) {
-            ""
-        } else {
-            cleaned
-        }
+        if (cleaned.isEmpty() || OcrTextCleaner.looksLikeDictionaryRamp(cleaned)) return ""
+        if (OcrTextCleaner.isAcceptableCyrillicOcrText(cleaned)) return cleaned
+        // Один мусорный токен больше не обнуляет всю подпись: чистая
+        // кириллица сохраняется, а сомнительные строки остаются как есть.
+        return OcrTextCleaner.filterGarbageTokens(cleaned)
     }
 
     private fun detectTextBoxes(image: Bitmap): List<TextBox> {
@@ -752,45 +758,61 @@ internal class CyrillicOcrEngine(
         } else {
             chars.size + 1
         }
-        return decodeCtc(values, chars, classes, recognitionModel)
+        val decoded = decodeCtc(values, chars, classes)
+        return Recognition(
+            text = decoded.text,
+            confidence = decoded.confidence,
+            model = recognitionModel,
+            coverage = CtcScoring.innerBlankCoverage(decoded.blankSteps, decoded.emitted, decoded.steps),
+        )
     }
 
     private fun decodeCtc(
         values: FloatArray,
         chars: List<String>,
         classes: Int,
-        recognitionModel: RecognitionModel,
-    ): Recognition {
-        if (classes <= 1 || values.size < classes) return Recognition("", 0f)
+    ): CtcDecode {
+        if (classes <= 1 || values.size < classes) return CtcDecode("", 0f, 0, 0, 0)
         val steps = values.size / classes
         val text = StringBuilder(steps)
         var previous = -1
         var confidenceSum = 0f
         var confidenceCount = 0
+        // Шаги, на которых победил blank между первым и последним символом.
+        var blankSteps = 0
+        var countingBlanks = false
         for (step in 0 until steps) {
             val base = step * classes
+            val probabilities = CtcScoring.softmax(values, base, classes)
             var bestIndex = 0
-            var bestScore = values[base]
+            var bestScore = probabilities[0]
             for (index in 1 until classes) {
                 val char = chars.getOrNull(index - 1).orEmpty()
                 if (!allowed(char)) continue
-                val score = values[base + index]
+                val score = probabilities[index]
                 if (score > bestScore) {
                     bestScore = score
                     bestIndex = index
                 }
             }
-            if (bestIndex != 0 && bestIndex != previous) {
-                chars.getOrNull(bestIndex - 1)?.let(text::append)
-                confidenceSum += bestScore
-                confidenceCount++
+            when {
+                bestIndex != 0 && bestIndex != previous -> {
+                    chars.getOrNull(bestIndex - 1)?.let(text::append)
+                    confidenceSum += bestScore
+                    confidenceCount++
+                    countingBlanks = true
+                }
+                // blank между двумя уже выданными символами = выпавшая буква.
+                bestIndex == 0 && countingBlanks -> blankSteps++
             }
             previous = bestIndex
         }
-        return Recognition(
+        return CtcDecode(
             text = text.toString().trim(),
             confidence = if (confidenceCount == 0) 0f else confidenceSum / confidenceCount,
-            model = recognitionModel,
+            emitted = confidenceCount,
+            blankSteps = blankSteps,
+            steps = steps,
         )
     }
 
@@ -873,6 +895,10 @@ internal class CyrillicOcrEngine(
         // порога не было и роль «пола отсечения» играл PRIMARY_CONFIDENCE:
         // верно прочитанные, но неуверенные слова выпадали из текста.
         // Лучше показать слово с опечаткой, чем молча его потерять.
+        // Доля пропущенных шагов, после которой уверенность начинает
+        // снижаться. 12 % — это примерно один выпавший символ на восемь
+        // прочитанных: нормальный шум тонкого шрифта ещё не штрафуется.
+        private const val MIN_COVERAGE = 0.12f
         private const val MIN_ACCEPT_CONFIDENCE = 0.25f
         private const val SHORT_TEXT_MIN_CONFIDENCE = 0.12f
         private const val ALLOWED_PUNCTUATION = " .,!?;:-()[]{}\"'«»„“”%№+/=…—–"
