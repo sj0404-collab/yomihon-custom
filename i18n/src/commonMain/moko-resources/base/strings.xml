@@ -1364,4 +1364,33 @@
     <string name="pref_voice_plugin_missing">Not ready</string>
     <string name="pref_voice_requires_system">Installed Android TTS engine</string>
     <string name="pref_voice_requires_native">Native sherpa-onnx library</string>
+    <string name="pref_category_ai">AI assistant</string>
+    <string name="pref_ai_backends_group">Chat backends</string>
+    <string name="pref_ai_backend_online">Online (Zen / OpenRouter)</string>
+    <string name="pref_ai_backend_local">Local LLM</string>
+    <string name="pref_ai_backend_runner">Semi-online (GitHub Runner)</string>
+    <string name="pref_ai_backend_selected">Selected</string>
+    <string name="pref_ai_backend_ready">Ready</string>
+    <string name="pref_ai_backend_not_ready">Not ready</string>
+    <string name="pref_ai_backend_offline">Works offline</string>
+    <string name="pref_ai_backend_current" formatted="false">Current backend: %s</string>
+    <string name="pref_ai_backend_switch_hint">The backend, models and keys are switched in the AI tab settings (⚙)</string>
+    <string name="pref_ai_requires">Required</string>
+    <string name="pref_ai_requires_network">internet connection</string>
+    <string name="pref_ai_requires_openrouter_key">OpenRouter API key</string>
+    <string name="pref_ai_requires_github_pat">GitHub token (PAT)</string>
+    <string name="pref_ai_requires_runner_allowed">semi-online LLM permission</string>
+    <string name="pref_ai_requires_model">downloaded local model</string>
+    <string name="pref_ai_requires_runner_session">active runner session</string>
+    <string name="pref_ai_workspace_group">Workspace and plugins</string>
+    <string name="pref_ai_workspace_files" formatted="false">Files in workspace: %d</string>
+    <string name="pref_ai_workspace_plugins" formatted="false">Developer plugins: %d</string>
+    <string name="pref_ai_workspace_hint">Plugins are created by the agent with plugin_create and stored in workspace/plugins</string>
+    <string name="pref_ai_access_group">Access</string>
+    <string name="pref_ai_open_chat">Open AI chat</string>
+    <string name="pref_ai_open_chat_summary">Switches to the AI tab in the bottom navigation</string>
+    <string name="pref_ai_tab_visible">Show AI tab</string>
+    <string name="pref_ai_tab_visible_summary">When hidden, the agent stays available through the built-in server</string>
+    <string name="pref_ai_http_server">Built-in AI server</string>
+    <string name="pref_ai_http_server_summary">Applies after restarting the app</string>
 </resources>

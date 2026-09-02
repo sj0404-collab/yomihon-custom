@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Translate
@@ -208,6 +209,12 @@ object SettingsMainScreen : Screen() {
             subtitleRes = MR.strings.pref_voice_plugins_group,
             icon = Icons.Outlined.RecordVoiceOver,
             screen = SettingsVoicePluginsScreen,
+        ),
+        Item(
+            titleRes = MR.strings.pref_category_ai,
+            subtitleRes = MR.strings.pref_ai_backends_group,
+            icon = Icons.Outlined.SmartToy,
+            screen = SettingsAiScreen,
         ),
         Item(
             titleRes = MR.strings.pref_category_downloads,

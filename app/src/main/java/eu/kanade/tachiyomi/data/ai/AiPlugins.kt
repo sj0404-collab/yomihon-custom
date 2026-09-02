@@ -63,7 +63,9 @@ object AiPlugins {
     fun save(context: Context, p: Plugin): Boolean {
         if (p.name.isBlank() || p.kind !in setOf("http", "prompt")) return false
         // Имя не должно перекрывать встроенные инструменты
-        if (sanitize(p.name) in RESERVED) return false
+        // Сюда же входят инструменты читалки (reader_status / ocr_preset /
+        // plugins_list): плагин разработчика не может их перехватить.
+        if (sanitize(p.name) in RESERVED_TOOL_NAMES) return false
         return runCatching {
             fileOf(context, p.name).writeText(toJson(p).toString(2))
             true
@@ -72,11 +74,20 @@ object AiPlugins {
 
     fun delete(context: Context, name: String): Boolean = fileOf(context, name).delete()
 
-    private val RESERVED = setOf(
+    /**
+     * Имена встроенных инструментов: плагин разработчика не может их занять,
+     * иначе @tool-вызов ушёл бы не туда. Сюда же входят инструменты читалки
+     * из [AiReaderTools] — они исполняются приложением наравне с остальными.
+     */
+    val RESERVED_TOOL_NAMES = setOf(
         "write_file", "edit_file", "append_file", "read_file", "gen_image",
         "check_site", "list_ext", "filter_ext", "find_manga", "zip_workspace",
         "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
-    )
+        // Ранер и GitHub отсутствовали в списке, хотя такие инструменты у
+        // агента есть: плагин разработчика с именем runner_chat перехватывал
+        // бы вызов. Теперь закрыто.
+        "runner_chat", "runner_start", "github_api",
+    ) + AiReaderTools.TOOL_NAMES
 
     private fun toJson(p: Plugin) = JSONObject()
         .put("name", sanitize(p.name))

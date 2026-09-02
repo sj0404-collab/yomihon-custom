@@ -104,6 +104,10 @@ object AiAgent {
             "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
             "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
             "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
+            "ЧИТАЛКА, РАСПОЗНАВАНИЕ И ОЗВУЧКА (реестры плагинов приложения):\n" +
+            AiReaderTools.SYSTEM_PROMPT_LINES.joinToString("\n") { it } + "\n" +
+            "Если пользователь жалуется, что текст распознаётся плохо или не тем порядком, — " +
+            "сначала reader_status, затем ocr_preset с подходящим id (manga/manhwa/comic/balanced).\n" +
             "Если пользователь просит новый инструмент — СОЗДАЙ его через plugin_create и сразу проверь вызовом.\n" +
             "НЕЙРО-КНИГИ и НЕЙРО-КОМИКСЫ: пиши книгу по главам через append_file " +
             "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
@@ -298,7 +302,7 @@ object AiAgent {
             "check_site", "list_ext", "filter_ext", "find_manga", "zip_workspace",
             "plugin_create", "plugin_edit", "plugin_delete", "plugin_list",
             "runner_chat", "runner_start", "github_api",
-        ) + AiPlugins.list(context).map { it.name }
+        ) + AiReaderTools.TOOL_NAMES + AiPlugins.list(context).map { it.name }
 
     /**
      * Разбор вызовов инструментов. Модели (особенно бесплатные) пишут вызов
@@ -409,6 +413,20 @@ object AiAgent {
         call: ToolCall,
         chatFn: suspend (String, String) -> AiAssistant.ChatReply?,
     ): ToolResult = when (call.name) {
+        // Инструменты читалки: видят те же реестры и настройки, что и экраны,
+        // поэтому ответ агента не может разойтись с настройками пользователя.
+        AiReaderTools.TOOL_READER_STATUS -> runCatching {
+            ToolResult(call.name, AiReaderTools.readerStatus(context))
+        }.getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
+
+        AiReaderTools.TOOL_OCR_PRESET -> runCatching {
+            ToolResult(call.name, AiReaderTools.applyPreset(context, call.args.optString("id")))
+        }.getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
+
+        AiReaderTools.TOOL_PLUGINS_LIST -> runCatching {
+            ToolResult(call.name, AiReaderTools.pluginsReport(context))
+        }.getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
+
         "runner_chat" -> {
             val prefsR = uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
             if (!prefsR.aiAllowRunner().get()) {

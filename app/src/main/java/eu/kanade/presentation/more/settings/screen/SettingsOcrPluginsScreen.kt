@@ -1,8 +1,6 @@
 package eu.kanade.presentation.more.settings.screen
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
@@ -13,6 +11,7 @@ import mihon.data.ocr.OcrPluginDescriptor
 import mihon.data.ocr.OcrPluginRequirement
 import mihon.data.ocr.OcrPlugins
 import mihon.domain.ocr.service.OcrPreferences
+import tachiyomi.core.common.util.system.isNetworkAvailable
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
@@ -125,12 +124,5 @@ object SettingsOcrPluginsScreen : SearchableSettings {
 }
 
 @Composable
-internal fun rememberNetworkState(context: Context): Boolean {
-    val connectivity = remember(context) {
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-    }
-    return remember(connectivity) {
-        val caps = connectivity?.getNetworkCapabilities(connectivity.activeNetwork)
-        caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-    }
-}
+internal fun rememberNetworkState(context: Context): Boolean =
+    remember(context) { isNetworkAvailable(context) }

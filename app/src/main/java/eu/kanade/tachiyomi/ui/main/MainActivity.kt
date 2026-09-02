@@ -546,6 +546,23 @@ class MainActivity : BaseActivity() {
             return true
         }
 
+        // Кнопка «Открыть AI-чат» в настройках: вкладка живёт в нижней
+        // навигации, поэтому идём тем же путём, что и ярлыки рабочего стола.
+        if (intent.getBooleanExtra(EXTRA_OPEN_AI_CHAT, false)) {
+            intent.removeExtra(EXTRA_OPEN_AI_CHAT)
+            if (Injekt.get<mihon.domain.ocr.service.OcrPreferences>().aiTabVisible().get()) {
+                navigator.popUntilRoot()
+                lifecycleScope.launch { HomeScreen.openTab(HomeScreen.Tab.AiChat) }
+                ready = true
+                return true
+            }
+            // Вкладка скрыта — показываем настройки AI, где её можно включить.
+            navigator.popUntilRoot()
+            navigator.push(SettingsScreen(SettingsScreen.Destination.About))
+            ready = true
+            return true
+        }
+
         val tabToOpen = when (intent.action) {
             Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_MANGA -> {
@@ -619,6 +636,9 @@ class MainActivity : BaseActivity() {
     }
 
     companion object {
+        /** Extra: открыть вкладку «AI» (кнопка «Открыть AI-чат» в настройках). */
+        const val EXTRA_OPEN_AI_CHAT = "open_ai_chat"
+
         const val INTENT_SEARCH = "eu.kanade.tachiyomi.SEARCH"
         const val INTENT_SEARCH_QUERY = "query"
         const val INTENT_SEARCH_FILTER = "filter"

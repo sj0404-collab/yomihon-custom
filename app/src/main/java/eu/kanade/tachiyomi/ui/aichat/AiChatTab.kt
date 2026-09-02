@@ -235,51 +235,24 @@ data object AiChatTab : Tab {
                 // само приложение, а модель (онлайн/локальная/ранер) только
                 // пишет текст. Поэтому у локальной модели ЕСТЬ файлы,
                 // картинки, проверка сайтов и всё остальное.
+                // Маршрутизация бэкенда вынесена в реестр AiBackends: та же
+                // проверка готовности, но одна на чат и на экран настроек.
                 val prefsBk = Injekt.get<OcrPreferences>()
-                val backendKey = prefsBk.aiBackend().get()
-                val chatFn: (suspend (String, String) -> eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply?)? =
-                    when (backendKey) {
-                        "local" -> {
-                            val modelId = prefsBk.localLlmModel().get()
-                            val model = eu.kanade.tachiyomi.data.ai.LocalLlm.CATALOG.firstOrNull { it.id == modelId }
-                            if (model != null && eu.kanade.tachiyomi.data.ai.LocalLlm.isInstalled(context, model)) {
-                                { p, sys ->
-                                    eu.kanade.tachiyomi.data.ai.LocalLlm
-                                        .chat(context, model, "$sys\n\n$p")
-                                        ?.let {
-                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, model.name)
-                                        }
-                                }
-                            } else {
-                                null // не готова — ниже честное сообщение
-                            }
-                        }
-                        "runner" -> {
-                            val session = eu.kanade.tachiyomi.data.ai.RunnerLlm.listSessions(context).firstOrNull()
-                            if (session?.url != null) {
-                                { p, sys ->
-                                    eu.kanade.tachiyomi.data.ai.RunnerLlm
-                                        .chat(context, session, "$sys\n\n$p")
-                                        ?.let {
-                                            eu.kanade.tachiyomi.data.ai.AiAssistant.ChatReply(it, null, session.model)
-                                        }
-                                }
-                            } else {
-                                null
-                            }
-                        }
-                        else -> { p, sys -> eu.kanade.tachiyomi.data.ai.AiAssistant.chatFull(p, sys, maxTokens = 1800) }
-                    }
+                val resolution = eu.kanade.tachiyomi.data.ai.AiBackends.resolve(
+                    context = context,
+                    backendId = prefsBk.aiBackend().get(),
+                )
+                val backendKey = resolution.backendId
+                val chatFn = resolution.chat
                 if (chatFn == null) {
                     withContext(Dispatchers.Main) {
                         pushMsg(
                             Msg(
                                 "ai",
-                                if (backendKey == "local") {
-                                    "Локальная модель не готова: скачайте её в ⚙ → Локальные LLM и прогоните «Тест»"
-                                } else {
-                                    "Нет живой ранер-сессии: запустите её в ⚙ → Полу-онлайн LLM"
-                                },
+                                // Текст объяснения даёт реестр — он же показывается
+                                // в настройках, поэтому формулировки не расходятся.
+                                resolution.message
+                                    ?: "Бэкенд «$backendKey» не готов к запросу",
                                 model = backendKey,
                             ),
                         )

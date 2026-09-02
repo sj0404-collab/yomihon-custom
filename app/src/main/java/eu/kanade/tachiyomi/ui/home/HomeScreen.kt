@@ -184,6 +184,17 @@ object HomeScreen : Screen() {
                             }
                             Tab.Dictionary -> MoreTab // словарь скрыт из таб-бара
                             is Tab.More -> MoreTab
+                            // Вкладку AI можно скрыть в настройках; открывать
+                            // несуществующую вкладку нельзя — уходим в библиотеку.
+                            Tab.AiChat ->
+                                if (Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                                        .aiTabVisible()
+                                        .get()
+                                ) {
+                                    eu.kanade.tachiyomi.ui.aichat.AiChatTab
+                                } else {
+                                    LibraryTab
+                                }
                         }
 
                         if (it is Tab.Library && it.mangaIdToOpen != null) {
@@ -344,6 +355,9 @@ object HomeScreen : Screen() {
         data object History : Tab
         data class Browse(val toExtensions: Boolean = false) : Tab
         data object Dictionary : Tab
+
+        /** Вкладка «AI»: агент, чат, workspace и плагины разработчика. */
+        data object AiChat : Tab
         data class More(val toDownloads: Boolean) : Tab
     }
 }
