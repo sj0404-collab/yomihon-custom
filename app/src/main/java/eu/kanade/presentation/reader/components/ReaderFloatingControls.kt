@@ -56,6 +56,7 @@ import eu.kanade.tachiyomi.data.ui.UiActionRegistry
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import mihon.data.ui.UiActions
 import mihon.data.ui.UiPlacement
 import mihon.domain.ocr.service.ScanRegion
 
@@ -89,6 +90,7 @@ fun ReaderFloatingControls(
     var voiceGender by remember(manualVoiceGender) { mutableStateOf(manualVoiceGender) }
     var menuOpen by remember { mutableStateOf(false) }
     var showRegions by remember { mutableStateOf(false) }
+    var showPresets by remember { mutableStateOf(false) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -145,7 +147,43 @@ fun ReaderFloatingControls(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
-                            if (showRegions) {
+                            if (showPresets) {
+                                // Пресеты контента — те же встроенные действия
+                                // реестра UiActions, что видит агент
+                                // (preset_manga/manhwa/comic/balanced). Раньше
+                                // они жили только в реестре и в настройках:
+                                // пользователь в читалке их не видел и считал
+                                // кнопки «скрытыми без его ведома».
+                                Text(
+                                    "Пресет контента",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                UiActions.builtIn()
+                                    .filter { it.effect == mihon.data.ui.UiEffect.OCR_PRESET }
+                                    .forEach { preset ->
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.End,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(
+                                                preset.title,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            SmallFloatingActionButton(onClick = {
+                                                beepAction()
+                                                context.toast(UiActionRegistry.apply(context, preset))
+                                                showPresets = false
+                                                menuOpen = false
+                                                onTriggerOcr()
+                                            }) {
+                                                Icon(Icons.Outlined.Tune, contentDescription = preset.title)
+                                            }
+                                        }
+                                    }
+                            } else if (showRegions) {
                                 Text(
                                     "Область сканирования",
                                     style = MaterialTheme.typography.labelMedium,
@@ -169,6 +207,15 @@ fun ReaderFloatingControls(
                                     onTriggerOcr()
                                 }) { Text("  ⬇ Нижние 50%  ") }
                             } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Пресет контента  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        beepAction()
+                                        showPresets = true
+                                    }) {
+                                        Icon(Icons.Outlined.Tune, contentDescription = "Пресет контента")
+                                    }
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("OCR скан  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -351,7 +398,10 @@ fun ReaderFloatingControls(
                 FloatingActionButton(
                     onClick = {
                         beepOpen()
-                        if (menuOpen) showRegions = false
+                        if (menuOpen) {
+                            showRegions = false
+                            showPresets = false
+                        }
                         menuOpen = !menuOpen
                     },
                     containerColor = MaterialTheme.colorScheme.primary,

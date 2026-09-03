@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.tts
 
 import android.content.Context
+import eu.kanade.tachiyomi.data.ai.AiWorkspace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -155,8 +156,15 @@ object OnnxTts {
         if (!isRuntimeInstalled(context)) return false
         return runCatching {
             val d = runtimeDir(context)
-            // Порядок важен: зависимости первыми
-            listOf("libonnxruntime.so", "libsherpa-onnx-c-api.so", "libsherpa-onnx-jni.so").forEach {
+            // Порядок важен: зависимости первыми. Сначала ВСЕ прочие .so из
+            // папки (libc++_shared.so и любые будущие зависимости): dlopen
+            // ищет DT_NEEDED только в путях приложения и системы, папки
+            // filesDir в этом списке нет, поэтому зависимости грузим руками.
+            val mainLibs = listOf("libonnxruntime.so", "libsherpa-onnx-c-api.so", "libsherpa-onnx-jni.so")
+            (d.listFiles { f -> f.isFile && f.extension == "so" && f.name !in mainLibs } ?: emptyArray())
+                .sortedBy { it.name }
+                .forEach { f -> runCatching { System.load(f.absolutePath) } }
+            mainLibs.forEach {
                 val f = File(d, it)
                 if (f.isFile) System.load(f.absolutePath)
             }
@@ -165,7 +173,7 @@ object OnnxTts {
             showOnnxNotif(context, "TTS-рантайм готов", "Голоса можно скачивать", 100)
             true
         }.onFailure {
-            logcat(LogPriority.ERROR, it) { "sherpa-onnx runtime load failed" }
+            fail(context, "Рантайм не загрузился: ${it.javaClass.simpleName}: ${it.message}")
         }.getOrDefault(false)
     }
 
@@ -257,7 +265,10 @@ object OnnxTts {
             wav.delete()
             true to "Тест пройден за ${took / 1000.0}с"
         } else {
-            false to "Синтез не удался — смотрите логи"
+            false to (
+                "Синтез не удался: " + (_lastError.value ?: "причина неизвестна") +
+                    ". Подробности: workspace/logs/tts.log (вкладка Workspace → logs)"
+                )
         }
     }
 
@@ -267,6 +278,29 @@ object OnnxTts {
 
     private val _progress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val progress: StateFlow<Map<String, Float>> = _progress
+
+    /**
+     * Последняя причина сбоя синтеза/инициализации.
+     *
+     * Раньше тест голоса говорил только «Синтез не удался — смотрите логи»,
+     * а логов пользователь не видел: logcat на устройстве без adb недоступен.
+     * Теперь причина показывается в том же тосте и дописывается в
+     * `workspace/logs/tts.log`, который агент читает через read_file.
+     */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError
+
+    private fun fail(context: Context, message: String) {
+        _lastError.value = message
+        logcat(LogPriority.WARN) { "OnnxTts: $message" }
+        runCatching {
+            val logDir = File(AiWorkspace.root(context), "logs").apply { mkdirs() }
+            File(logDir, "tts.log").appendText(
+                "[" + java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                    .format(java.util.Date()) + "] " + message + "\n",
+            )
+        }
+    }
 
     /**
      * Счётчик изменений установленных пакетов (рантайм, голоса). UI собирает
@@ -408,7 +442,7 @@ object OnnxTts {
             engineVoiceId = v.id
             tts
         }.onFailure {
-            logcat(LogPriority.ERROR, it) { "ONNX TTS init failed: ${v.id}" }
+            fail(context, "Инициализация голоса ${v.id}: ${it.javaClass.simpleName}: ${it.message}")
         }.getOrNull()
     }
 
@@ -450,12 +484,16 @@ object OnnxTts {
                 val tts = ensureEngine(context, v) ?: return@withContext null
                 val gen = tts.javaClass.getMethod(
                     "generate", String::class.java, Int::class.java, Float::class.java,
-                ).invoke(tts, text, 0, speed) ?: return@withContext null
+                ).invoke(tts, text, 0, speed)
+                if (gen == null) {
+                    fail(context, "generate() вернул пустой результат для «${text.take(40)}»")
+                    return@withContext null
+                }
                 val out = File(context.cacheDir, "onnx_tts_${System.nanoTime()}.wav")
                 gen.javaClass.getMethod("save", String::class.java).invoke(gen, out.absolutePath)
                 out.takeIf { it.isFile && it.length() > 44 }
             }.onFailure {
-                logcat(LogPriority.WARN, it) { "ONNX synth failed" }
+                fail(context, "Сбой синтеза: ${it.javaClass.simpleName}: ${it.message}")
             }.getOrNull()
         }
 
