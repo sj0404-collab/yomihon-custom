@@ -60,10 +60,15 @@ class LibraryIndexTest {
     }
 
     @Test
-    fun `a bare marker shows everything`() {
+    fun `a bare marker is not an index query and searches as text`() {
+        // «#» без ключа — это запрос текста «#»: папка «#1 Special» находится,
+        // а указатель не включается. Иначе имя папки, начинающееся с «#»,
+        // стало бы ненаходимым.
         LibraryIndex.indexKey("#").shouldBeNull()
-        LibraryIndex.matches("Акира", "#") shouldBe true
-        LibraryIndex.matches("Акира", "#   ") shouldBe true
+        LibraryIndex.indexKey("#   ").shouldBeNull()
+        LibraryIndex.matches("#1 Special", "#") shouldBe true
+        LibraryIndex.matches("#1 Special", "#   ") shouldBe true
+        LibraryIndex.matches("Акира", "#") shouldBe false
     }
 
     @Test
