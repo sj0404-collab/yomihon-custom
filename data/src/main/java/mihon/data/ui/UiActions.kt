@@ -10,7 +10,8 @@ import mihon.domain.ocr.service.ScanRegion
  * Размещение декларативное: экраны читают список действий своего размещения и
  * дорисовывают их к встроенным кнопкам. Вкладка приложения сюда намеренно не
  * входит — у вкладки есть содержимое, а исполняемый код из плагинов мы не
- * загружаем.
+ * загружаем. Видимостью вкладок управляет отдельный реестр [UiTabs]: он тоже
+ * декларативный и хранит только id.
  */
 enum class UiPlacement(val id: String, val title: String) {
     /** Плавающее меню читалки (SAO-кнопка). */
@@ -208,4 +209,83 @@ object UiActions {
     fun forPlacement(actions: List<UiActionSpec>, placement: UiPlacement): List<UiActionSpec> =
         actions.filter { it.placement == placement }.sortedWith(compareBy({ it.order }, { it.title }))
 
+}
+
+/**
+ * Вкладки нижней навигации приложения.
+ *
+ * Id стабильные и живут в файлах пользователя, поэтому их нельзя брать из имени
+ * класса: в release-сборке R8 переименовывает классы. Порядок объявлений —
+ * порядок вкладок в навигации.
+ *
+ * @param pinned вкладку нельзя скрыть: без неё приложение останется либо без
+ *   контента ([LIBRARY]), либо без входа в настройки ([MORE]), и вернуть её
+ *   будет нечем.
+ */
+enum class UiTab(val id: String, val title: String, val pinned: Boolean = false) {
+    LIBRARY("library", "Библиотека", pinned = true),
+    LOCAL_LIBRARY("local_library", "Локальная библиотека"),
+    UPDATES("updates", "Обновления"),
+    HISTORY("history", "История"),
+    BROWSE("browse", "Каталоги"),
+    BROWSER("browser", "Браузер"),
+    AI("ai", "AI-чат"),
+    MORE("more", "Ещё", pinned = true),
+    ;
+
+    companion object {
+        fun fromId(id: String?): UiTab? =
+            entries.firstOrNull { it.id == id?.trim()?.lowercase() }
+    }
+}
+
+/**
+ * Правила видимости вкладок: чистые функции без Android, чтобы их можно было
+ * проверить юнит-тестами.
+ */
+object UiTabs {
+
+    /** Все id в порядке показа. */
+    val IDS: List<String> = UiTab.entries.map { it.id }
+
+    /** Id, которые нельзя скрыть ни через чат, ни правкой файла. */
+    val PROTECTED_IDS: Set<String> = UiTab.entries.filter { it.pinned }.map { it.id }.toSet()
+
+    /**
+     * Причина, по которой id не годится, или `null`, если годится.
+     *
+     * Текст причины показывается пользователю и агенту, поэтому он всегда
+     * содержит список допустимых значений.
+     */
+    fun validate(id: String): String? {
+        val key = id.trim().lowercase()
+        return when {
+            key.isEmpty() -> "Пустой id вкладки"
+            key !in IDS -> "Неизвестная вкладка «$key». Доступны: ${IDS.joinToString()}"
+            key in PROTECTED_IDS ->
+                "Вкладку «$key» нельзя скрыть: без неё не останется библиотеки или входа в настройки"
+            else -> null
+        }
+    }
+
+    /** Скрыта ли вкладка. Закреплённые не скрываются никогда. */
+    fun isHidden(id: String, hidden: Set<String>): Boolean {
+        val key = id.trim().lowercase()
+        return key in hidden && key !in PROTECTED_IDS
+    }
+
+    /**
+     * Оставить только видимые вкладки, сохранив порядок [ids].
+     *
+     * Защита применяется и здесь: файл `workspace/ui/tabs.json` пользователь
+     * может править руками или залить из архива чужого workspace.
+     */
+    fun visibleTabs(ids: List<String>, hidden: Set<String>): List<String> =
+        ids.filterNot { isHidden(it, hidden) }
+
+    /** Выкинуть неизвестные, закреплённые и пустые id, привести к нижнему регистру. */
+    fun sanitizeHidden(ids: Collection<String>): Set<String> =
+        ids.map { it.trim().lowercase() }
+            .filter { it in IDS && it !in PROTECTED_IDS }
+            .toSet()
 }
