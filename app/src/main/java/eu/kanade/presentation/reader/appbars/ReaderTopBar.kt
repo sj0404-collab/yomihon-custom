@@ -13,6 +13,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +24,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
+import eu.kanade.tachiyomi.data.ui.UiActionRegistry
+import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import mihon.data.ui.UiActionSpec
+import mihon.data.ui.UiPlacement
 import mihon.domain.ocr.model.OcrModel
 import mihon.domain.ocr.service.OcrPreferences
 import mihon.feature.ocr.titleRes
@@ -44,6 +51,17 @@ fun ReaderTopBar(
     onShare: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Пользовательские действия реестра UiActions для верхней панели. Список
+    // читается не в композиции, а в LaunchedEffect на IO: это файлы на общем
+    // хранилище. Ошибка чтения даёт пустой список, а не падение.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var userActions by remember { mutableStateOf<List<UiActionSpec>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        userActions = withContext(Dispatchers.IO) {
+            UiActionRegistry.list(context).filter { it.placement == UiPlacement.READER_TOP_BAR }
+        }
+    }
+
     AppBar(
         modifier = modifier,
         backgroundColor = Color.Transparent,
@@ -105,6 +123,17 @@ fun ReaderTopBar(
                             AppBar.OverflowAction(
                                 title = stringResource(MR.strings.action_share),
                                 onClick = it,
+                            ),
+                        )
+                    }
+                    // Свои действия пользователя — в overflow, чтобы не
+                    // распухала строка иконок. Эффект ограничен переключением
+                    // настроек, поэтому пункт не может уронить читалку.
+                    userActions.forEach { action ->
+                        add(
+                            AppBar.OverflowAction(
+                                title = action.title,
+                                onClick = { context.toast(UiActionRegistry.apply(context, action)) },
                             ),
                         )
                     }

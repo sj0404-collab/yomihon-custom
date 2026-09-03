@@ -1060,4 +1060,8 @@
     <string name="pref_voice_system_engine">Системный движок TTS (Android)</string>
     <string name="pref_voice_system_engine_info">Здесь перечислены движки, установленные на устройстве; голос внутри движка выбирается отдельно</string>
     <string name="pref_ocr_content_type_reading_mode">Режим чтения следует пресету: %1$s</string>
+    <string name="pref_reader_actions_tab">Действия</string>
+    <string name="pref_reader_actions_hint">Свои действия создаёт AI-чат (ui_action_create) или файлы в workspace/ui. Нажмите, чтобы применить.</string>
+    <string name="pref_reader_actions_empty">Действий пока нет</string>
+    <string name="pref_reader_actions_builtin">встроенное</string>
 </resources>
