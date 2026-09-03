@@ -26,8 +26,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import tachiyomi.presentation.core.util.collectAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +42,7 @@ import cafe.adriel.voyager.navigator.tab.TabNavigator
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.data.ui.UiTabRegistry
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.history.HistoryTab
@@ -46,11 +50,15 @@ import eu.kanade.tachiyomi.ui.library.LibraryTab
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.more.MoreTab
 import eu.kanade.tachiyomi.ui.updates.UpdatesTab
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import mihon.data.ui.UiTab
+import mihon.data.ui.UiTabs
 import soup.compose.material.motion.animation.materialFadeThroughIn
 import soup.compose.material.motion.animation.materialFadeThroughOut
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -74,26 +82,52 @@ object HomeScreen : Screen() {
     @Suppress("ConstPropertyName")
     private const val TabNavigatorKey = "HomeTabs"
 
+    /**
+     * Вкладки вместе со стабильными id из реестра [UiTabs]. Id нельзя брать из
+     * имени класса: в release-сборке R8 переименовывает классы, а id живут в
+     * файлах пользователя.
+     */
     private val TABS = listOf(
-        LibraryTab,
-        eu.kanade.tachiyomi.ui.locallibrary.LocalLibraryTab,
-        UpdatesTab,
-        HistoryTab,
-        BrowseTab,
-        eu.kanade.tachiyomi.ui.webbrowser.BrowserTab,
-        eu.kanade.tachiyomi.ui.aichat.AiChatTab,
+        UiTab.LIBRARY to LibraryTab,
+        UiTab.LOCAL_LIBRARY to eu.kanade.tachiyomi.ui.locallibrary.LocalLibraryTab,
+        UiTab.UPDATES to UpdatesTab,
+        UiTab.HISTORY to HistoryTab,
+        UiTab.BROWSE to BrowseTab,
+        UiTab.BROWSER to eu.kanade.tachiyomi.ui.webbrowser.BrowserTab,
+        UiTab.AI to eu.kanade.tachiyomi.ui.aichat.AiChatTab,
         // DictionaryTab скрыт из нижней навигации («в дальний ящик»):
         // словарь доступен из Ещё → Настройки → Словарь
-        MoreTab,
+        UiTab.MORE to MoreTab,
     )
 
-    /** Видимые вкладки: «AI» можно скрыть в её же настройках (агент тогда
-     *  доступен из внешнего браузера через встроенный сервер). */
+    /**
+     * Видимые вкладки.
+     *
+     * «AI» скрывается в её же настройках (агент тогда доступен из внешнего
+     * браузера через встроенный сервер), остальные — через реестр [UiTabRegistry]
+     * (AI-чат: `ui_tab_hide` / `ui_tab_show`, либо файл `workspace/ui/tabs.json`).
+     * Библиотека и «Ещё» закреплены в [UiTabs.PROTECTED_IDS]: без них приложение
+     * останется без контента или без входа в настройки, и вернуть вкладку будет
+     * нечем.
+     *
+     * Список читается на `Dispatchers.IO` и перечитывается на каждый рост
+     * [UiTabRegistry.version], поэтому скрытие вкладки из чата видно сразу, без
+     * перезапуска.
+     */
     @Composable
     private fun visibleTabs(): List<eu.kanade.presentation.util.Tab> {
         val prefs = remember { Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
         val aiVisible by prefs.aiTabVisible().collectAsState()
-        return if (aiVisible) TABS else TABS.filter { it !is eu.kanade.tachiyomi.ui.aichat.AiChatTab }
+        val context = LocalContext.current
+        val version by UiTabRegistry.version.collectAsState()
+        var hidden by remember { mutableStateOf(emptySet<String>()) }
+        LaunchedEffect(version) {
+            hidden = withContext(Dispatchers.IO) { UiTabRegistry.hidden(context) }
+        }
+        return TABS
+            .filterNot { (tab, _) -> tab == UiTab.AI && !aiVisible }
+            .filterNot { (tab, _) -> UiTabs.isHidden(tab.id, hidden) }
+            .map { (_, screen) -> screen }
     }
 
     @Composable

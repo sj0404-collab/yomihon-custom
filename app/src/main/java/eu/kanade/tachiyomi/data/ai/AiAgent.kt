@@ -5,12 +5,15 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.ui.UiActionRegistry
+import eu.kanade.tachiyomi.data.ui.UiTabRegistry
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
+import mihon.data.ui.UiTab
+import mihon.data.ui.UiTabs
 import mihon.domain.ocr.model.OcrImage
 import mihon.domain.ocr.repository.OcrRepository
 import org.json.JSONArray
@@ -120,6 +123,11 @@ object AiAgent {
             "@tool ui_action_edit {\"id\":\"my_manhwa\",\"title\":\"новое название\"} — изменить кнопку\n" +
             "@tool ui_action_delete {\"id\":\"my_manhwa\"} — убрать кнопку\n" +
             "@tool ui_action_list {} — все кнопки: встроенные и пользовательские\n" +
+            "ВКЛАДКИ ПРИЛОЖЕНИЯ (нижняя навигация; скрываем только то, что просит пользователь):\n" +
+            "@tool ui_tab_hide {\"id\":\"browser\"} — скрыть вкладку. Доступны: " +
+            "local_library|updates|history|browse|browser|ai (library и more закреплены, их скрыть нельзя)\n" +
+            "@tool ui_tab_show {\"id\":\"browser\"} — вернуть вкладку\n" +
+            "@tool ui_tab_list {} — все вкладки и какие из них скрыты\n" +
             "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
             "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
             "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
@@ -323,6 +331,7 @@ object AiAgent {
             "runner_chat", "runner_start", "github_api",
             "provider_create", "provider_edit", "provider_delete", "provider_list",
             "ui_action_create", "ui_action_edit", "ui_action_delete", "ui_action_list",
+            "ui_tab_hide", "ui_tab_show", "ui_tab_list",
         ) + AiReaderTools.TOOL_NAMES + AiPlugins.list(context).map { it.name }
 
     /**
@@ -791,6 +800,60 @@ object AiAgent {
                     }
                     appendLine("Эффекты: " + mihon.data.ui.UiEffect.entries.joinToString { "${it.id} (${it.title})" })
                     append("Размещения: " + mihon.data.ui.UiPlacement.entries.joinToString { it.id })
+                },
+            )
+        }
+
+        "ui_tab_hide", "ui_tab_show" -> {
+            val id = call.args.optString("id")
+            val hide = call.name == "ui_tab_hide"
+            val ok = when {
+                id.isBlank() -> false
+                hide -> UiTabRegistry.hide(context, id)
+                else -> UiTabRegistry.show(context, id)
+            }
+            when {
+                id.isBlank() -> ToolResult(
+                    call.name,
+                    "ОШИБКА: нужен id вкладки. Доступны: " + UiTabs.IDS.joinToString(),
+                    status = "error",
+                )
+                ok -> ToolResult(
+                    call.name,
+                    "Вкладка «${UiTab.fromId(id)?.title ?: id}» " +
+                        (if (hide) "скрыта" else "возвращена") +
+                        ". Панель обновилась сразу; если пользователь был на этой вкладке, " +
+                        "содержимое останется до перехода на другую.",
+                )
+                hide && UiTabs.validate(id) != null ->
+                    ToolResult(call.name, "ОШИБКА: " + UiTabs.validate(id), status = "error")
+                UiTab.fromId(id) == null -> ToolResult(
+                    call.name,
+                    "ОШИБКА: неизвестная вкладка «$id». Доступны: " + UiTabs.IDS.joinToString(),
+                    status = "error",
+                )
+                // Id годный, валидация прошла — значит не записался файл.
+                else -> ToolResult(
+                    call.name,
+                    "ОШИБКА: не удалось записать список вкладок (workspace недоступен?)",
+                    status = "error",
+                )
+            }
+        }
+
+        "ui_tab_list" -> {
+            val hidden = UiTabRegistry.hidden(context)
+            ToolResult(
+                "ui_tab_list",
+                buildString {
+                    appendLine("Вкладок: ${UiTab.entries.size}, скрыто: ${hidden.size}")
+                    UiTab.entries.forEach { tab ->
+                        append("• ${tab.id} — ${tab.title}")
+                        if (tab.pinned) append(" [закреплена]")
+                        if (tab.id in hidden) append(" [скрыта]")
+                        appendLine()
+                    }
+                    append("Скрыть можно: " + UiTabs.IDS.filterNot { it in UiTabs.PROTECTED_IDS }.joinToString())
                 },
             )
         }

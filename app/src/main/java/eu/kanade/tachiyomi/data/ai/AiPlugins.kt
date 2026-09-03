@@ -93,6 +93,9 @@ object AiPlugins {
         // Инструменты реестра действий пользовательского UI (UiActions):
         // плагин разработчика не может занять их имена.
         "ui_action_create", "ui_action_edit", "ui_action_delete", "ui_action_list",
+        // Инструменты реестра видимости вкладок (UiTabs): тоже закрыты, иначе
+        // плагин с именем ui_tab_hide перехватил бы управление навигацией.
+        "ui_tab_hide", "ui_tab_show", "ui_tab_list",
     ) + AiReaderTools.TOOL_NAMES
 
     private fun toJson(p: Plugin) = JSONObject()
