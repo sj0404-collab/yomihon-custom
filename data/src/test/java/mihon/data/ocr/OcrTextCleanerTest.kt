@@ -97,6 +97,21 @@ class OcrTextCleanerTest {
     }
 
     @Test
+    fun `restores device-reported glued captions from user screenshots`() {
+        OcrTextCleaner.restoreKnownCaptionWords("СЕГОДНЯЯНЕ СМОГКОСНУТЬСЯ КОНЧИКАВОЛОС ЭТОГОПАРНЯ!") shouldBe
+            "СЕГОДНЯ Я НЕ СМОГ КОСНУТЬСЯ КОНЧИКА ВОЛОС ЭТОГО ПАРНЯ!"
+        OcrTextCleaner.restoreKnownCaptionWords("УФ,КАКЖЕ ЖАРКО!") shouldBe "УФ, КАК ЖЕ ЖАРКО!"
+        OcrTextCleaner.restoreKnownCaptionWords("НАСЕГОДНЯ ТРЕНИРОВКА ОКОНЧЕНА!") shouldBe
+            "НА СЕГОДНЯ ТРЕНИРОВКА ОКОНЧЕНА!"
+    }
+
+    @Test
+    fun `space is restored after a comma before a letter`() {
+        OcrTextCleaner.restoreKnownCaptionWords("КОГДАЖЕ Я,НАКОНЕЦ, СМОГУПО") shouldBe
+            "КОГДА ЖЕ Я, НАКОНЕЦ, СМОГУ ПО"
+    }
+
+    @Test
     fun `unknown cyrillic run is never split or rewritten`() {
         OcrTextCleaner.restoreKnownCaptionWords("НЕИЗВЕСТНОЕСЛОВО") shouldBe "НЕИЗВЕСТНОЕСЛОВО"
     }

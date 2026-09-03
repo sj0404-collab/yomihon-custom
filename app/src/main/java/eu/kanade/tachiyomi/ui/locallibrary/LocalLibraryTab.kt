@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -312,22 +313,31 @@ data object LocalLibraryTab : Tab {
             // использует фильтры источника по умолчанию (OrderBy.Popular =
             // «название, по возрастанию»), и для полосы букв это ровно то, что
             // ждёт пользователь.
-            Navigator(
-                screen = BrowseSourceScreen(
-                    sourceId = LocalSource.ID,
-                    listingQuery = LibraryIndex.queryFor(letter)
-                        ?: if (sortByNewest) {
-                            GetRemoteManga.QUERY_LATEST
-                        } else {
-                            GetRemoteManga.QUERY_POPULAR
-                        },
-                    folderKey = listOf(
-                        if (sortByNewest) "latest" else "az",
-                        activeRoot,
-                        letter.orEmpty(),
-                    ).joinToString("|"),
-                ),
-            )
+            val listingQuery = LibraryIndex.queryFor(letter)
+                ?: if (sortByNewest) {
+                    GetRemoteManga.QUERY_LATEST
+                } else {
+                    GetRemoteManga.QUERY_POPULAR
+                }
+            val folderKey = listOf(
+                if (sortByNewest) "latest" else "az",
+                activeRoot,
+                letter.orEmpty(),
+            ).joinToString("|")
+            // ВАЖНО: одного data-класса экрана мало. Composable Navigator()
+            // держит стек в remember{} и НЕ реагирует на новую ссылку screen:
+            // без compose key() тап по чипу папки менял preference, но список
+            // оставался прежним (баг с устройства: «чипы не фильтруют»).
+            // key() утилизирует старый стек вместе со ScreenModel'ом.
+            key(listingQuery, folderKey) {
+                Navigator(
+                    screen = BrowseSourceScreen(
+                        sourceId = LocalSource.ID,
+                        listingQuery = listingQuery,
+                        folderKey = folderKey,
+                    ),
+                )
+            }
         }
     }
 

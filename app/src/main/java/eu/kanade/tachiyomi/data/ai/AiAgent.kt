@@ -128,6 +128,7 @@ object AiAgent {
             "local_library|updates|history|browse|browser|ai (library и more закреплены, их скрыть нельзя)\n" +
             "@tool ui_tab_show {\"id\":\"browser\"} — вернуть вкладку\n" +
             "@tool ui_tab_list {} — все вкладки и какие из них скрыты\n" +
+            "ЛОГИ: пользователь жалуется на озвучку/скачивание голосов — читай logs/tts.log через read_file.\n" +
             "@tool runner_chat {\"text\":\"вопрос\"} — спросить LLM на GitHub-ранере (если сессия жива и разрешено в настройках)\n" +
             "@tool runner_start {\"model\":\"qwen2.5-1.5b\",\"os\":\"linux|windows\"} — запустить новую ранер-сессию (если разрешено)\n" +
             "@tool github_api {\"path\":\"/repos/OWNER/REPO/actions/runs?per_page=3\"} — GET-запрос к GitHub API привязанным токеном (если разрешено)\n" +
@@ -428,9 +429,17 @@ object AiAgent {
             Regex("<tool_call>.*?</tool_call>", RegexOption.DOT_MATCHES_ALL),
             "",
         )
+        // laguna пишет аргументы XML-тегами прямо после имени инструмента и
+        // часто без обёртки <tool_call>: такие огрызки («@tool ocr_preset<arg_key>…»)
+        // раньше оставались в пузыре ответа. Убираем и их.
+        cleaned = cleaned.replace(
+            Regex("<arg_key>.*?</arg_value>", RegexOption.DOT_MATCHES_ALL),
+            " ",
+        )
         cleaned = cleaned.lines().filterNot { line ->
             val t = line.trim().trim('`').trim()
                 .removePrefix("@tool ").removePrefix("@").trim()
+                .substringBefore('<')
             t.substringBefore(' ') in known && (
                 line.trimStart().startsWith("@") || t.contains("{") || t.substringBefore(' ') == t
                 )
@@ -633,7 +642,18 @@ object AiAgent {
         "read_file" -> {
             val name = call.args.optString("name")
             val f = AiWorkspace.resolve(context, name)
-            if (f?.isFile == true) {
+            if (f?.isFile == true && f.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp")) {
+                // Картинку модель не увидит: readText() по JPEG/PNG давал
+                // бинарный мусор в контекст (скриншот: агент «читает» скриншот
+                // и отвечает, что не может его интерпретировать). Честнее
+                // сразу сказать, что нужно описание словами.
+                ToolResult(
+                    "read_file",
+                    "«$name» — изображение (${f.length()} байт). Я не вижу картинки: " +
+                        "попроси пользователя описать скриншот словами (текст ошибки, " +
+                        "название экрана, что нажимали) или дать текстовый файл.",
+                )
+            } else if (f?.isFile == true) {
                 val text = f.readText()
                 // Хвост файла важнее начала: продолжение книги пишется с конца
                 val slice = if (text.length > 3000) "…" + text.takeLast(3000) else text

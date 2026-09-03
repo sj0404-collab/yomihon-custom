@@ -406,7 +406,14 @@ internal class CyrillicOcrEngine(
         val restoredWhole = OcrTextCleaner.normalizeLocalCyrillicCaption(wholeLine.text)
         val restoresBoundaries = restoredWhole.count(Char::isWhitespace) > wholeLine.text.count(Char::isWhitespace)
         val wholeQuality = candidateQuality(wholeLine) + if (restoresBoundaries) tuning().wholeLineBoundaryBonus else 0f
-        val segmentedQuality = candidateQuality(segmented)
+        // Огрызки «Г», «ИЕ» от перерезки внутри слова (декоративный шрифт со
+        // свободной кернинговой посадкой) не должны побеждать целую строку:
+        // каждый кусок короче трёх букв, не являющийся коротким словом,
+        // снимает с нарезки 0.15 качества.
+        val shortFragments = segmented.text.split(' ').count { frag ->
+            frag.length <= 2 && frag.uppercase() !in OcrTextCleaner.SMALL_WORDS
+        }
+        val segmentedQuality = candidateQuality(segmented) - shortFragments * 0.15f
         return if (restoresBoundaries && wholeQuality >= segmentedQuality) wholeLine else segmented
     }
 
