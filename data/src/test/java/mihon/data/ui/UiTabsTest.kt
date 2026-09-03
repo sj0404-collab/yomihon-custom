@@ -62,9 +62,8 @@ class UiTabsTest {
     fun `a pinned tab stays visible even if the file asks to hide it`() {
         // Файл правится руками или сторонним плагином, поэтому защита
         // применяется и на чтении, а не только на записи.
-        UiTabs.visibleTabs(UiTabs.IDS, setOf("library", "more", "browser")) shouldContainExactly listOf(
-            "local_library", "updates", "history", "browse", "ai",
-        )
+        UiTabs.visibleTabs(UiTabs.IDS, setOf("library", "more", "browser")) shouldContainExactly
+            listOf("library", "local_library", "updates", "history", "browse", "ai", "more")
         UiTabs.isHidden("library", setOf("library")) shouldBe false
         UiTabs.isHidden("browser", setOf("browser")) shouldBe true
     }
