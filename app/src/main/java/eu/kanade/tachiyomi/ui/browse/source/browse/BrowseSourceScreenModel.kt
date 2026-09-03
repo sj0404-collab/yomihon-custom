@@ -46,6 +46,7 @@ import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
+import tachiyomi.domain.library.model.LibraryIndex
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetDuplicateLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
@@ -105,7 +106,11 @@ class BrowseSourceScreenModel(
             it.copy(
                 listing = listing,
                 filters = source.getFilterList(),
-                toolbarQuery = query,
+                // Служебный маркер алфавитного указателя («#а») в строку поиска
+                // не показываем: активная буква видна в чипах указателя, а
+                // «#а» в поле выглядело бы мусором. Обычный запрос показываем
+                // как раньше. Введённый пользователем текст маркер заменяет.
+                toolbarQuery = query?.takeUnless { q -> LibraryIndex.isIndexQuery(q) },
             )
         }
 

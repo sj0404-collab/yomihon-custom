@@ -34,6 +34,7 @@ import tachiyomi.core.metadata.comicinfo.copyFromComicInfo
 import tachiyomi.core.metadata.comicinfo.getComicInfo
 import tachiyomi.core.metadata.tachiyomi.MangaDetails
 import tachiyomi.domain.chapter.service.ChapterRecognition
+import tachiyomi.domain.library.model.LibraryIndex
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.filter.GenreFilter
@@ -125,7 +126,10 @@ actual class LocalSource(
                 if (lastModifiedLimit == 0L && query.isBlank()) {
                     true
                 } else if (lastModifiedLimit == 0L) {
-                    it.name.orEmpty().contains(query, ignoreCase = true)
+                    // Обычный запрос — поиск по подстроке, запрос с маркером «#»
+                    // — алфавитный указатель (см. LibraryIndex). Разбор живёт в
+                    // domain и покрыт юнит-тестами.
+                    LibraryIndex.matches(it.name.orEmpty(), query)
                 } else {
                     it.lastModified() >= lastModifiedLimit
                 }
