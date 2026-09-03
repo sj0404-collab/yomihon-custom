@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.onStart
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.domain.library.model.LibraryIndex
 import tachiyomi.domain.source.interactor.GetRemoteManga
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.storage.service.StoragePreferences
@@ -106,6 +107,10 @@ data object LocalLibraryTab : Tab {
         // Сортировка списка: false — по алфавиту (OrderBy.Popular в LocalSource
         // сортирует по названию A→Я), true — сначала новые (OrderBy.Latest).
         var sortByNewest by remember { mutableStateOf(false) }
+        // Алфавитный указатель: ключ из LibraryIndex.LETTERS или null («все»).
+        // Ключ превращается в служебный запрос «#а», который LocalSource
+        // разбирает как «название начинается на…».
+        var letter by remember { mutableStateOf<String?>(null) }
 
         val addFolderLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocumentTree(),
@@ -255,6 +260,28 @@ data object LocalLibraryTab : Tab {
                             }
                         }
                     }
+                    // Алфавитный указатель: А–Я (с «ё»), A–Z, цифры и «прочие».
+                    // Повторный тап по букве сбрасывает указатель.
+                    LazyRow(
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp),
+                    ) {
+                        item(key = "__index_all__") {
+                            FilterChip(
+                                selected = letter == null,
+                                onClick = { letter = null },
+                                label = { Text("Все") },
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                        }
+                        items(LibraryIndex.LETTERS, key = { "__index_$it" }) { letterKey ->
+                            FilterChip(
+                                selected = letter == letterKey,
+                                onClick = { letter = if (letter == letterKey) null else letterKey },
+                                label = { Text(indexLabel(letterKey)) },
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                        }
+                    }
                     LazyRow(
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
                     ) {
@@ -278,20 +305,40 @@ data object LocalLibraryTab : Tab {
                 }
             }
             // folderKey и listingQuery входят в data-класс экрана: при смене
-            // папки или сортировки Voyager пересоздаёт ScreenModel и список
-            // перезапрашивается у LocalSource.
+            // папки, сортировки или буквы указателя Voyager пересоздаёт
+            // ScreenModel и список перезапрашивается у LocalSource.
+            //
+            // С указателем список всегда идёт в порядке «название А→Я»: поиск
+            // использует фильтры источника по умолчанию (OrderBy.Popular =
+            // «название, по возрастанию»), и для полосы букв это ровно то, что
+            // ждёт пользователь.
             Navigator(
                 screen = BrowseSourceScreen(
                     sourceId = LocalSource.ID,
-                    listingQuery = if (sortByNewest) {
-                        GetRemoteManga.QUERY_LATEST
-                    } else {
-                        GetRemoteManga.QUERY_POPULAR
-                    },
-                    folderKey = if (sortByNewest) "latest|$activeRoot" else "az|$activeRoot",
+                    listingQuery = LibraryIndex.queryFor(letter)
+                        ?: if (sortByNewest) {
+                            GetRemoteManga.QUERY_LATEST
+                        } else {
+                            GetRemoteManga.QUERY_POPULAR
+                        },
+                    folderKey = listOf(
+                        if (sortByNewest) "latest" else "az",
+                        activeRoot,
+                        letter.orEmpty(),
+                    ).joinToString("|"),
                 ),
             )
         }
+    }
+
+    /**
+     * Подпись чипа указателя: буквы заглавные, служебные ключи — словами,
+     * чтобы «*» не выглядел опечаткой.
+     */
+    private fun indexLabel(key: String): String = when (key) {
+        LibraryIndex.DIGITS -> "0–9"
+        LibraryIndex.OTHER -> "прочие"
+        else -> key.uppercase()
     }
 
     private fun prettyUri(uriString: String): String {
