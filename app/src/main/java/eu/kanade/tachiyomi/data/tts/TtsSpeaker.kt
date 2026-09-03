@@ -439,6 +439,12 @@ object TtsSpeaker {
         val p = prefs()
         currentJob = scope.launch {
             setSpeaking(true)
+            val sentences = splitSentences(text)
+            // Сколько предложений нейроголос уже озвучил и сломался ли он
+            // посреди чтения. Принцип AlReader: текст ВСЕГДА озвучен —
+            // движок лишь деталь, при отказе дочитываем системным голосом.
+            var doneUpTo = 0
+            var failed = false
             try {
                 val installed = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
                 if (!OnnxTts.isAvailable(context) || installed.isEmpty()) {
@@ -455,14 +461,22 @@ object TtsSpeaker {
                     ?: installed.firstOrNull { it.id == preferredId }
                     ?: installed.first()
                 val baseSpeed = p.speechRate().get().coerceIn(0.5f, 2f)
-                for (sentence in splitSentences(text)) {
+                for (sentence in sentences) {
                     if (currentJob?.isActive != true) break
                     val trimmed = sentence.trim()
                     // Живая просодия: скорость зависит от знаков препинания
                     // и капса — вопросы медленнее, крик быстрее, «…» задумчиво
                     val speed = OnnxTts.prosodySpeed(trimmed, baseSpeed)
-                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed) ?: continue
+                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed)
+                    if (wav == null) {
+                        // Синтез не удался (причину OnnxTts уже записал в
+                        // workspace/logs/tts.log): не молчим до конца главы,
+                        // а отдаём остаток системному движку.
+                        failed = true
+                        break
+                    }
                     playFileBlocking(wav)
+                    doneUpTo++
                     // Пауза между предложениями: 240мс после точки,
                     // 400мс после !/? — дыхание, а не конвейер
                     val pause = when {
@@ -472,9 +486,21 @@ object TtsSpeaker {
                     }
                     kotlinx.coroutines.delay(pause)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                setSpeaking(false)
+                throw e
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "ONNX TTS failed" }
-            } finally {
+                failed = true
+            }
+            if (failed && doneUpTo < sentences.size && currentJob?.isActive == true) {
+                val rest = sentences.subList(doneUpTo, sentences.size).joinToString(" ")
+                logcat(LogPriority.WARN) {
+                    "ONNX fallback to system TTS from sentence $doneUpTo/${sentences.size}" +
+                        " (reason: ${OnnxTts.lastError.value ?: "unknown"})"
+                }
+                withContext(Dispatchers.Main) { speakSystem(context, rest, gender) }
+            } else {
                 setSpeaking(false)
             }
         }
