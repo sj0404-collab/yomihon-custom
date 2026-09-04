@@ -23,6 +23,9 @@ class OcrPreferences(
     // параметров детектора и порядок чтения. См. mihon.data.ocr.OcrTuning.
     fun contentType() = preferenceStore.getString("pref_ocr_content_type", "balanced")
 
+    /** Авто-пресет типа контента по геометрии страницы: on/off. */
+    fun autoPreset() = preferenceStore.getString("pref_ocr_auto_preset", "on")
+
     // Область, которую пресет применяет по умолчанию. Хранится отдельно от
     // scanRegion(): пользователь может переопределить область, не теряя пресет.
     fun presetScanRegion() = preferenceStore.getString("pref_ocr_preset_region", "full")

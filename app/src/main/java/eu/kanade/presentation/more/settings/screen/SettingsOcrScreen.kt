@@ -121,6 +121,14 @@ object SettingsOcrScreen : SearchableSettings {
                         true
                     },
                 ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = prefs.autoPreset(),
+                    entries = mapOf(
+                        "on" to "Включён: манхва/вебтун определяются по странице",
+                        "off" to "Выключен: только ручной выбор",
+                    ),
+                    title = "Авто-пресет типа контента",
+                ),
                 Preference.PreferenceItem.InfoPreference(
                     title = stringResource(MR.strings.pref_ocr_content_type_info),
                 ),
