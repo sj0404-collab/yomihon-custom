@@ -107,7 +107,11 @@ fun ReaderFloatingControls(
     ) {
         eu.kanade.presentation.reader.OcrLoadingIndicator(
             visible = true,
-            modifier = Modifier.align(Alignment.TopCenter),
+            // Индикатор — в центре читалки (над страницей), а не у верхней
+            // кромки экрана телефона (жалоба пользователя).
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 24.dp),
         )
         androidx.compose.material3.Text(
             text = if (ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DETECTING) {
@@ -118,18 +122,27 @@ fun ReaderFloatingControls(
             style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
             color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 64.dp),
+                .align(Alignment.Center)
+                .padding(top = 56.dp, start = 16.dp, end = 16.dp),
         )
     }
-    if (ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DONE && ocrStage.note.isNotBlank()) {
+    // Заметка о готовности видна 5 секунд в центре и гаснет сама.
+    var showDoneNote by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(ocrStage) {
+        showDoneNote = ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DONE && ocrStage.note.isNotBlank()
+        if (showDoneNote) {
+            kotlinx.coroutines.delay(5000)
+            showDoneNote = false
+        }
+    }
+    if (showDoneNote) {
         androidx.compose.material3.Text(
             text = "Текст готов: ${ocrStage.note}",
             style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp),
+                .align(Alignment.Center)
+                .padding(top = 96.dp, start = 16.dp, end = 16.dp),
         )
     }
 

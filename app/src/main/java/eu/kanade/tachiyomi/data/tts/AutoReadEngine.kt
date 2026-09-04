@@ -430,7 +430,15 @@ class AutoReadEngine(
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
-    private suspend fun speakAndAwait(text: String, gender: String? = null, speakerSlot: Int = 0) {
+    private suspend fun speakAndAwait(rawText: String, gender: String? = null, speakerSlot: Int = 0) {
+        // Многоточие TTS читает как «точка точка точка»: заменяем на паузу-
+        // запятую. Одиночные точки (концы предложений) не трогаем.
+        val text = rawText
+            .replace("…", ", ")
+            .replace(Regex("\\.{3,}"), ", ")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+        if (text.isBlank()) return
         val done = MutableStateFlow(false)
         var started = false
         val t0 = System.currentTimeMillis()
