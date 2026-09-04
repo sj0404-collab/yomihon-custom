@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.data.ai
 
 import android.content.Context
-import eu.kanade.tachiyomi.data.tts.OnnxTts
 import eu.kanade.tachiyomi.data.voice.VoiceBackend
 import eu.kanade.tachiyomi.data.voice.VoicePlugins
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -52,7 +51,7 @@ object AiReaderTools {
         "@tool plugins_list {} — реестры плагинов: OCR-движки, голосовые движки и бэкенды AI-чата " +
             "с требованиями и доступностью",
         "@tool tts_status {} — озвучка: выбранный движок и голоса, установленные системные " +
-            "TTS-движки, состояние ONNX и последняя ошибка синтеза, хвост logs/tts.log",
+            "TTS-движки, адрес сервера синтеза и последняя ошибка, хвост logs/tts.log",
     )
 
     /**
@@ -248,9 +247,8 @@ object AiReaderTools {
         hasApiKey = { plugin ->
             plugin.backend == VoiceBackend.ELEVEN_API && prefs.elevenApiKey().get().isNotBlank()
         },
-        modelsDownloaded = { plugin ->
-            plugin.backend == VoiceBackend.ONNX &&
-                OnnxTts.CATALOG.any { OnnxTts.isInstalled(context, it) }
+        hasServerAddress = { plugin ->
+            plugin.backend == VoiceBackend.REMOTE_TTS && prefs.remoteTtsUrl().get().isNotBlank()
         },
     ).map { it.id }.toSet()
 
@@ -271,7 +269,6 @@ object AiReaderTools {
             android.speech.tts.TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE,
         )
         val services = runCatching { pm.queryIntentServices(intent, 0) }.getOrNull().orEmpty()
-        val onnxVoices = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
         val logTail = runCatching {
             val f = java.io.File(AiWorkspace.root(context), "logs/tts.log")
             if (f.isFile) f.readLines().takeLast(12).joinToString("\n") else null
@@ -287,11 +284,9 @@ object AiReaderTools {
             appendLine("Мужские реплики: ${prefs.voiceMale().get().ifBlank { "не задан" }}")
             appendLine()
             appendLine(
-                "ONNX: рантайм " +
-                    (if (OnnxTts.isRuntimeInstalled(context)) "скачан" else "НЕ скачан") +
-                    "; голоса: " + onnxVoices.joinToString { it.id }.ifEmpty { "не скачаны" },
+                "Удалённый TTS-сервер: " +
+                    prefs.remoteTtsUrl().get().ifBlank { "адрес не задан" },
             )
-            OnnxTts.lastError.value?.let { appendLine("Последняя ошибка ONNX: $it") }
             appendLine()
             appendLine("Системные TTS-движки (PackageManager):")
             if (services.isEmpty()) appendLine("  не найдены")

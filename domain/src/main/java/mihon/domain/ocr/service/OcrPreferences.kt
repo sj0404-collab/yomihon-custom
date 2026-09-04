@@ -159,7 +159,8 @@ class OcrPreferences(
     fun localLlmModel() = preferenceStore.getString("pref_local_llm_model", "")
 
     // ONNX-голос по умолчанию (id из OnnxTts.CATALOG)
-    fun onnxVoice() = preferenceStore.getString("pref_onnx_voice", "irina")
+    /** Адрес локального TTS-сервера (tools/remote_tts_server.py на ПК/ранере). */
+    fun remoteTtsUrl() = preferenceStore.getString("pref_remote_tts_url", "")
 
     // Пакет системного TTS-движка: "" = движок по умолчанию системы.
     // Примеры: com.google.android.tts, com.github.olga_yakovleva.rhvoice.android,

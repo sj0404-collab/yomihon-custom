@@ -63,7 +63,7 @@ class AiReaderToolsTest {
                 TtsSpeaker.ENGINE_SYSTEM,
                 TtsSpeaker.ENGINE_GOOGLE_WEB,
                 TtsSpeaker.ENGINE_ELEVENLABS,
-                TtsSpeaker.ENGINE_ONNX,
+                TtsSpeaker.ENGINE_REMOTE,
             )
         AiBackends.ALL.map { it.id } shouldContainExactly listOf("online", "local", "runner")
     }

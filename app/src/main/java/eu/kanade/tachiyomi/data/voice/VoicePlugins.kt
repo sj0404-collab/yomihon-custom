@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.speech.tts.TextToSpeech
-import eu.kanade.tachiyomi.data.tts.OnnxTts
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.data.tts.VoiceHelper
 import eu.kanade.tachiyomi.data.tts.VoiceKind
@@ -40,13 +39,16 @@ enum class VoiceBackend(val id: String) {
     /** ElevenLabs по API-ключу. */
     ELEVEN_API(TtsSpeaker.ENGINE_ELEVENLABS),
 
-    /** Офлайн нейросетевые голоса sherpa-onnx (VITS/Piper). */
-    ONNX(TtsSpeaker.ENGINE_ONNX),
+    /** Нейроголоса на сервере пользователя (ПК/ранер): sherpa-onnx + Piper. */
+    REMOTE_TTS(TtsSpeaker.ENGINE_REMOTE),
     ;
 
     companion object {
         /** Значения из сборок, где ONNX ещё был объявлен как `onnx`. */
-        private val LEGACY_IDS = mapOf("onnx" to ONNX)
+        private val LEGACY_IDS = mapOf(
+            "onnx" to REMOTE_TTS,
+            "onnx_tts" to REMOTE_TTS,
+        )
 
         /**
          * Точное распознавание id, включая legacy-написания. `null`, если
@@ -80,14 +82,17 @@ enum class VoiceRequirement {
 
     /** Нужна нативная библиотека, которой может не быть в сборке. */
     NATIVE_LIBRARY,
+
+    /** Нужен адрес локального сервера озвучки (ПК/ранер). */
+    SERVER_ADDRESS,
 }
 
 /**
  * Описание одного голосового движка как плагина.
  *
  * Как и [eu.kanade.tachiyomi.data.ai.AiPlugins], это декларативный реестр: он
- * ничего не озвучивает сам. Реальные вызовы остаются в `TtsSpeaker`,
- * `OnnxTts` и `VoiceHelper`, а реестр даёт настройкам единый список движков с
+ * ничего не озвучивает сам. Реальные вызовы остаются в `TtsSpeaker` и
+ * `VoiceHelper`, а реестр даёт настройкам единый список движков с
  * понятными требованиями и списком голосов.
  */
 data class VoicePluginDescriptor(
@@ -107,10 +112,21 @@ data class VoicePluginDescriptor(
 /**
  * Реестр голосовых плагинов и один голос внутри них.
  *
- * [voices] намеренно функция, а не поле: список системных голосов и скачанных
- * ONNX-моделей зависит от устройства и меняется во время работы приложения.
+ * [voices] намеренно функция, а не поле: список системных голосов зависит от
+ * устройства и меняется во время работы приложения.
  */
+/** голоса серверного синтеза: те же Piper-модели, что раньше качались в APK. */
+private val REMOTE_VOICE_CATALOG = listOf(
+    Triple("irina", "Ирина (женский, мягкий)", "female"),
+    Triple("dmitri", "Дмитрий (мужской)", "male"),
+    Triple("ruslan", "Руслан (мужской, низкий)", "male"),
+)
+
 object VoicePlugins {
+
+    /** id серверных голосов — для настроек и контрактов (тесты). */
+    val REMOTE_VOICE_CATALOG_IDS = REMOTE_VOICE_CATALOG.map { it.first }
+
 
     /** Один конкретный голос внутри движка. */
     data class Voice(
@@ -159,17 +175,18 @@ object VoicePlugins {
         offline = false,
     )
 
-    val ONNX = VoicePluginDescriptor(
-        id = VoiceBackend.ONNX.id,
-        backend = VoiceBackend.ONNX,
-        title = "ONNX-голоса (офлайн)",
-        summary = "sherpa-onnx и русские Piper-голоса: модели скачиваются один раз, дальше работают без сети.",
-        requirements = setOf(VoiceRequirement.MODEL_DOWNLOAD, VoiceRequirement.NATIVE_LIBRARY),
+    val REMOTE_TTS = VoicePluginDescriptor(
+        id = VoiceBackend.REMOTE_TTS.id,
+        backend = VoiceBackend.REMOTE_TTS,
+        title = "TTS-сервер (ПК/ранер)",
+        summary = "sherpa-onnx и русские Piper-голоса на вашей машине: приложение шлёт текст и проигрывает wav.",
+        requirements = setOf(VoiceRequirement.SERVER_ADDRESS),
         supportsGender = true,
         supportsMultipleVoices = true,
+        offline = false,
     )
 
-    val ALL = listOf(SYSTEM_TTS, GOOGLE_WEB, ELEVEN_API, ONNX)
+    val ALL = listOf(SYSTEM_TTS, GOOGLE_WEB, ELEVEN_API, REMOTE_TTS)
 
     private val BY_ID = ALL.associateBy { it.id }
 
@@ -191,6 +208,7 @@ object VoicePlugins {
         hasApiKey: (VoicePluginDescriptor) -> Boolean = { false },
         nativeLibraryPresent: (VoicePluginDescriptor) -> Boolean = { true },
         modelsDownloaded: (VoicePluginDescriptor) -> Boolean = { false },
+        hasServerAddress: (VoicePluginDescriptor) -> Boolean = { false },
     ): List<VoicePluginDescriptor> = ALL.filter { plugin ->
         plugin.requirements.all { requirement ->
             when (requirement) {
@@ -199,24 +217,24 @@ object VoicePlugins {
                 VoiceRequirement.SYSTEM_ENGINE -> systemEnginePresent
                 VoiceRequirement.MODEL_DOWNLOAD -> modelsDownloaded(plugin)
                 VoiceRequirement.NATIVE_LIBRARY -> nativeLibraryPresent(plugin)
+                VoiceRequirement.SERVER_ADDRESS -> hasServerAddress(plugin)
             }
         }
     }
 
     /**
-     * Голоса движка. Для ONNX берётся реальный каталог [OnnxTts.CATALOG],
-     * поэтому список не расходится с тем, что приложение умеет скачивать.
+     * Голоса движка: системные берутся из настроек, серверные — из
+     * каталога Piper-голосов ранера/ПК.
      */
     fun voices(context: Context, plugin: VoicePluginDescriptor, prefs: OcrPreferences): List<Voice> =
         when (plugin.backend) {
-            VoiceBackend.ONNX -> OnnxTts.CATALOG.map { voice ->
+            VoiceBackend.REMOTE_TTS -> REMOTE_VOICE_CATALOG.map { voice ->
                 Voice(
-                    id = voice.id,
-                    name = voice.name,
-                    gender = voice.gender,
+                    id = voice.first,
+                    name = voice.second,
+                    gender = voice.third,
                     language = "ru-RU",
-                    sizeMb = voice.sizeMb,
-                    installed = OnnxTts.isInstalled(context, voice),
+                    installed = true,
                 )
             }
 

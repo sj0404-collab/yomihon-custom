@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test
  * Реестр голосовых плагинов.
  *
  * Проверяется только декларативная часть (id, бэкенд, требования, доступность):
- * реальная озвучка живёт в `TtsSpeaker`/`OnnxTts` и требует Android.
+ * реальная озвучка живёт в `TtsSpeaker`/`VoiceHelper` и требует Android.
  */
 class VoicePluginsTest {
 
@@ -28,10 +28,12 @@ class VoicePluginsTest {
         VoiceBackend.fromId("system_tts") shouldBe VoiceBackend.SYSTEM_TTS
         VoiceBackend.fromId("google_web") shouldBe VoiceBackend.GOOGLE_WEB
         VoiceBackend.fromId("eleven_api") shouldBe VoiceBackend.ELEVEN_API
-        // Значение, которое реально пишет UI озвучки (TtsSpeaker.ENGINE_ONNX).
-        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.ONNX
-        // Наследие сборок, где ONNX был объявлен как "onnx".
-        VoiceBackend.fromId("onnx") shouldBe VoiceBackend.ONNX
+        // Значение, которое пишет UI озвучки (TtsSpeaker.ENGINE_REMOTE).
+        VoiceBackend.fromId("remote_tts") shouldBe VoiceBackend.REMOTE_TTS
+        // Наследие сборок, где нейроголоса жили в APK: "onnx_tts" и "onnx"
+        // обязаны вести на серверный движок, иначе пользователь потерял бы выбор.
+        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.REMOTE_TTS
+        VoiceBackend.fromId("onnx") shouldBe VoiceBackend.REMOTE_TTS
         // Пустое или неизвестное значение читается как системный TTS.
         VoiceBackend.fromId("") shouldBe VoiceBackend.SYSTEM_TTS
         VoiceBackend.fromId(null) shouldBe VoiceBackend.SYSTEM_TTS
@@ -60,44 +62,44 @@ class VoicePluginsTest {
             VoicePlugins.ELEVEN_API,
         )
 
-        // ONNX требует скачанную модель: без неё движок не предлагается.
+        // Серверный движок предлагается только когда задан адрес сервера.
         VoicePlugins.available(
             networkAvailable = false,
             systemEnginePresent = true,
-            modelsDownloaded = { true },
-        ) shouldContainExactly listOf(VoicePlugins.SYSTEM_TTS, VoicePlugins.ONNX)
-    }
+            hasServerAddress = { true },
+        ) shouldContainExactly listOf(VoicePlugins.SYSTEM_TTS, VoicePlugins.REMOTE_TTS)
 
-    @Test
-    fun `a missing native library hides the onnx engine`() {
         VoicePlugins.available(
             networkAvailable = false,
             systemEnginePresent = true,
-            modelsDownloaded = { true },
-            nativeLibraryPresent = { false },
+            hasServerAddress = { false },
         ) shouldContainExactly listOf(VoicePlugins.SYSTEM_TTS)
     }
 
     @Test
     fun `offline flags are declared for the engines that work without network`() {
         VoicePlugins.ALL.filter { it.offline }.map { it.id } shouldContainExactly
-            listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.ONNX.id)
+            listOf(VoiceBackend.SYSTEM_TTS.id)
         VoicePlugins.ALL.filterNot { it.offline }.map { it.id } shouldContainExactly
-            listOf(VoiceBackend.GOOGLE_WEB.id, VoiceBackend.ELEVEN_API.id)
+            listOf(
+                VoiceBackend.GOOGLE_WEB.id,
+                VoiceBackend.ELEVEN_API.id,
+                VoiceBackend.REMOTE_TTS.id,
+            )
     }
 
     @Test
     fun `gender aware engines are marked so auto-voicing can use them`() {
         VoicePlugins.ALL.filter { it.supportsGender }.map { it.id } shouldContainExactly
-            listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.ONNX.id)
+            listOf(VoiceBackend.SYSTEM_TTS.id, VoiceBackend.REMOTE_TTS.id)
     }
 
     @Test
-    fun `system voices are reported as installed while onnx models are not assumed`() {
-        // Декларативно: у системных/веб/ElevenLabs голосов installed = true,
-        // а у ONNX его выставляет реальная проверка модели на диске.
-        VoicePlugins.SYSTEM_TTS.backend shouldBe VoiceBackend.SYSTEM_TTS
-        VoicePlugins.ONNX.requirements.contains(VoiceRequirement.MODEL_DOWNLOAD) shouldBe true
+    fun `remote engine declares the server address requirement`() {
+        VoicePlugins.REMOTE_TTS.backend shouldBe VoiceBackend.REMOTE_TTS
+        VoicePlugins.REMOTE_TTS.requirements.contains(VoiceRequirement.SERVER_ADDRESS) shouldBe true
+        // Каталог серверных голосов не пустой и совпадает с Piper-набором.
+        VoicePlugins.REMOTE_VOICE_CATALOG_IDS shouldBe listOf("irina", "dmitri", "ruslan")
     }
 
     @Test
@@ -108,16 +110,17 @@ class VoicePluginsTest {
         VoiceBackend.SYSTEM_TTS.id shouldBe TtsSpeaker.ENGINE_SYSTEM
         VoiceBackend.GOOGLE_WEB.id shouldBe TtsSpeaker.ENGINE_GOOGLE_WEB
         VoiceBackend.ELEVEN_API.id shouldBe TtsSpeaker.ENGINE_ELEVENLABS
-        VoiceBackend.ONNX.id shouldBe TtsSpeaker.ENGINE_ONNX
+        VoiceBackend.REMOTE_TTS.id shouldBe TtsSpeaker.ENGINE_REMOTE
     }
 
     @Test
-    fun `a legacy engine value still resolves to the onnx plugin`() {
-        // На устройствах с прежней сборкой в pref_voice_engine лежит "onnx".
-        // Без legacy-разбора such пользователь потерял бы выбранный движок.
-        VoicePlugins.byId("onnx") shouldBe VoicePlugins.ONNX
-        VoicePlugins.byId("onnx_tts") shouldBe VoicePlugins.ONNX
-        VoicePlugins.byId("  onnx_tts  ") shouldBe VoicePlugins.ONNX
+    fun `a legacy engine value still resolves to the remote plugin`() {
+        // На устройствах с прежней сборкой в pref_voice_engine лежит
+        // "onnx" или "onnx_tts". Без legacy-разбора пользователь потерял бы
+        // выбранный движок после обновления.
+        VoicePlugins.byId("onnx") shouldBe VoicePlugins.REMOTE_TTS
+        VoicePlugins.byId("onnx_tts") shouldBe VoicePlugins.REMOTE_TTS
+        VoicePlugins.byId("  onnx_tts  ") shouldBe VoicePlugins.REMOTE_TTS
         // Мусор не должен молча превращаться в системный плагин.
         VoicePlugins.byId("несуществующий") shouldBe null
         VoicePlugins.byId("") shouldBe null
@@ -126,8 +129,8 @@ class VoicePluginsTest {
 
     @Test
     fun `unknown and legacy engine values fall back to the system engine`() {
-        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.ONNX
-        VoiceBackend.fromId("  onnx_tts  ") shouldBe VoiceBackend.ONNX
+        VoiceBackend.fromId("onnx_tts") shouldBe VoiceBackend.REMOTE_TTS
+        VoiceBackend.fromId("  onnx_tts  ") shouldBe VoiceBackend.REMOTE_TTS
         VoiceBackend.fromId("ONNX_TTS") shouldBe VoiceBackend.SYSTEM_TTS
         VoiceBackend.fromId("plugin:my-voice") shouldBe VoiceBackend.SYSTEM_TTS
     }

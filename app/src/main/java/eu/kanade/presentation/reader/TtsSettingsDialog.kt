@@ -202,9 +202,9 @@ fun TtsSettingsDialog(
                         modifier = Modifier.padding(end = 6.dp),
                     )
                     FilterChip(
-                        selected = engine == TtsSpeaker.ENGINE_ONNX,
-                        onClick = { engine = TtsSpeaker.ENGINE_ONNX },
-                        label = { Text("🧠 ONNX") },
+                        selected = engine == TtsSpeaker.ENGINE_REMOTE,
+                        onClick = { engine = TtsSpeaker.ENGINE_REMOTE },
+                        label = { Text("🖥 Сервер") },
                         modifier = Modifier.padding(end = 6.dp),
                     )
                     FilterChip(
@@ -219,27 +219,22 @@ fun TtsSettingsDialog(
                         label = { Text("ElevenLabs") },
                     )
                 }
-                if (engine == TtsSpeaker.ENGINE_ONNX) {
-                    val ctxOnnx = androidx.compose.ui.platform.LocalContext.current
-                    val onnxInstalled = remember {
-                        eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.filter {
-                            eu.kanade.tachiyomi.data.tts.OnnxTts.isInstalled(ctxOnnx, it)
-                        }
-                    }
+                if (engine == TtsSpeaker.ENGINE_REMOTE) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = prefs.remoteTtsUrl().get(),
+                        onValueChange = { prefs.remoteTtsUrl().set(it.trim()) },
+                        label = { Text("Адрес сервера: http://192.168.1.10:8788") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
                     Text(
-                        if (!eu.kanade.tachiyomi.data.tts.OnnxTts.isRuntimeInstalled(ctxOnnx)) {
-                            "Рантайм не скачан: Ещё → Text Recognition → Голоса → ONNX"
-                        } else if (onnxInstalled.isEmpty()) {
-                            "Голоса не скачаны: Ещё → Text Recognition → Голоса → ONNX"
-                        } else {
-                            "Установлены: " + onnxInstalled.joinToString { it.name.substringBefore(" (") } +
-                                ". ♀ реплики — женским, ♂ — мужским автоматически."
-                        },
+                        "Нейроголоса (sherpa-onnx/Piper) работают на вашем ПК или ранере: " +
+                            "запустите tools/remote_tts_server.py и укажите адрес. " +
+                            "Приложение шлёт текст и проигрывает готовый wav.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
