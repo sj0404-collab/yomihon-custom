@@ -197,7 +197,9 @@ class OcrPreferences(
 
     // Стиль: bubble (мягкое пятно, по умолчанию) | box (рамка) |
     // underline (подчёркивание) | both
-    fun highlightStyle() = preferenceStore.getString("pref_highlight_style", "bubble")
+    // По умолчанию — видимая рамка: «bubble» (еле заметные круги) пользователь
+    // воспринял как отсутствие подсветки вообще.
+    fun highlightStyle() = preferenceStore.getString("pref_highlight_style", "box")
 
     // Толщина рамки/линии в dp
     fun highlightWidth() = preferenceStore.getFloat("pref_highlight_width", 3f)
