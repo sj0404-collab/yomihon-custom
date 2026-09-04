@@ -299,7 +299,8 @@ internal class CyrillicOcrEngine(
             OcrStageBus.post(
                 OcrStageBus.Stage.DONE,
                 "${out.length} симв | словарь: ${OcrTextCleanerStats.wordDictHits}, " +
-                    "пунктуация: ${OcrTextCleanerStats.punctFixes}",
+                    "пунктуация: ${OcrTextCleanerStats.punctFixes}, " +
+                    "разбиение: ${OcrTextCleanerStats.splitFixes}",
             )
             out
         }

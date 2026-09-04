@@ -20,6 +20,7 @@ object OcrHistoryStore {
         val detail: String,
         val wordDictHits: Int,
         val punctFixes: Int,
+        val splitFixes: Int,
     )
 
     data class AutoReadEntry(
@@ -36,8 +37,16 @@ object OcrHistoryStore {
     val reads: StateFlow<List<AutoReadEntry>> = _reads
 
     @Synchronized
-    fun addScan(ok: Boolean, detail: String, wordDictHits: Int, punctFixes: Int) {
-        val entry = ScanEntry(System.currentTimeMillis(), ok, detail, wordDictHits, punctFixes)
+    fun addScan(
+        ok: Boolean,
+        detail: String,
+        wordDictHits: Int,
+        punctFixes: Int,
+        splitFixes: Int,
+    ) {
+        val entry = ScanEntry(
+            System.currentTimeMillis(), ok, detail, wordDictHits, punctFixes, splitFixes,
+        )
         _scans.value = (listOf(entry) + _scans.value).take(MAX_ENTRIES)
     }
 

@@ -25,9 +25,13 @@ object OcrTextCleanerStats {
     @Volatile
     var punctFixes: Int = 0
 
+    @Volatile
+    var splitFixes: Int = 0
+
     fun reset() {
         wordDictHits = 0
         punctFixes = 0
+        splitFixes = 0
     }
 }
 
@@ -207,7 +211,16 @@ object OcrTextCleaner {
 
     private fun restoreRun(source: String): String {
         val upper = source.uppercase()
-        val segments = splitKnownWords(upper)
+        var segments = splitKnownWords(upper)
+        if (segments == null) {
+            // Слиплись слова без пробелов: разбиваем по частотному
+            // словарю словоформ. Только вставка пробелов.
+            val glued = splitGluedRun(upper)
+            if (glued != null) {
+                OcrTextCleanerStats.splitFixes++
+                segments = glued
+            }
+        }
         val normalized = (segments ?: listOf(upper)).map(::normalizeCaptionWord)
         val joined = normalized.joinToString(" ")
         val letters = source.filter(Char::isLetter)
@@ -231,6 +244,28 @@ object OcrTextCleaner {
                 val current = best[end]
                 // Минимум сегментов, а не максимум: реальное слово («ПАРАД»)
                 // должно побеждать рваньё («ПАР»+«АД»), а не наоборот.
+                if (current == null || candidate.size < current.size) best[end] = candidate
+            }
+        }
+        return best[run.length]?.takeIf { it.size > 1 }
+    }
+
+    /**
+     * DP-разбиение сплошного прогона капсом на слова из [RuWordList]:
+     * минимум сегментов при полном покрытии, как в [splitKnownWords].
+     */
+    private fun splitGluedRun(run: String): List<String>? {
+        if (run.length < 6) return null
+        val best = arrayOfNulls<List<String>>(run.length + 1)
+        best[0] = emptyList()
+        for (start in run.indices) {
+            val prefix = best[start] ?: continue
+            val maxEnd = minOf(run.length, start + 24)
+            for (end in start + 2..maxEnd) {
+                val word = run.substring(start, end)
+                if (word !in RuWordList.upper) continue
+                val candidate = prefix + word
+                val current = best[end]
                 if (current == null || candidate.size < current.size) best[end] = candidate
             }
         }
