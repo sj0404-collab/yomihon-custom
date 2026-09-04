@@ -118,6 +118,13 @@ object SettingsOcrScreen : SearchableSettings {
                         // BALANCED (KEEP) выбор пользователя не трогает.
                         val mode = ReadingMode.fromOcrHint(OcrContentType.fromId(value).viewer)
                         if (mode != null) readerPrefs.defaultReadingMode.set(mode.flagValue)
+                        // Ручной выбор запоминаем для текущей манги: авто-пресет
+                        // восстановит его при следующем входе без переклассификации.
+                        mihon.data.ocr.ContentAutoPreset.rememberManual(
+                            mihon.data.ocr.ReaderContextBus.current.value?.mangaId,
+                            value,
+                            prefs,
+                        )
                         true
                     },
                 ),
@@ -128,14 +135,6 @@ object SettingsOcrScreen : SearchableSettings {
                         "off" to "Выключен: только ручной выбор",
                     ),
                     title = "Авто-пресет типа контента",
-                ),
-                Preference.PreferenceItem.ListPreference(
-                    preference = prefs.ruStress(),
-                    entries = mapOf(
-                        "on" to "Включены: RHVoice получает разметку ударений",
-                        "off" to "Выключены: текст без разметки",
-                    ),
-                    title = "Ударения для локальных голосов",
                 ),
                 Preference.PreferenceItem.InfoPreference(
                     title = stringResource(MR.strings.pref_ocr_content_type_info),
