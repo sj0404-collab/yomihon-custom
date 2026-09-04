@@ -11,6 +11,33 @@ import mihon.domain.ocr.model.OcrBoundingBox
  */
 internal object OcrBoxGeometry {
 
+    /** Тип текстового бокса: пресет обработки привязывается к облачку сам. */
+    enum class Kind { BUBBLE, CAPTION, VERTICAL }
+
+    /**
+     * Классификация бокса без модели: по геометрии относительно страницы.
+     *  - VERTICAL — высокое и узкое (вертикальная разметка): кадр поворачиваем;
+     *  - CAPTION — широкая низкая плашка у края страницы или очень широкая:
+     *    подписи читаются словарным DP без «пузырной» эвристики;
+     *  - BUBBLE — всё остальное (реплики в пузырях).
+     */
+    fun classifyKind(
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+    ): Kind {
+        val w = (right - left).coerceAtLeast(1)
+        val h = (bottom - top).coerceAtLeast(1)
+        if (imageWidth <= 0 || imageHeight <= 0) return Kind.BUBBLE
+        if (h > 2.2f * w) return Kind.VERTICAL
+        val atEdge = top < imageHeight * 0.12f || bottom > imageHeight * 0.88f
+        return if ((w >= 2.6f * h && atEdge) || w >= 4.5f * h) Kind.CAPTION else Kind.BUBBLE
+    }
+
+
     /**
      * @return нормализованный бокс или null, если он вырожденный либо
      * изображение имеет нулевой размер.
