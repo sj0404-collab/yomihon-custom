@@ -25,7 +25,6 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RecordVoiceOver
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.Card
@@ -38,6 +37,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,15 +49,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalContext
-import eu.kanade.tachiyomi.data.ui.UiActionRegistry
-import eu.kanade.tachiyomi.util.system.toast
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import mihon.data.ui.UiActions
-import mihon.data.ui.UiPlacement
 import mihon.domain.ocr.service.ScanRegion
 
 /**
@@ -90,22 +81,10 @@ fun ReaderFloatingControls(
     var voiceGender by remember(manualVoiceGender) { mutableStateOf(manualVoiceGender) }
     var menuOpen by remember { mutableStateOf(false) }
     var showRegions by remember { mutableStateOf(false) }
-    var showPresets by remember { mutableStateOf(false) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
-
-    // Действия, которые пользователь добавил плагинами (workspace/ui). Список
-    // читается не в композиции, а в LaunchedEffect на IO: это файлы на общем
-    // хранилище. Ошибки не роняют меню — реестр возвращает пустой список.
-    val context = LocalContext.current
-    var userActions by remember { mutableStateOf<List<mihon.data.ui.UiActionSpec>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        userActions = withContext(Dispatchers.IO) {
-            UiActionRegistry.list(context).filter { it.placement == UiPlacement.FLOATING_MENU }
-        }
-    }
 
     // Короткий SAO-подобный "бип" на открытие/закрытие меню и действия
     val tone = remember { runCatching { ToneGenerator(AudioManager.STREAM_SYSTEM, 55) }.getOrNull() }
@@ -119,6 +98,41 @@ fun ReaderFloatingControls(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomEnd,
     ) {
+    // Индикация сканирования/распознавания: пользователь видит, что приложение
+    // работает, ещё до появления текста (и заметку о словарях после).
+    val ocrStage by mihon.data.ocr.OcrStageBus.event.collectAsState()
+    if (
+        ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DETECTING ||
+        ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.RECOGNIZING
+    ) {
+        eu.kanade.presentation.reader.OcrLoadingIndicator(
+            visible = true,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        androidx.compose.material3.Text(
+            text = if (ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DETECTING) {
+                "Сканирую облачка…"
+            } else {
+                "Распознаю текст… ${ocrStage.note}"
+            },
+            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 64.dp),
+        )
+    }
+    if (ocrStage.stage == mihon.data.ocr.OcrStageBus.Stage.DONE && ocrStage.note.isNotBlank()) {
+        androidx.compose.material3.Text(
+            text = "Текст готов: ${ocrStage.note}",
+            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp),
+        )
+    }
+
         AnimatedVisibility(
             visible = visible,
             enter = fadeIn(),
@@ -147,43 +161,7 @@ fun ReaderFloatingControls(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
-                            if (showPresets) {
-                                // Пресеты контента — те же встроенные действия
-                                // реестра UiActions, что видит агент
-                                // (preset_manga/manhwa/comic/balanced). Раньше
-                                // они жили только в реестре и в настройках:
-                                // пользователь в читалке их не видел и считал
-                                // кнопки «скрытыми без его ведома».
-                                Text(
-                                    "Пресет контента",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                                UiActions.builtIn()
-                                    .filter { it.effect == mihon.data.ui.UiEffect.OCR_PRESET }
-                                    .forEach { preset ->
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.End,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Text(
-                                                preset.title,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            SmallFloatingActionButton(onClick = {
-                                                beepAction()
-                                                context.toast(UiActionRegistry.apply(context, preset))
-                                                showPresets = false
-                                                menuOpen = false
-                                                onTriggerOcr()
-                                            }) {
-                                                Icon(Icons.Outlined.Tune, contentDescription = preset.title)
-                                            }
-                                        }
-                                    }
-                            } else if (showRegions) {
+                            if (showRegions) {
                                 Text(
                                     "Область сканирования",
                                     style = MaterialTheme.typography.labelMedium,
@@ -207,15 +185,6 @@ fun ReaderFloatingControls(
                                     onTriggerOcr()
                                 }) { Text("  ⬇ Нижние 50%  ") }
                             } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Пресет контента  ", style = MaterialTheme.typography.labelMedium)
-                                    SmallFloatingActionButton(onClick = {
-                                        beepAction()
-                                        showPresets = true
-                                    }) {
-                                        Icon(Icons.Outlined.Tune, contentDescription = "Пресет контента")
-                                    }
-                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("OCR скан  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -349,46 +318,6 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.RecordVoiceOver, contentDescription = "Озвучка")
                                     }
                                 }
-
-                                // Пользовательские действия из реестра плагинов.
-                                // Эффект ограничен переключением настроек, поэтому
-                                // пункт не может уронить читалку.
-                                if (userActions.isNotEmpty()) {
-                                    Text(
-                                        "Свои действия",
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
-                                }
-                                userActions.forEach { action ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.End,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text(
-                                            action.title,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1,
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        SmallFloatingActionButton(onClick = {
-                                            beepAction()
-                                            val result = UiActionRegistry.apply(context, action)
-                                            context.toast(result)
-                                            menuOpen = false
-                                            // Пресет и область влияют на OCR: сразу
-                                            // запускаем распознавание, как это
-                                            // делают встроенные кнопки областей.
-                                            if (action.effect == mihon.data.ui.UiEffect.OCR_PRESET ||
-                                                action.effect == mihon.data.ui.UiEffect.SCAN_REGION
-                                            ) {
-                                                onTriggerOcr()
-                                            }
-                                        }) {
-                                            Icon(Icons.Outlined.Tune, contentDescription = action.title)
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -398,10 +327,7 @@ fun ReaderFloatingControls(
                 FloatingActionButton(
                     onClick = {
                         beepOpen()
-                        if (menuOpen) {
-                            showRegions = false
-                            showPresets = false
-                        }
+                        if (menuOpen) showRegions = false
                         menuOpen = !menuOpen
                     },
                     containerColor = MaterialTheme.colorScheme.primary,

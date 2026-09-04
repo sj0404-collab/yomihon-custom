@@ -13,6 +13,24 @@ package mihon.data.ocr
  *    «переносится»);
  * 3. [looksLikeDictionaryRamp] — фильтр мусора «словарной лесенкой».
  */
+/**
+ * Счётчики чистильщиков, которые РЕАЛЬНО сработали за проход распознавания:
+ * словарные восстановления слов и склейки пунктуации. Используются индикатором
+ * сканирования и историей: пользователь просил видеть, применялся ли словарь.
+ */
+object OcrTextCleanerStats {
+    @Volatile
+    var wordDictHits: Int = 0
+
+    @Volatile
+    var punctFixes: Int = 0
+
+    fun reset() {
+        wordDictHits = 0
+        punctFixes = 0
+    }
+}
+
 object OcrTextCleaner {
 
     private val HYPHEN_LINE_BREAK = Regex("([\\p{L}])-[ \\t]*\\n[ \\t]*([\\p{L}])")
@@ -166,9 +184,17 @@ object OcrTextCleaner {
      */
     fun restoreKnownCaptionWords(text: String): String {
         if (text.isBlank()) return text
+        var hits = 0
         val restored = CYRILLIC_RUN.replace(text) { match ->
-            restoreRun(match.value)
+            val r = restoreRun(match.value)
+            if (r != match.value) hits++
+            r
         }
+        // Счётчики реальных срабатываний словарей: их видит индикатор
+        // сканирования и (следом) история распознанных страниц.
+        OcrTextCleanerStats.wordDictHits += hits
+        OcrTextCleanerStats.punctFixes +=
+            Regex("([,!?;:])(?=[А-Яа-яЁё])").findAll(restored).count()
         return restored
             .replace(Regex("([»”])(?=[А-ЯЁ])"), "${'$'}1 ")
             .replace(Regex("(?<=[А-ЯЁа-яё])([«„])"), " ${'$'}1")
