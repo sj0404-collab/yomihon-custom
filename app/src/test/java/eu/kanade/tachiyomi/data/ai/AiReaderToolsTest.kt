@@ -19,7 +19,12 @@ class AiReaderToolsTest {
 
     @Test
     fun `tool names are unique`() {
-        AiReaderTools.TOOL_NAMES shouldContainExactly listOf("reader_status", "ocr_preset", "plugins_list")
+        AiReaderTools.TOOL_NAMES shouldContainExactly listOf(
+            "reader_status",
+            "ocr_preset",
+            "plugins_list",
+            "tts_status",
+        )
         AiReaderTools.TOOL_NAMES.distinct().size shouldBe AiReaderTools.TOOL_NAMES.size
     }
 
