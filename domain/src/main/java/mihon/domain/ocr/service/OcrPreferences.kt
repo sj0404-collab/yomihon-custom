@@ -26,6 +26,9 @@ class OcrPreferences(
     /** Авто-пресет типа контента по геометрии страницы: on/off. */
     fun autoPreset() = preferenceStore.getString("pref_ocr_auto_preset", "on")
 
+    /** Разметка ударений («+» после ударного гласного) для RHVoice. */
+    fun ruStress() = preferenceStore.getString("pref_ru_stress", "on")
+
     // Область, которую пресет применяет по умолчанию. Хранится отдельно от
     // scanRegion(): пользователь может переопределить область, не теряя пресет.
     fun presetScanRegion() = preferenceStore.getString("pref_ocr_preset_region", "full")

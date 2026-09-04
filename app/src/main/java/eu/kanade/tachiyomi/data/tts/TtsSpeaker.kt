@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
+import mihon.data.ocr.RuStress
 import mihon.domain.ocr.service.OcrPreferences
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
@@ -363,7 +364,14 @@ object TtsSpeaker {
             // тишина (250мс после точки, 420мс после !/?, 160мс после запятой).
             // Вопросительные получают лёгкий подъём питча, восклицательные —
             // чуть быстрее и выше.
-            val sentences = splitSentences(text)
+            // Ударения для локальных голосов: RHVoice понимает «+» после
+            // ударного гласного; прочие движки получают исходный текст.
+            val spokenText = if (isRhVoice && prefs().ruStress().get() == "on") {
+                RuStress.mark(text)
+            } else {
+                text
+            }
+            val sentences = splitSentences(spokenText)
             if (sentences.isEmpty()) { setSpeaking(false); return@ensureSystem }
             val lastId = "yk_${sentences.size - 1}"
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {

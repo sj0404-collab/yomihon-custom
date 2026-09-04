@@ -20,6 +20,7 @@ object OcrStageBus {
         val note: String = "",
         val wordDictHits: Int = 0,
         val punctFixes: Int = 0,
+        val splitFixes: Int = 0,
     )
 
     private val _event = MutableStateFlow(Event(Stage.IDLE))
@@ -31,6 +32,7 @@ object OcrStageBus {
             note = note,
             wordDictHits = OcrTextCleanerStats.wordDictHits,
             punctFixes = OcrTextCleanerStats.punctFixes,
+            splitFixes = OcrTextCleanerStats.splitFixes,
         )
         _event.value = event
         // Финал прохода сразу уходит в журнал сканирования (экран истории).
@@ -40,6 +42,7 @@ object OcrStageBus {
                 detail = note,
                 wordDictHits = event.wordDictHits,
                 punctFixes = event.punctFixes,
+                splitFixes = event.splitFixes,
             )
         }
     }

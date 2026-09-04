@@ -129,7 +129,8 @@ fun OcrHistoryDialog(onDismiss: () -> Unit) {
                                     // срабатывания; морфология/интонации придут со словарём RU.
                                     Text(
                                         text = "словари: слова=${entry.wordDictHits}, пунктуация=${entry.punctFixes}, " +
-                                            "морфология=нет, интонации=нет",
+                                            "разбиение=${entry.splitFixes}; морфология=пол говорящего, " +
+                                            "интонации=ударения RHVoice + паузы/питч по знакам",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
