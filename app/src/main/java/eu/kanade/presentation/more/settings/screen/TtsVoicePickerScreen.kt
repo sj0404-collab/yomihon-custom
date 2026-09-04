@@ -159,6 +159,10 @@ fun TtsVoicePickerScreen(
 private fun OfflineTab(context: Context, prefs: OcrPreferences) {
     var systemVoices by remember { mutableStateOf<List<android.speech.tts.Voice>>(emptyList()) }
     var systemReady by remember { mutableStateOf(false) }
+    // Пока движок отдаёт голоса (RHVoice на некоторых прошивках встаёт
+    // за 3-6 секунд), показываем честное «читаем голоса», а не пугалку
+    // «голоса не найдены» — раньше список «появлялся и пропадал».
+    var probing by remember { mutableStateOf(true) }
     var ttsProbe by remember { mutableStateOf<TextToSpeech?>(null) }
     val enginePkg = remember { prefs.systemTtsEngine().get() }
     var onnxCatalog = remember { OnnxTts.CATALOG }
@@ -190,12 +194,17 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
     LaunchedEffect(ttsProbe, systemReady, enginePkg) {
         val probe = ttsProbe ?: return@LaunchedEffect
         eu.kanade.tachiyomi.data.tts.VoiceHelper.prepareForLanguage(probe, "ru")
-        for (attempt in 0 until 8) {
+        for (attempt in 0 until 14) {
             val found = eu.kanade.tachiyomi.data.tts.VoiceHelper.russianVoices(probe, enginePkg)
-            if (found.isNotEmpty()) { systemVoices = found; return@LaunchedEffect }
-            kotlinx.coroutines.delay(300)
+            if (found.isNotEmpty()) {
+                systemVoices = found
+                probing = false
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(250L + attempt * 150L)
         }
         systemVoices = eu.kanade.tachiyomi.data.tts.VoiceHelper.russianVoices(probe, enginePkg)
+        probing = false
     }
 
     LazyColumn(
@@ -211,7 +220,18 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
             )
         }
 
-        if (systemVoices.isEmpty() && systemReady) {
+        if (systemVoices.isEmpty() && systemReady && probing) {
+            item {
+                Text(
+                    "Читаем голоса движка…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
+
+        if (systemVoices.isEmpty() && systemReady && !probing) {
             item {
                 Card(
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
@@ -258,16 +278,21 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(voice.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                        Text("$genderLabel · ${voice.locale}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "$genderLabel · ${voice.locale} · " +
+                                if (voice.isNetworkConnectionRequired) "☁ онлайн" else "📱 офлайн",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     if (isActive) {
                         Icon(Icons.Default.CheckCircle, "Активен", tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
                     }
                     IconButton(onClick = {
-                        TtsSpeaker.speak(context, "Привет! Это тест голоса.") {
-                            if (!it) context.toast("Готово")
-                        }
+                        // Проба ИМЕННО этим голосом, а не текущим активным:
+                        // иначе все голоса «звучат одинаково» (дефолтом).
+                        TtsSpeaker.speakSystemVoiceTest(context, voice.name)
                     }) { Icon(Icons.Default.PlayArrow, "Проба") }
                     Spacer(Modifier.width(4.dp))
                     OutlinedButton(onClick = {

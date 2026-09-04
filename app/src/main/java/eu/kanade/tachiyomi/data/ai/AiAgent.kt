@@ -136,6 +136,9 @@ object AiAgent {
             AiReaderTools.SYSTEM_PROMPT_LINES.joinToString("\n") { it } + "\n" +
             "Если пользователь жалуется, что текст распознаётся плохо или не тем порядком, — " +
             "сначала reader_status, затем ocr_preset с подходящим id (manga/manhwa/comic/balanced).\n" +
+            "Если пользователь жалуется на озвучку/голоса/синтез (молчит, один голос на всех ролей, " +
+            "движок «исчез» из списка) — ПЕРВЫМ вызывай tts_status и опирайся на него; " +
+            "reader_status и plugins_list для голосовых жалоб не подходят.\n" +
             "Если пользователь просит новый инструмент — СОЗДАЙ его через plugin_create и сразу проверь вызовом.\n" +
             "НЕЙРО-КНИГИ и НЕЙРО-КОМИКСЫ: пиши книгу по главам через append_file " +
             "(book/название.md), перед продолжением читай хвост через read_file — так контекст не теряется. " +
@@ -464,6 +467,10 @@ object AiAgent {
 
         AiReaderTools.TOOL_PLUGINS_LIST -> runCatching {
             ToolResult(call.name, AiReaderTools.pluginsReport(context))
+        }.getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
+
+        AiReaderTools.TOOL_TTS_STATUS -> runCatching {
+            ToolResult(call.name, AiReaderTools.ttsStatus(context))
         }.getOrElse { ToolResult(call.name, "ОШИБКА: ${it.message?.take(160)}") }
 
         "runner_chat" -> {

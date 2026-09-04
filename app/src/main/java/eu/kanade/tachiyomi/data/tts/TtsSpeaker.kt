@@ -284,7 +284,10 @@ object TtsSpeaker {
             // Разные персонажи одного пола получают разные голоса: слот > 0
             // сдвигает выбор внутри группы. Явный пресет пользователя всегда
             // важнее автоподбора.
-            val v: android.speech.tts.Voice? = when {
+            val activeEnginePackage = systemEnginePkg
+                ?: runCatching { engine.defaultEngine }.getOrNull()
+            val isRhVoice = activeEnginePackage.orEmpty().contains("rhvoice", ignoreCase = true)
+            var chosen: android.speech.tts.Voice? = when {
                 presetVoice.isNotBlank() && speakerSlot == 0 ->
                     VoiceHelper.pick(
                         engine,
@@ -308,17 +311,39 @@ object TtsSpeaker {
                     VoiceHelper.pick(engine, VoiceKind.FEMALE, saved, systemEnginePkg)
                 }
             }
-            val activeEnginePackage = systemEnginePkg
-                ?: runCatching { engine.defaultEngine }.getOrNull()
-            val isRhVoice = activeEnginePackage.orEmpty().contains("rhvoice", ignoreCase = true)
-            val forcedVoiceName = v?.name?.takeIf { isRhVoice }
+            // RHVoice на части прошивок отдаёт пустой getVoices(): клиент «не
+            // видит» установленные голоса, pick() соскальзывал на дефолт движка
+            // (почти всегда женский), и все роли звучали одним голосом. Сам же
+            // сервис RHVoice принимает точное имя и через setVoice(), и через
+            // параметр "voiceName" в speak() — поэтому Voice создаётся руками
+            // и выбор пользователя больше не теряется.
+            if (isRhVoice && presetVoice.isNotBlank() && speakerSlot == 0 &&
+                (chosen == null || chosen.name != presetVoice)
+            ) {
+                chosen = runCatching {
+                    android.speech.tts.Voice(
+                        presetVoice,
+                        Locale("ru", "RU"),
+                        android.speech.tts.Voice.QUALITY_NORMAL,
+                        0,
+                        false,
+                        null,
+                    )
+                }.getOrNull() ?: chosen
+            }
+            val v = chosen
+            val forcedVoiceName = when {
+                isRhVoice && presetVoice.isNotBlank() && speakerSlot == 0 -> presetVoice
+                isRhVoice -> v?.name
+                else -> null
+            }
             if (v != null) {
                 val res = engine.setVoice(v)
                 if (res != TextToSpeech.SUCCESS) {
                     // Some OEM clients reject a manually-created RHVoice Voice
                     // before the engine sees it. speak() below also sends the
                     // exact name in KEY_PARAM_VOICE_NAME, bypassing that bug.
-                    logcat(LogPriority.WARN) { "Voice ${'$'}{v.name} rejected by TextToSpeech client" }
+                    logcat(LogPriority.WARN) { "Voice ${v.name} rejected by TextToSpeech client" }
                     engine.language = Locale("ru", "RU")
                 }
             } else {
@@ -435,16 +460,58 @@ object TtsSpeaker {
         }
     }
 
+    /**
+     * ПРОБА КОНКРЕТНЫМ системным голосом (кнопка «Проба» в списке голосов).
+     * Раньше проба звала speak() с текущими настройками — пользователь жал
+     * кнопку у мужского голоса и слышал дефолтный женский: казалось, что
+     * «все голоса одинаковые». Здесь имя голоса передаётся напрямую.
+     */
+    fun speakSystemVoiceTest(context: Context, voiceName: String) {
+        stop()
+        currentJob = scope.launch {
+            setSpeaking(true)
+            try {
+                withContext(Dispatchers.Main) {
+                    ensureSystem(context) { engine ->
+                        if (engine == null) {
+                            setSpeaking(false)
+                            return@ensureSystem
+                        }
+                        engine.setOnUtteranceProgressListener(
+                            object : android.speech.tts.UtteranceProgressListener() {
+                                override fun onStart(utteranceId: String?) = setSpeaking(true)
+                                override fun onDone(utteranceId: String?) = setSpeaking(false)
+                                @Deprecated("Deprecated in Java")
+                                override fun onError(utteranceId: String?) = setSpeaking(false)
+                                override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
+                            },
+                        )
+                        engine.setSpeechRate(prefs().speechRate().get().coerceIn(0.5f, 2f))
+                        val known = runCatching { engine.voices?.firstOrNull { it.name == voiceName } }.getOrNull()
+                        if (known != null) engine.setVoice(known)
+                        val params = android.os.Bundle().apply { putString("voiceName", voiceName) }
+                        val r = runCatching {
+                            engine.speak(
+                                "Привет! Это тест голоса $voiceName.",
+                                TextToSpeech.QUEUE_FLUSH,
+                                params,
+                                "yk_vtest",
+                            )
+                        }.getOrDefault(TextToSpeech.ERROR)
+                        if (r != TextToSpeech.SUCCESS) setSpeaking(false)
+                    }
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "voice test failed" }
+                setSpeaking(false)
+            }
+        }
+    }
+
     private fun speakOnnx(context: Context, text: String, gender: String?) {
         val p = prefs()
         currentJob = scope.launch {
             setSpeaking(true)
-            val sentences = splitSentences(text)
-            // Сколько предложений нейроголос уже озвучил и сломался ли он
-            // посреди чтения. Принцип AlReader: текст ВСЕГДА озвучен —
-            // движок лишь деталь, при отказе дочитываем системным голосом.
-            var doneUpTo = 0
-            var failed = false
             try {
                 val installed = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
                 if (!OnnxTts.isAvailable(context) || installed.isEmpty()) {
@@ -461,22 +528,14 @@ object TtsSpeaker {
                     ?: installed.firstOrNull { it.id == preferredId }
                     ?: installed.first()
                 val baseSpeed = p.speechRate().get().coerceIn(0.5f, 2f)
-                for (sentence in sentences) {
+                for (sentence in splitSentences(text)) {
                     if (currentJob?.isActive != true) break
                     val trimmed = sentence.trim()
                     // Живая просодия: скорость зависит от знаков препинания
                     // и капса — вопросы медленнее, крик быстрее, «…» задумчиво
                     val speed = OnnxTts.prosodySpeed(trimmed, baseSpeed)
-                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed)
-                    if (wav == null) {
-                        // Синтез не удался (причину OnnxTts уже записал в
-                        // workspace/logs/tts.log): не молчим до конца главы,
-                        // а отдаём остаток системному движку.
-                        failed = true
-                        break
-                    }
+                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed) ?: continue
                     playFileBlocking(wav)
-                    doneUpTo++
                     // Пауза между предложениями: 240мс после точки,
                     // 400мс после !/? — дыхание, а не конвейер
                     val pause = when {
@@ -486,21 +545,9 @@ object TtsSpeaker {
                     }
                     kotlinx.coroutines.delay(pause)
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                setSpeaking(false)
-                throw e
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) { "ONNX TTS failed" }
-                failed = true
-            }
-            if (failed && doneUpTo < sentences.size && currentJob?.isActive == true) {
-                val rest = sentences.subList(doneUpTo, sentences.size).joinToString(" ")
-                logcat(LogPriority.WARN) {
-                    "ONNX fallback to system TTS from sentence $doneUpTo/${sentences.size}" +
-                        " (reason: ${OnnxTts.lastError.value ?: "unknown"})"
-                }
-                withContext(Dispatchers.Main) { speakSystem(context, rest, gender) }
-            } else {
+            } finally {
                 setSpeaking(false)
             }
         }
