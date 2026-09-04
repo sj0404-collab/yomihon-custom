@@ -760,6 +760,18 @@ class ReaderActivity : BaseActivity() {
                     }
                 }
 
+                // Контекст для авто-пресета: манга + порядок чтения уходят в
+                // data-слой через шину, без прямой зависимости читалки от OCR.
+                androidx.compose.runtime.LaunchedEffect(readingMode, state.manga?.id) {
+                    mihon.data.ocr.ReaderContextBus.set(
+                        mangaId = state.manga?.id,
+                        rtl = readingMode == ReadingMode.RIGHT_TO_LEFT,
+                        webtoon = readingMode == ReadingMode.WEBTOON ||
+                            readingMode == ReadingMode.CONTINUOUS_VERTICAL,
+                        vertical = readingMode == ReadingMode.VERTICAL,
+                    )
+                }
+
                 ReaderContentOverlay(
                     brightness = state.brightnessOverlayValue,
                     color = colorOverlay.takeIf { colorOverlayEnabled },

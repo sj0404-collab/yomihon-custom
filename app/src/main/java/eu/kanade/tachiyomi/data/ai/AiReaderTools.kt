@@ -5,7 +5,9 @@ import eu.kanade.tachiyomi.data.voice.VoiceBackend
 import eu.kanade.tachiyomi.data.voice.VoicePlugins
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
+import mihon.data.ocr.ContentAutoPreset
 import mihon.data.ocr.OcrContentType
+import mihon.data.ocr.ReaderContextBus
 import mihon.data.ocr.OcrPluginAvailability
 import mihon.data.ocr.OcrPlugins
 import mihon.data.ocr.OcrRegionRules
@@ -140,6 +142,12 @@ object AiReaderTools {
         // и пресет не имеет права их сбрасывать. Порядок чтения и параметры
         // детектора при этом всё равно следуют за типом контента.
         prefs.contentType().set(contentType.id)
+        // Запоминаем выбор агента для текущей манги (память авто-пресета).
+        ContentAutoPreset.rememberManual(
+            ReaderContextBus.current.value?.mangaId,
+            contentType.id,
+            prefs,
+        )
 
         // Пресет задаёт и вьюер: порядок чтения OCR и направление листания —
         // одна сущность. BALANCED (KEEP) выбор пользователя не трогает.
