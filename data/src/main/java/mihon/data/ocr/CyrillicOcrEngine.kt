@@ -208,6 +208,7 @@ internal class CyrillicOcrEngine(
      */
     suspend fun detectRegions(image: Bitmap): List<OcrBoundingBox> {
         ensureInitialized()
+        OcrStageBus.post(OcrStageBus.Stage.DETECTING)
         return mutex.withLock {
             require(!image.isRecycled) { "Input bitmap is recycled" }
             detectTextBoxes(image).mapNotNull { box ->
@@ -225,10 +226,16 @@ internal class CyrillicOcrEngine(
 
     override suspend fun recognizeText(image: Bitmap): String {
         ensureInitialized()
-        return mutex.withLock {
+        OcrTextCleanerStats.reset()
+        return try {
+        mutex.withLock {
             require(!image.isRecycled) { "Input bitmap is recycled" }
             val boxes = detectTextBoxes(image)
-            if (boxes.isEmpty()) return@withLock recognizeWholeImageFallback(image)
+            OcrStageBus.post(OcrStageBus.Stage.RECOGNIZING, "боксов: ${boxes.size}")
+            if (boxes.isEmpty()) {
+                OcrStageBus.post(OcrStageBus.Stage.DONE, "рамки проекцией чернил")
+                return@withLock recognizeWholeImageFallback(image)
+            }
 
             // Отклонённые по уверенности строки запоминаются: это второй
             // rescue-эшелон (см. ниже).
@@ -267,7 +274,11 @@ internal class CyrillicOcrEngine(
                 // нечитаемым. Поэтому сначала пробуем лучшие из отклонённых
                 // строк — их детектор уже нашёл и вырезал по размеру.
                 val rescued = rescueRejectedLines(rejected)
-                if (rescued.isNotEmpty()) return@withLock rescued
+                if (rescued.isNotEmpty()) {
+                    OcrStageBus.post(OcrStageBus.Stage.DONE, "rescue: ${rescued.length} символов")
+                    return@withLock rescued
+                }
+                OcrStageBus.post(OcrStageBus.Stage.DONE, "цельностраничный rescue")
                 return@withLock recognizeWholeImageFallback(image)
             }
 
@@ -284,7 +295,17 @@ internal class CyrillicOcrEngine(
             val text = rows.joinToString("\n") { row ->
                 row.sortedBy { it.first.rect.left }.joinToString(" ") { it.second.trim() }
             }
-            cleanRecognition(textPostprocessor.postprocess(text))
+            val out = cleanRecognition(textPostprocessor.postprocess(text))
+            OcrStageBus.post(
+                OcrStageBus.Stage.DONE,
+                "${out.length} симв | словарь: ${OcrTextCleanerStats.wordDictHits}, " +
+                    "пунктуация: ${OcrTextCleanerStats.punctFixes}",
+            )
+            out
+        }
+        } catch (e: Exception) {
+            OcrStageBus.post(OcrStageBus.Stage.FAILED, e.javaClass.simpleName)
+            throw e
         }
     }
 
