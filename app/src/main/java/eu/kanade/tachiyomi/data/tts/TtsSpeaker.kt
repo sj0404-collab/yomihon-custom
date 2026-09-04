@@ -324,7 +324,7 @@ object TtsSpeaker {
                     android.speech.tts.Voice(
                         presetVoice,
                         Locale("ru", "RU"),
-                        TextToSpeech.QUALITY_NORMAL,
+                        android.speech.tts.Voice.QUALITY_NORMAL,
                         0,
                         false,
                         null,
