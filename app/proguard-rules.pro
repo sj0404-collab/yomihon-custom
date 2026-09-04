@@ -94,3 +94,11 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 -keep class eu.kanade.tachiyomi.ui.reader.html.YomihonWebBridge { public *; }
+
+# sherpa-onnx (ONNX-голоса) вызывается из OnnxTts ТОЛЬКО через рефлексию
+# (Class.forName("com.k2fsa.sherpa.onnx.…")). Без этого правила R8 в release
+# вырезает классы как «неиспользуемые», и на устройстве синтез падает с
+# ClassNotFoundException/NoClassDefFoundError OfflineTtsVitsModelConfig —
+# причина подтверждена логом logs/tts.log с устройства (v1.9.16/17).
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn com.k2fsa.sherpa.onnx.**

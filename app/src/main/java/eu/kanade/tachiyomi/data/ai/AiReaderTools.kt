@@ -34,8 +34,14 @@ object AiReaderTools {
     const val TOOL_READER_STATUS = "reader_status"
     const val TOOL_OCR_PRESET = "ocr_preset"
     const val TOOL_PLUGINS_LIST = "plugins_list"
+    const val TOOL_TTS_STATUS = "tts_status"
 
-    val TOOL_NAMES = listOf(TOOL_READER_STATUS, TOOL_OCR_PRESET, TOOL_PLUGINS_LIST)
+    val TOOL_NAMES = listOf(
+        TOOL_READER_STATUS,
+        TOOL_OCR_PRESET,
+        TOOL_PLUGINS_LIST,
+        TOOL_TTS_STATUS,
+    )
 
     /** Документация инструментов для системного промпта агента. */
     val SYSTEM_PROMPT_LINES = listOf(
@@ -45,6 +51,8 @@ object AiReaderTools {
             "контента (меняет параметры детектора, область и порядок чтения)",
         "@tool plugins_list {} — реестры плагинов: OCR-движки, голосовые движки и бэкенды AI-чата " +
             "с требованиями и доступностью",
+        "@tool tts_status {} — озвучка: выбранный движок и голоса, установленные системные " +
+            "TTS-движки, состояние ONNX и последняя ошибка синтеза, хвост logs/tts.log",
     )
 
     /**
@@ -251,4 +259,52 @@ object AiReaderTools {
     private fun gender(supported: Boolean) = if (supported) " | различает пол" else ""
     private fun requirements(names: List<String>) =
         if (names.isEmpty()) "" else " | нужно: ${names.joinToString(", ")}"
+
+    /**
+     * Плотный статус озвучки для агента: почему молчит / каким голосом
+     * говорит / какие движки вообще есть в системе. Данные — те же prefs и
+     * реестры, что видит экран настроек, плюс хвост лога синтеза.
+     */
+    fun ttsStatus(context: Context, prefs: OcrPreferences = Injekt.get()): String {
+        val pm = context.packageManager
+        val intent = android.content.Intent(
+            android.speech.tts.TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE,
+        )
+        val services = runCatching { pm.queryIntentServices(intent, 0) }.getOrNull().orEmpty()
+        val onnxVoices = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
+        val logTail = runCatching {
+            val f = java.io.File(AiWorkspace.root(context), "logs/tts.log")
+            if (f.isFile) f.readLines().takeLast(12).joinToString("\n") else null
+        }.getOrNull()
+        return buildString {
+            appendLine("Движок озвучки: ${prefs.voiceEngine().get()}")
+            appendLine(
+                "Системный TTS-движок: " +
+                    prefs.systemTtsEngine().get().ifBlank { "по умолчанию системы" },
+            )
+            appendLine("Основной голос: ${prefs.voiceName().get().ifBlank { "не задан" }}")
+            appendLine("Женские реплики: ${prefs.voiceFemale().get().ifBlank { "не задан" }}")
+            appendLine("Мужские реплики: ${prefs.voiceMale().get().ifBlank { "не задан" }}")
+            appendLine()
+            appendLine(
+                "ONNX: рантайм " +
+                    (if (OnnxTts.isRuntimeInstalled(context)) "скачан" else "НЕ скачан") +
+                    "; голоса: " + onnxVoices.joinToString { it.id }.ifEmpty { "не скачаны" },
+            )
+            OnnxTts.lastError.value?.let { appendLine("Последняя ошибка ONNX: $it") }
+            appendLine()
+            appendLine("Системные TTS-движки (PackageManager):")
+            if (services.isEmpty()) appendLine("  не найдены")
+            services.forEach { ri ->
+                appendLine("  - ${ri.serviceInfo.packageName} (${ri.loadLabel(pm)})")
+            }
+            appendLine()
+            if (logTail.isNullOrBlank()) {
+                appendLine("logs/tts.log: пусто или нет файла")
+            } else {
+                appendLine("Хвост logs/tts.log:")
+                appendLine(logTail)
+            }
+        }
+    }
 }
