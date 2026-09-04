@@ -341,6 +341,13 @@ class OcrRepositoryImpl(
         return withActiveOperation {
             val regionChoice = ocrPreferences.scanRegion().get()
             val result = image.useBitmap { originalBitmap ->
+                // Авто-пресет: один раз на главу, до чтения профиля детектора.
+                ContentAutoPreset.maybeApply(
+                    chapterId = chapterId,
+                    pageWidth = originalBitmap.width,
+                    pageHeight = originalBitmap.height,
+                    prefs = ocrPreferences,
+                )
                 val bitmap = when (regionChoice) {
                     mihon.domain.ocr.service.ScanRegion.TOP_HALF -> Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.width, originalBitmap.height / 2)
                     mihon.domain.ocr.service.ScanRegion.BOTTOM_HALF -> Bitmap.createBitmap(originalBitmap, 0, originalBitmap.height / 2, originalBitmap.width, originalBitmap.height / 2)
