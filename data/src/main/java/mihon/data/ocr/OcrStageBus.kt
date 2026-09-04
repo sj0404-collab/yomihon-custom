@@ -26,11 +26,21 @@ object OcrStageBus {
     val event: StateFlow<Event> = _event
 
     fun post(stage: Stage, note: String = "") {
-        _event.value = Event(
+        val event = Event(
             stage = stage,
             note = note,
             wordDictHits = OcrTextCleanerStats.wordDictHits,
             punctFixes = OcrTextCleanerStats.punctFixes,
         )
+        _event.value = event
+        // Финал прохода сразу уходит в журнал сканирования (экран истории).
+        if (stage == Stage.DONE || stage == Stage.FAILED) {
+            OcrHistoryStore.addScan(
+                ok = stage == Stage.DONE,
+                detail = note,
+                wordDictHits = event.wordDictHits,
+                punctFixes = event.punctFixes,
+            )
+        }
     }
 }
