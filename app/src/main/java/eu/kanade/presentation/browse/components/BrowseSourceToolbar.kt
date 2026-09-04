@@ -45,7 +45,9 @@ fun BrowseSourceToolbar(
     var selectingDisplayMode by remember { mutableStateOf(false) }
 
     SearchToolbar(
-        navigateUp = navigateUp,
+        // Боковая «назад» в обычном режиме лишняя: есть нижняя навигация и
+        // системный жест. В режиме поиска AppBar сам подставляет закрытие.
+        navigateUp = null,
         titleContent = { AppBarTitle(title) },
         searchQuery = searchQuery,
         onChangeSearchQuery = onSearchQueryChange,

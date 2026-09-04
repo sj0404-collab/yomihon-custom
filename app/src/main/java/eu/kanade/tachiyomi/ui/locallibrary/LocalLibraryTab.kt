@@ -159,7 +159,9 @@ data object LocalLibraryTab : Tab {
                 .statusBarsPadding(),
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                // Фон шапки обязан совпадать с темой: surfaceVariant давал
+                // серое пятно на тёмных окрасках (жалоба пользователя).
+                color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column {
