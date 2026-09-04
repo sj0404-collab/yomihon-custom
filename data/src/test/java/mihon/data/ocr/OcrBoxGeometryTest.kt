@@ -84,4 +84,20 @@ class OcrBoxGeometryTest {
         box.bottom shouldBe 0.13f
         OcrBoxGeometry.coversWholePage(box) shouldBe false
     }
+
+    @Test
+    fun `box kinds follow geometry so presets bind to bubbles automatically`() {
+        // Квадратное облачко в середине страницы — реплика в пузыре.
+        OcrBoxGeometry.classifyKind(300, 800, 620, 1100, 1000, 2000) shouldBe OcrBoxGeometry.Kind.BUBBLE
+        // Широкая низкая плашка у верхнего края — подпись (caption).
+        OcrBoxGeometry.classifyKind(60, 40, 940, 150, 1000, 2000) shouldBe OcrBoxGeometry.Kind.CAPTION
+        // То же у нижнего края — тоже подпись.
+        OcrBoxGeometry.classifyKind(60, 1880, 940, 1970, 1000, 2000) shouldBe OcrBoxGeometry.Kind.CAPTION
+        // Очень широкая полоса в середине — плашка перевода.
+        OcrBoxGeometry.classifyKind(40, 900, 960, 1080, 1000, 2000) shouldBe OcrBoxGeometry.Kind.CAPTION
+        // Узкое высокое облачко — вертикальная разметка: кадр повернём.
+        OcrBoxGeometry.classifyKind(700, 300, 800, 900, 1000, 2000) shouldBe OcrBoxGeometry.Kind.VERTICAL
+        // Вырожденный размер изображения не должен ронять классификатор.
+        OcrBoxGeometry.classifyKind(1, 1, 5, 5, 0, 0) shouldBe OcrBoxGeometry.Kind.BUBBLE
+    }
 }

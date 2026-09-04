@@ -236,7 +236,14 @@ internal class CyrillicOcrEngine(
             val recognized = boxes.mapNotNull { box ->
                 val padded = pad(box.rect, image.width, image.height)
                 if (padded.width() < 4 || padded.height() < 4) return@mapNotNull null
-                val crop = Bitmap.createBitmap(image, padded.left, padded.top, padded.width(), padded.height())
+                val rawCrop = Bitmap.createBitmap(image, padded.left, padded.top, padded.width(), padded.height())
+                // Вертикальное облачко (манхва/японская разметка): распознаватель
+                // ждёт горизонтальную строку, поэтому поворачиваем кадр.
+                val kind = OcrBoxGeometry.classifyKind(
+                    padded.left, padded.top, padded.right, padded.bottom,
+                    image.width, image.height,
+                )
+                val crop = if (kind == OcrBoxGeometry.Kind.VERTICAL) rotate90cw(rawCrop) else rawCrop
                 try {
                     val result = recognizeLineBitmap(crop)
                     // Отбрасываем только совсем безнадёжное. Для коротких
@@ -250,7 +257,8 @@ internal class CyrillicOcrEngine(
                         null
                     }
                 } finally {
-                    crop.recycle()
+                    if (crop !== rawCrop) crop.recycle()
+                    rawCrop.recycle()
                 }
             }
             if (recognized.isEmpty()) {
@@ -406,14 +414,7 @@ internal class CyrillicOcrEngine(
         val restoredWhole = OcrTextCleaner.normalizeLocalCyrillicCaption(wholeLine.text)
         val restoresBoundaries = restoredWhole.count(Char::isWhitespace) > wholeLine.text.count(Char::isWhitespace)
         val wholeQuality = candidateQuality(wholeLine) + if (restoresBoundaries) tuning().wholeLineBoundaryBonus else 0f
-        // Огрызки «Г», «ИЕ» от перерезки внутри слова (декоративный шрифт со
-        // свободной кернинговой посадкой) не должны побеждать целую строку:
-        // каждый кусок короче трёх букв, не являющийся коротким словом,
-        // снимает с нарезки 0.15 качества.
-        val shortFragments = segmented.text.split(' ').count { frag ->
-            frag.length <= 2 && frag.uppercase() !in OcrTextCleaner.SMALL_WORDS
-        }
-        val segmentedQuality = candidateQuality(segmented) - shortFragments * 0.15f
+        val segmentedQuality = candidateQuality(segmented)
         return if (restoresBoundaries && wholeQuality >= segmentedQuality) wholeLine else segmented
     }
 
@@ -565,14 +566,53 @@ internal class CyrillicOcrEngine(
     }
 
     private fun detectTextBoxes(image: Bitmap): List<TextBox> {
+        val boxes = runDetection(image, 0, 0).toMutableList()
+        // Тайловая развёртка: на страницах высокого разрешения мелкие
+        // облачка исчезают, когда весь лист ужат в квадрат детектора, —
+        // прогоняем модель дополнительно по плиткам 2×2 с перекрытием 12%.
+        if (max(image.width, image.height) > DETECTOR_SIZE) {
+            val overX = (image.width * 0.12f).toInt()
+            val overY = (image.height * 0.12f).toInt()
+            val halfW = image.width / 2
+            val halfH = image.height / 2
+            val tiles = listOf(
+                intArrayOf(0, 0, halfW + overX, halfH + overY),
+                intArrayOf(halfW - overX, 0, image.width, halfH + overY),
+                intArrayOf(0, halfH - overY, halfW + overX, image.height),
+                intArrayOf(halfW - overX, halfH - overY, image.width, image.height),
+            )
+            for (t in tiles) {
+                val l = t[0].coerceAtLeast(0)
+                val tp = t[1].coerceAtLeast(0)
+                val r = t[2].coerceAtMost(image.width)
+                val bt = t[3].coerceAtMost(image.height)
+                if (r - l < 96 || bt - tp < 96) continue
+                val crop = Bitmap.createBitmap(image, l, tp, r - l, bt - tp)
+                try {
+                    boxes += runDetection(crop, l, tp)
+                } finally {
+                    crop.recycle()
+                }
+            }
+        }
+        val merged = mergeBoxes(boxes, tuning())
+        // Облачков нет, но текст есть: рамки строятся проекцией чернил —
+        // текст не должен теряться из-за того, что детектор не нашёл пузырь.
+        if (merged.isEmpty()) return projectionBoxes(image)
+        return merged.take(tuning().maxTextBoxes).map(::TextBox)
+    }
+
+    /** Один проход детектора по области; координаты — в системе исходника. */
+    private fun runDetection(source: Bitmap, offX: Int, offY: Int): List<Rect> {
+
         detectorCanvas.drawColor(Color.WHITE)
-        val scale = min(DETECTOR_SIZE.toFloat() / image.width, DETECTOR_SIZE.toFloat() / image.height)
-        val scaledWidth = max(1, (image.width * scale).toInt())
-        val scaledHeight = max(1, (image.height * scale).toInt())
+        val scale = min(DETECTOR_SIZE.toFloat() / source.width, DETECTOR_SIZE.toFloat() / source.height)
+        val scaledWidth = max(1, (source.width * scale).toInt())
+        val scaledHeight = max(1, (source.height * scale).toInt())
         val offsetX = (DETECTOR_SIZE - scaledWidth) / 2
         val offsetY = (DETECTOR_SIZE - scaledHeight) / 2
         detectorCanvas.drawBitmap(
-            image,
+            source,
             null,
             Rect(offsetX, offsetY, offsetX + scaledWidth, offsetY + scaledHeight),
             detectorPaint,
@@ -633,13 +673,103 @@ internal class CyrillicOcrEngine(
             if (area < tuning().minComponentArea || maxX - minX < 3 || maxY - minY < 3) continue
             val expandX = max(3, ((maxX - minX) * 0.16f).toInt())
             val expandY = max(2, ((maxY - minY) * 0.20f).toInt())
-            val left = (((minX - expandX - offsetX) / scale).toInt()).coerceIn(0, image.width - 1)
-            val top = (((minY - expandY - offsetY) / scale).toInt()).coerceIn(0, image.height - 1)
-            val right = (ceil((maxX + expandX - offsetX) / scale).toInt()).coerceIn(left + 1, image.width)
-            val bottom = (ceil((maxY + expandY - offsetY) / scale).toInt()).coerceIn(top + 1, image.height)
+            val left = offX + (((minX - expandX - offsetX) / scale).toInt()).coerceIn(0, source.width - 1)
+            val top = offY + (((minY - expandY - offsetY) / scale).toInt()).coerceIn(0, source.height - 1)
+            val right = (offX + ceil((maxX + expandX - offsetX) / scale).toInt()).coerceIn(left + 1, source.width)
+            val bottom = (offY + ceil((maxY + expandY - offsetY) / scale).toInt()).coerceIn(top + 1, source.height)
             if (right - left >= 6 && bottom - top >= 6) boxes += Rect(left, top, right, bottom)
         }
+        return boxes
+    }
+
+    /**
+     * Рамки текста без модели: Отсу-порог по яркости, проекция чернил по
+     * строкам и столбцам. Спасает страницы, где детектор облачков молчит,
+     * а текст есть (пользовательское «нет облачков — выдели рамкой и читай»).
+     */
+    private fun projectionBoxes(image: Bitmap): List<TextBox> {
+        val w = 360
+        val h = max(8, (image.height * w.toFloat() / image.width).toInt())
+        val small = Bitmap.createScaledBitmap(image, w, h, true)
+        val px = IntArray(w * h)
+        small.getPixels(px, 0, w, 0, 0, w, h)
+        small.recycle()
+        val gray = IntArray(w * h) { i ->
+            val p = px[i]
+            (((p shr 16) and 0xFF) * 77 + ((p shr 8) and 0xFF) * 150 + (p and 0xFF) * 29) shr 8
+        }
+        // Порог Отсу по гистограмме яркости.
+        val hist = IntArray(256)
+        gray.forEach { hist[it]++ }
+        var total = 0L
+        for (i in 0..255) total += i * hist[i]
+        var sumB = 0L
+        var wB = 0
+        var best = -1.0
+        var thr = 128
+        for (t in 0..255) {
+            wB += hist[t]
+            if (wB == 0) continue
+            val wF = w * h - wB
+            if (wF == 0) break
+            sumB += t * hist[t]
+            val mB = sumB.toDouble() / wB
+            val mF = (total - sumB).toDouble() / wF
+            val between = wB.toDouble() * wF * (mB - mF) * (mB - mF)
+            if (between > best) {
+                best = between
+                thr = t
+            }
+        }
+        val sx = image.width.toFloat() / w
+        val sy = image.height.toFloat() / h
+        val rowInk = FloatArray(h) { y ->
+            var ink = 0
+            for (x in 0 until w) if (gray[y * w + x] < thr) ink++
+            ink.toFloat() / w
+        }
+        val boxes = mutableListOf<Rect>()
+        var y = 0
+        while (y < h && boxes.size < 12) {
+            if (rowInk[y] < 0.04f) {
+                y++
+                continue
+            }
+            var y2 = y
+            while (y2 < h && rowInk[y2] >= 0.02f) y2++
+            if (y2 - y >= max(4, (h * 0.012f).toInt())) {
+                val colInk = FloatArray(w) { x ->
+                    var ink = 0
+                    for (yy in y until y2) if (gray[yy * w + x] < thr) ink++
+                    ink.toFloat() / (y2 - y)
+                }
+                var x = 0
+                while (x < w && boxes.size < 12) {
+                    if (colInk[x] < 0.05f) {
+                        x++
+                        continue
+                    }
+                    var x2 = x
+                    while (x2 < w && colInk[x2] >= 0.02f) x2++
+                    if (x2 - x >= 6) {
+                        val left = ((x - 2) * sx).toInt().coerceIn(0, image.width - 2)
+                        val top = ((y - 2) * sy).toInt().coerceIn(0, image.height - 2)
+                        val right = ((x2 + 2) * sx).toInt().coerceIn(left + 8, image.width)
+                        val bottom = ((y2 + 2) * sy).toInt().coerceIn(top + 8, image.height)
+                        boxes += Rect(left, top, right, bottom)
+                    }
+                    x = x2 + 1
+                }
+            }
+            y = y2 + 1
+        }
         return mergeBoxes(boxes, tuning()).take(tuning().maxTextBoxes).map(::TextBox)
+    }
+
+    /** Поворот по часовой: вертикальные облачка читаются как горизонтальные. */
+    private fun rotate90cw(src: Bitmap): Bitmap {
+        val m = android.graphics.Matrix().apply { postRotate(90f) }
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
     }
 
     private fun mergeBoxes(source: List<Rect>, tuning: OcrTuning): List<Rect> {
