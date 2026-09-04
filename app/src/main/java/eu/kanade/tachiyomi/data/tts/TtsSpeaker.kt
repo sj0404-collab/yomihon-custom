@@ -54,7 +54,7 @@ object TtsSpeaker {
     const val ENGINE_SYSTEM = "system_tts"
     const val ENGINE_GOOGLE_WEB = "google_web"
     const val ENGINE_ELEVENLABS = "eleven_api"
-    const val ENGINE_ONNX = "onnx_tts"
+    const val ENGINE_REMOTE = "remote_tts"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var currentJob: Job? = null
@@ -227,7 +227,9 @@ object TtsSpeaker {
         when (prefs().voiceEngine().get()) {
             ENGINE_GOOGLE_WEB -> speakGoogleWeb(context, spoken)
             ENGINE_ELEVENLABS -> speakElevenLabs(context, spoken)
-            ENGINE_ONNX -> speakOnnx(context, spoken, effectiveGender)
+            // legacy-значения pref_voice_engine со сборок с ONNX:
+            // нейроголоса теперь живут на сервере, маршрутизируем туда же.
+            ENGINE_REMOTE, "onnx_tts", "onnx" -> speakRemote(context, spoken, effectiveGender)
             else -> speakSystem(context, spoken, effectiveGender, slot)
         }
     }
@@ -433,124 +435,89 @@ object TtsSpeaker {
 
     // endregion
 
-    // region ONNX (sherpa-onnx, нейроголоса офлайн)
+    // region REMOTE (нейроголоса на сервере ПК/ранера)
 
     /**
-     * ONNX-голос: женские реплики — голосом с gender=female (Ирина),
-     * мужские — male (Дмитрий/Руслан). Голос по умолчанию — из настройки
-     * pref_onnx_voice; при отсутствии установленного голоса — фолбэк на
-     * системный TTS (честно, без тишины).
+     * УДАЛЁННЫЙ НЕЙРОГОЛОС: sherpa-onnx/Piper больше не живёт в APK (R8, ABI и
+     * память устройства ломали синтез). Синтез крутится на ПК пользователя или
+     * сервере (tools/remote_tts_server.py): приложение шлёт предложение и
+     * проигрывает готовый wav. Нет адреса или сервер молчит — дочитываем
+     * системным голосом (принцип AlReader: текст всегда озвучен).
      */
-    /** Test an ONNX voice: speak a sample phrase with the given voice. */
-    fun speakOnnxTest(context: Context, voice: OnnxTts.Voice) {
-        currentJob = scope.launch {
-            setSpeaking(true)
-            try {
-                if (!OnnxTts.isAvailable(context) || !OnnxTts.isInstalled(context, voice)) {
-                    withContext(Dispatchers.Main) { speakSystem(context, "Голос не установлен", null) }
-                    return@launch
-                }
-                val wav = OnnxTts.synthesizeToFile(context, voice, "Привет! Это тест нейроголоса.", 1.0f)
-                if (wav != null) playFileBlocking(wav)
-            } catch (e: Exception) {
-                logcat(LogPriority.WARN, e) { "ONNX test failed" }
-            } finally {
-                setSpeaking(false)
-            }
-        }
-    }
-
-    /**
-     * ПРОБА КОНКРЕТНЫМ системным голосом (кнопка «Проба» в списке голосов).
-     * Раньше проба звала speak() с текущими настройками — пользователь жал
-     * кнопку у мужского голоса и слышал дефолтный женский: казалось, что
-     * «все голоса одинаковые». Здесь имя голоса передаётся напрямую.
-     */
-    fun speakSystemVoiceTest(context: Context, voiceName: String) {
-        stop()
-        currentJob = scope.launch {
-            setSpeaking(true)
-            try {
-                withContext(Dispatchers.Main) {
-                    ensureSystem(context) { engine ->
-                        if (engine == null) {
-                            setSpeaking(false)
-                            return@ensureSystem
-                        }
-                        engine.setOnUtteranceProgressListener(
-                            object : android.speech.tts.UtteranceProgressListener() {
-                                override fun onStart(utteranceId: String?) = setSpeaking(true)
-                                override fun onDone(utteranceId: String?) = setSpeaking(false)
-                                @Deprecated("Deprecated in Java")
-                                override fun onError(utteranceId: String?) = setSpeaking(false)
-                                override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
-                            },
-                        )
-                        engine.setSpeechRate(prefs().speechRate().get().coerceIn(0.5f, 2f))
-                        val known = runCatching { engine.voices?.firstOrNull { it.name == voiceName } }.getOrNull()
-                        if (known != null) engine.setVoice(known)
-                        val params = android.os.Bundle().apply { putString("voiceName", voiceName) }
-                        val r = runCatching {
-                            engine.speak(
-                                "Привет! Это тест голоса $voiceName.",
-                                TextToSpeech.QUEUE_FLUSH,
-                                params,
-                                "yk_vtest",
-                            )
-                        }.getOrDefault(TextToSpeech.ERROR)
-                        if (r != TextToSpeech.SUCCESS) setSpeaking(false)
-                    }
-                }
-            } catch (e: Exception) {
-                logcat(LogPriority.WARN, e) { "voice test failed" }
-                setSpeaking(false)
-            }
-        }
-    }
-
-    private fun speakOnnx(context: Context, text: String, gender: String?) {
+    private fun speakRemote(context: Context, text: String, gender: String?) {
         val p = prefs()
         currentJob = scope.launch {
             setSpeaking(true)
+            val url = p.remoteTtsUrl().get().trim()
+            val sentences = splitSentences(text)
+            if (url.isBlank()) {
+                withContext(Dispatchers.Main) { speakSystem(context, text, gender) }
+                return@launch
+            }
+            var doneUpTo = 0
+            var failed = false
             try {
-                val installed = OnnxTts.CATALOG.filter { OnnxTts.isInstalled(context, it) }
-                if (!OnnxTts.isAvailable(context) || installed.isEmpty()) {
-                    // Нет библиотеки или голосов — откат на системный движок
-                    withContext(Dispatchers.Main) { speakSystem(context, text, gender) }
-                    return@launch
-                }
-                // Локальный JSON-советник (voice_rules.json) важнее эвристик:
-                // «{имя} говорит голосом X» — задаётся пользователем или AI-агентом
-                val advice = LocalVoiceAdvisor.recommend(text, gender)
-                val preferredId = p.onnxVoice().get()
-                val voice = advice.onnxVoiceId?.let { id -> installed.firstOrNull { it.id == id } }
-                    ?: installed.firstOrNull { gender != null && it.gender == gender }
-                    ?: installed.firstOrNull { it.id == preferredId }
-                    ?: installed.first()
-                val baseSpeed = p.speechRate().get().coerceIn(0.5f, 2f)
-                for (sentence in splitSentences(text)) {
+                for (sentence in sentences) {
                     if (currentJob?.isActive != true) break
                     val trimmed = sentence.trim()
-                    // Живая просодия: скорость зависит от знаков препинания
-                    // и капса — вопросы медленнее, крик быстрее, «…» задумчиво
-                    val speed = OnnxTts.prosodySpeed(trimmed, baseSpeed)
-                    val wav = OnnxTts.synthesizeToFile(context, voice, trimmed, speed) ?: continue
-                    playFileBlocking(wav)
-                    // Пауза между предложениями: 240мс после точки,
-                    // 400мс после !/? — дыхание, а не конвейер
-                    val pause = when {
-                        trimmed.endsWith("!") || trimmed.endsWith("?") -> 400L
-                        trimmed.endsWith("…") || trimmed.endsWith("...") -> 500L
-                        else -> 240L
+                    val wav = synthesizeRemote(context, url, trimmed, gender)
+                    if (wav == null) {
+                        failed = true
+                        break
                     }
-                    kotlinx.coroutines.delay(pause)
+                    playFileBlocking(wav)
+                    doneUpTo++
+                    kotlinx.coroutines.delay(180L)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                setSpeaking(false)
+                throw e
             } catch (e: Exception) {
-                logcat(LogPriority.WARN, e) { "ONNX TTS failed" }
-            } finally {
+                logcat(LogPriority.WARN, e) { "remote TTS failed" }
+                failed = true
+            }
+            if (failed && doneUpTo < sentences.size && currentJob?.isActive == true) {
+                val rest = sentences.subList(doneUpTo, sentences.size).joinToString(" ")
+                logcat(LogPriority.WARN) { "remote TTS fallback to system from sentence $doneUpTo" }
+                withContext(Dispatchers.Main) { speakSystem(context, rest, gender) }
+            } else {
                 setSpeaking(false)
             }
         }
+    }
+
+    /** POST {text, voice, speed} на /tts сервера; ответ — wav-байты. */
+    private suspend fun synthesizeRemote(
+        context: Context,
+        url: String,
+        text: String,
+        gender: String?,
+    ): File? = withContext(Dispatchers.IO) {
+        runCatching {
+            val conn = java.net.URL(url.trimEnd('/') + "/tts").openConnection()
+                as java.net.HttpURLConnection
+            conn.connectTimeout = 5_000
+            conn.readTimeout = 90_000
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            val speed = prefs().speechRate().get().coerceIn(0.5f, 2f)
+            val body = "{\"text\":${jsonQuote(text)},\"voice\":${jsonQuote(gender ?: "auto")},\"speed\":$speed}"
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (conn.responseCode != 200) {
+                logcat(LogPriority.WARN) { "remote TTS HTTP ${conn.responseCode}" }
+                return@runCatching null
+            }
+            val dir = File(context.cacheDir, "remote_tts").apply { mkdirs() }
+            val f = File(dir, "seg_${System.currentTimeMillis()}.wav")
+            conn.inputStream.use { input -> f.outputStream().use { input.copyTo(it) } }
+            if (f.length() < 1024) {
+                f.delete()
+                null
+            } else {
+                f
+            }
+        }.getOrNull()
     }
 
     // endregion

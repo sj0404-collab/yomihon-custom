@@ -65,7 +65,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import eu.kanade.tachiyomi.data.tts.OnnxTts
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
@@ -77,7 +76,7 @@ import uy.kohesive.injekt.api.get
 
 /**
  * Полноэкранный выбор TTS-голосов с тремя вкладками:
- * 1. Оффлайн — системные локальные голоса + ONNX нейроголоса
+ * 1. Оффлайн — системные локальные голоса + адрес TTS-сервера
  * 2. Полу-онлайн — Google Translate TTS (без ключа)
  * 3. Онлайн — ElevenLabs (API-ключ) + другие облачные
  *
@@ -153,7 +152,7 @@ fun TtsVoicePickerScreen(
 }
 
 // ==========================================
-// Tab 1: OFFLINE — System local + ONNX voices
+// Tab 1: OFFLINE — System local voices + remote TTS server
 // ==========================================
 @Composable
 private fun OfflineTab(context: Context, prefs: OcrPreferences) {
@@ -165,12 +164,6 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
     var probing by remember { mutableStateOf(true) }
     var ttsProbe by remember { mutableStateOf<TextToSpeech?>(null) }
     val enginePkg = remember { prefs.systemTtsEngine().get() }
-    var onnxCatalog = remember { OnnxTts.CATALOG }
-    val onnxProgress = OnnxTts.progress.collectAsState()
-    // Версия установленных пакетов: после скачивания рантайма/голоса флаги
-    // isInstalled пересчитываются сразу (раньше были заморожены в remember{}
-    // и «ничего не происходило» — кнопки не менялись до перезахода).
-    val installedVersion by OnnxTts.installedVersion.collectAsState()
 
     DisposableEffect(enginePkg) {
         systemVoices = emptyList(); systemReady = false; ttsProbe = null
@@ -304,133 +297,33 @@ private fun OfflineTab(context: Context, prefs: OcrPreferences) {
             }
         }
 
-        // ONNX voices section
+        // Remote TTS server section: нейроголоса уехали с телефона на ПК/ранер
         item {
             Spacer(Modifier.height(16.dp))
             Text(
-                "Нейроголоса ONNX (офлайн)",
+                "TTS-сервер (ПК или ранер)",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             Text(
-                "Скачиваются один раз, работают без интернета. Требуется TTS-рантайм (~30 МБ).",
+                "Нейроголоса sherpa-onnx/Piper больше не живут в APK: синтез идёт на вашей " +
+                    "машине, телефон шлёт текст и проигрывает wav. Запустите " +
+                    "tools/remote_tts_server.py на ПК и укажите адрес.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
             )
-        }
-
-        // Runtime download button
-        item {
-            val runtimeInstalled = remember(installedVersion) { OnnxTts.isRuntimeInstalled(context) }
-            val runtimeProg = onnxProgress.value[OnnxTts.RUNTIME_PACK_ID]
-            Card(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("TTS-рантайм (sherpa-onnx)", fontWeight = FontWeight.Medium)
-                        Text(if (runtimeInstalled) "Установлен" else "~46 МБ · Нужен для нейроголосов",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (runtimeProg != null) {
-                            LinearProgressIndicator(
-                                progress = { runtimeProg },
-                                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                            )
-                        }
-                    }
-                    if (runtimeInstalled) {
-                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF4CAF50))
-                    } else {
-                        var downloadingRuntime by remember { mutableStateOf(false) }
-                        Button(
-                            enabled = !downloadingRuntime,
-                            onClick = {
-                                downloadingRuntime = true
-                                context.toast("Загрузка рантайма началась")
-                                kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                    val ok = runCatching { OnnxTts.downloadRuntime(context) }.getOrDefault(false)
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        downloadingRuntime = false
-                                        context.toast(if (ok) "Рантайм установлен" else "Ошибка загрузки рантайма — смотрите логи")
-                                    }
-                                }
-                            },
-                        ) { Text(if (downloadingRuntime) "Скачивается…" else "Скачать") }
-                    }
-                }
-            }
-        }
-
-        items(onnxCatalog) { voice ->
-            val installed = remember(installedVersion) { OnnxTts.isInstalled(context, voice) }
-            val isOnnxActive = prefs.voiceEngine().get() == TtsSpeaker.ENGINE_ONNX &&
-                prefs.onnxVoice().get() == voice.id
-            val prog = onnxProgress.value[voice.id]
-
-            Card(
+            androidx.compose.material3.OutlinedTextField(
+                value = prefs.remoteTtsUrl().get(),
+                onValueChange = { prefs.remoteTtsUrl().set(it.trim()) },
+                label = { Text("http://192.168.1.10:8788") },
                 modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isOnnxActive)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (voice.gender == "female") Icons.Outlined.Female else Icons.Outlined.Male,
-                        if (voice.gender == "female") "Женский" else "Мужской",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(voice.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                        Text("${voice.sizeMb} МБ · ${voice.gender}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (prog != null) {
-                            LinearProgressIndicator(
-                                progress = { prog },
-                                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                            )
-                        }
-                    }
-                    if (isOnnxActive) {
-                        Icon(Icons.Default.CheckCircle, "Активен", tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    if (installed) {
-                        IconButton(onClick = {
-                            prefs.voiceEngine().set(TtsSpeaker.ENGINE_ONNX)
-                            prefs.onnxVoice().set(voice.id)
-                            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) { TtsSpeaker.speakOnnxTest(context, voice) }
-                        }) { Icon(Icons.Default.PlayArrow, "Проба") }
-                        Spacer(Modifier.width(4.dp))
-                        OutlinedButton(onClick = {
-                            prefs.voiceEngine().set(TtsSpeaker.ENGINE_ONNX)
-                            prefs.onnxVoice().set(voice.id)
-                            context.toast("Нейроголос активирован: ${voice.name}")
-                        }) { Text("Актив.") }
-                    } else {
-                        Button(onClick = {
-                            context.toast("Загрузка голоса ${voice.name}…")
-                            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                val ok = runCatching { OnnxTts.download(context, voice) }.getOrDefault(false)
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                    if (ok) context.toast("Голос ${voice.name} установлен") 
-                                    else context.toast("Ошибка загрузки ${voice.name}")
-                                }
-                            }
-                        }) { Text("${voice.sizeMb} МБ") }
-                    }
-                }
-            }
+                singleLine = true,
+            )
+            OutlinedButton(
+                onClick = { prefs.voiceEngine().set(TtsSpeaker.ENGINE_REMOTE) },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            ) { Text("Сделать основным движком") }
         }
     }
 }
