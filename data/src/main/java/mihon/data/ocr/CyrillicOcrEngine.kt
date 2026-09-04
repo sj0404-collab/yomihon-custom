@@ -275,7 +275,7 @@ internal class CyrillicOcrEngine(
                 // строк — их детектор уже нашёл и вырезал по размеру.
                 val rescued = rescueRejectedLines(rejected)
                 if (rescued.isNotEmpty()) {
-                    OcrStageBus.post(OcrStageBus.Stage.DONE, "rescue: ${rescued.size} строк")
+                    OcrStageBus.post(OcrStageBus.Stage.DONE, "rescue: ${rescued.length} символов")
                     return@withLock rescued
                 }
                 OcrStageBus.post(OcrStageBus.Stage.DONE, "цельностраничный rescue")
