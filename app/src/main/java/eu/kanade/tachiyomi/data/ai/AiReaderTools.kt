@@ -1,9 +1,10 @@
 package eu.kanade.tachiyomi.data.ai
 
 import android.content.Context
-import eu.kanade.tachiyomi.data.tts.OnnxTts
 import eu.kanade.tachiyomi.data.voice.VoiceBackend
 import eu.kanade.tachiyomi.data.voice.VoicePlugins
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import mihon.data.ocr.ContentAutoPreset
 import mihon.data.ocr.OcrContentType
 import mihon.data.ocr.ReaderContextBus
@@ -34,8 +35,14 @@ object AiReaderTools {
     const val TOOL_READER_STATUS = "reader_status"
     const val TOOL_OCR_PRESET = "ocr_preset"
     const val TOOL_PLUGINS_LIST = "plugins_list"
+    const val TOOL_TTS_STATUS = "tts_status"
 
-    val TOOL_NAMES = listOf(TOOL_READER_STATUS, TOOL_OCR_PRESET, TOOL_PLUGINS_LIST)
+    val TOOL_NAMES = listOf(
+        TOOL_READER_STATUS,
+        TOOL_OCR_PRESET,
+        TOOL_PLUGINS_LIST,
+        TOOL_TTS_STATUS,
+    )
 
     /** Документация инструментов для системного промпта агента. */
     val SYSTEM_PROMPT_LINES = listOf(
@@ -45,6 +52,8 @@ object AiReaderTools {
             "контента (меняет параметры детектора, область и порядок чтения)",
         "@tool plugins_list {} — реестры плагинов: OCR-движки, голосовые движки и бэкенды AI-чата " +
             "с требованиями и доступностью",
+        "@tool tts_status {} — озвучка: выбранный движок и голоса, установленные системные " +
+            "TTS-движки, адрес сервера синтеза и последняя ошибка, хвост logs/tts.log",
     )
 
     /**
@@ -74,6 +83,7 @@ object AiReaderTools {
             appendLine("Пресет типа контента: ${profile.contentType.id} (${profile.contentType.title})")
             appendLine("Область сканирования: ${OcrRegionRules.regionTitle(profile.scanRegion)}")
             appendLine("Порядок чтения: ${OcrRegionRules.orderTitle(tuning.readingOrder)}")
+            appendLine("Режим чтения по пресету: ${profile.contentType.viewer.title}")
             appendLine(
                 "Точная подстройка: " +
                     if (profile.overrides.isEmpty) "не задана, все параметры из пресета"
@@ -139,12 +149,21 @@ object AiReaderTools {
             prefs,
         )
 
+        // Пресет задаёт и вьюер: порядок чтения OCR и направление листания —
+        // одна сущность. BALANCED (KEEP) выбор пользователя не трогает.
+        val viewerHint = contentType.viewer
+        val readingMode = ReadingMode.fromOcrHint(viewerHint)
+        if (readingMode != null) {
+            Injekt.get<ReaderPreferences>().defaultReadingMode.set(readingMode.flagValue)
+        }
+
         val profile = OcrRegionRules.profileOf(prefs)
         val tuning = profile.tuning()
         return buildString {
             appendLine("Пресет применён: ${contentType.id} (${contentType.title})")
             appendLine("Область: ${OcrRegionRules.regionTitle(profile.scanRegion)}")
             appendLine("Порядок чтения: ${OcrRegionRules.orderTitle(tuning.readingOrder)}")
+            appendLine("Режим чтения: ${viewerHint.title}")
             appendLine(
                 "Параметры: порог=${tuning.detectorThreshold}, мин. площадь=${tuning.minComponentArea}, " +
                     "макс. блоков=${tuning.maxTextBoxes}, зазор слов=${tuning.wordGapFactor}, " +
@@ -236,9 +255,8 @@ object AiReaderTools {
         hasApiKey = { plugin ->
             plugin.backend == VoiceBackend.ELEVEN_API && prefs.elevenApiKey().get().isNotBlank()
         },
-        modelsDownloaded = { plugin ->
-            plugin.backend == VoiceBackend.ONNX &&
-                OnnxTts.CATALOG.any { OnnxTts.isInstalled(context, it) }
+        hasServerAddress = { plugin ->
+            plugin.backend == VoiceBackend.REMOTE_TTS && prefs.remoteTtsUrl().get().isNotBlank()
         },
     ).map { it.id }.toSet()
 
@@ -247,4 +265,49 @@ object AiReaderTools {
     private fun gender(supported: Boolean) = if (supported) " | различает пол" else ""
     private fun requirements(names: List<String>) =
         if (names.isEmpty()) "" else " | нужно: ${names.joinToString(", ")}"
+
+    /**
+     * Плотный статус озвучки для агента: почему молчит / каким голосом
+     * говорит / какие движки вообще есть в системе. Данные — те же prefs и
+     * реестры, что видит экран настроек, плюс хвост лога синтеза.
+     */
+    fun ttsStatus(context: Context, prefs: OcrPreferences = Injekt.get()): String {
+        val pm = context.packageManager
+        val intent = android.content.Intent(
+            android.speech.tts.TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE,
+        )
+        val services = runCatching { pm.queryIntentServices(intent, 0) }.getOrNull().orEmpty()
+        val logTail = runCatching {
+            val f = java.io.File(AiWorkspace.root(context), "logs/tts.log")
+            if (f.isFile) f.readLines().takeLast(12).joinToString("\n") else null
+        }.getOrNull()
+        return buildString {
+            appendLine("Движок озвучки: ${prefs.voiceEngine().get()}")
+            appendLine(
+                "Системный TTS-движок: " +
+                    prefs.systemTtsEngine().get().ifBlank { "по умолчанию системы" },
+            )
+            appendLine("Основной голос: ${prefs.voiceName().get().ifBlank { "не задан" }}")
+            appendLine("Женские реплики: ${prefs.voiceFemale().get().ifBlank { "не задан" }}")
+            appendLine("Мужские реплики: ${prefs.voiceMale().get().ifBlank { "не задан" }}")
+            appendLine()
+            appendLine(
+                "Удалённый TTS-сервер: " +
+                    prefs.remoteTtsUrl().get().ifBlank { "адрес не задан" },
+            )
+            appendLine()
+            appendLine("Системные TTS-движки (PackageManager):")
+            if (services.isEmpty()) appendLine("  не найдены")
+            services.forEach { ri ->
+                appendLine("  - ${ri.serviceInfo.packageName} (${ri.loadLabel(pm)})")
+            }
+            appendLine()
+            if (logTail.isNullOrBlank()) {
+                appendLine("logs/tts.log: пусто или нет файла")
+            } else {
+                appendLine("Хвост logs/tts.log:")
+                appendLine(logTail)
+            }
+        }
+    }
 }
