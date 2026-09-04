@@ -223,8 +223,8 @@ object VoicePlugins {
     }
 
     /**
-     * Голоса движка. Для ONNX берётся реальный каталог [OnnxTts.CATALOG],
-     * поэтому список не расходится с тем, что приложение умеет скачивать.
+     * Голоса движка: системные берутся из настроек, серверные — из
+     * каталога Piper-голосов ранера/ПК.
      */
     fun voices(context: Context, plugin: VoicePluginDescriptor, prefs: OcrPreferences): List<Voice> =
         when (plugin.backend) {

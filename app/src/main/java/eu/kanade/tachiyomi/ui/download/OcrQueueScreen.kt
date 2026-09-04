@@ -719,12 +719,13 @@ object OcrQueueScreen : Screen() {
                 subtitle = when (voiceEngine) {
                     TtsSpeaker.ENGINE_GOOGLE_WEB -> "Онлайн: Google Translate, без API-ключа"
                     TtsSpeaker.ENGINE_ELEVENLABS -> "Онлайн: ElevenLabs, нужен API-ключ"
+                    TtsSpeaker.ENGINE_REMOTE -> "Сервер: sherpa-onnx/Piper на вашем ПК или ранере"
                     else -> "Системный TTS: офлайн- и онлайн-голоса устройства"
                 },
                 icon = null,
                 entries = mapOf(
                     TtsSpeaker.ENGINE_SYSTEM to "📱 Системный TTS (офлайн + онлайн)",
-                    TtsSpeaker.ENGINE_ONNX to "🧠 ONNX-нейроголоса (офлайн, скачать один раз)",
+                    TtsSpeaker.ENGINE_REMOTE to "🖥 TTS-сервер (нейроголоса на ПК/ранере)",
                     TtsSpeaker.ENGINE_GOOGLE_WEB to "☁ Google Web (онлайн, без ключа)",
                     TtsSpeaker.ENGINE_ELEVENLABS to "☁ ElevenLabs (онлайн, по ключу)",
                 ),
@@ -747,130 +748,21 @@ object OcrQueueScreen : Screen() {
                 onChange = { speechPitchPref.set(it / 100f) },
             )
 
-            if (voiceEngine == TtsSpeaker.ENGINE_ONNX) {
-                PreferenceGroupHeader(title = "ONNX-нейроголоса (Piper, офлайн)")
+            if (voiceEngine == TtsSpeaker.ENGINE_REMOTE) {
+                PreferenceGroupHeader(title = "TTS-сервер (ПК/ранер)")
                 InfoWidget(
-                    text = "Нейросетевые голоса: живее системных, работают без сети. " +
-                        "Женские реплики читает женский голос, мужские — мужской. " +
-                        "Сначала скачайте рантайм (~30 МБ), затем голос.",
+                    text = "Нейроголоса sherpa-onnx/Piper работают на вашей машине: запустите " +
+                        "tools/remote_tts_server.py на ПК и укажите адрес ниже. Приложение " +
+                        "шлёт текст и проигрывает готовый wav; сервер недоступен — дочитывает " +
+                        "системный голос.",
                 )
-                val onnxProgress by eu.kanade.tachiyomi.data.tts.OnnxTts.progress.collectAsState()
-                // РАНТАЙМ как скачиваемое дополнение (вынесен из APK: -55МБ)
-                var runtimeInstalled by remember {
-                    mutableStateOf(eu.kanade.tachiyomi.data.tts.OnnxTts.isRuntimeInstalled(context))
-                }
-                val runtimeProg = onnxProgress[eu.kanade.tachiyomi.data.tts.OnnxTts.RUNTIME_PACK_ID]
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Рантайм sherpa-onnx", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                when {
-                                    runtimeProg != null -> "Загрузка ${(runtimeProg * 100).toInt()}%"
-                                    runtimeInstalled -> "✅ Установлен (~30 МБ)"
-                                    else -> "~30 МБ • нужен для работы нейроголосов"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        when {
-                            runtimeProg != null -> androidx.compose.material3.CircularProgressIndicator(
-                                progress = { runtimeProg },
-                                modifier = Modifier.padding(8.dp).size(28.dp),
-                            )
-                            runtimeInstalled -> androidx.compose.material3.TextButton(onClick = {
-                                eu.kanade.tachiyomi.data.tts.OnnxTts.deleteRuntime(context)
-                                runtimeInstalled = false
-                            }) { Text("Удалить") }
-                            else -> androidx.compose.material3.FilledTonalButton(onClick = {
-                                scope2.launch(Dispatchers.IO) {
-                                    val ok = eu.kanade.tachiyomi.data.tts.OnnxTts.downloadRuntime(context)
-                                    withContext(Dispatchers.Main) { runtimeInstalled = ok }
-                                }
-                            }) { Text("Скачать") }
-                        }
-                    }
-                    if (runtimeProg != null) {
-                        androidx.compose.material3.LinearProgressIndicator(
-                            progress = { runtimeProg },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        )
-                    }
-                }
-                val onnxVoicePref = remember { ocrPreferences.onnxVoice() }
-                val onnxVoice by onnxVoicePref.changes().collectAsState(initial = onnxVoicePref.get())
-                eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.forEach { v ->
-                    var installed by remember(v.id) {
-                        mutableStateOf(eu.kanade.tachiyomi.data.tts.OnnxTts.isInstalled(context, v))
-                    }
-                    val prog = onnxProgress[v.id]
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    (if (v.gender == "female") "♀ " else "♂ ") + v.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                Text(
-                                    when {
-                                        prog != null -> "Загрузка ${(prog * 100).toInt()}%"
-                                        installed -> "✅ Установлен • ${v.sizeMb} МБ"
-                                        else -> "${v.sizeMb} МБ • не установлен"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            when {
-                                prog != null -> androidx.compose.material3.CircularProgressIndicator(
-                                    progress = { prog },
-                                    modifier = Modifier.padding(8.dp).size(28.dp),
-                                )
-                                installed -> Row {
-                                    RadioButton(
-                                        selected = onnxVoice == v.id,
-                                        onClick = { onnxVoicePref.set(v.id) },
-                                    )
-                                    androidx.compose.material3.TextButton(
-                                        enabled = runtimeInstalled,
-                                        onClick = {
-                                            context.toast("Проба: синтез первой фразы (до 20с)…")
-                                            scope2.launch(Dispatchers.IO) {
-                                                val (ok, msg) = eu.kanade.tachiyomi.data.tts.OnnxTts.probe(context, v)
-                                                withContext(Dispatchers.Main) {
-                                                    context.toast("${v.name}: $msg")
-                                                    if (ok) {
-                                                        // Реальное воспроизведение пробы
-                                                        eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(
-                                                            context, "Привет! Так звучит голос ${v.name.substringBefore(" (")}.",
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        },
-                                    ) { Text("▶ Проба") }
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        eu.kanade.tachiyomi.data.tts.OnnxTts.delete(context, v)
-                                        installed = false
-                                    }) { Text("Удалить") }
-                                }
-                                else -> androidx.compose.material3.FilledTonalButton(onClick = {
-                                    scope2.launch(Dispatchers.IO) {
-                                        val ok = eu.kanade.tachiyomi.data.tts.OnnxTts.download(context, v)
-                                        withContext(Dispatchers.Main) { installed = ok }
-                                    }
-                                }) { Text("Скачать") }
-                            }
-                        }
-                        if (prog != null) {
-                            androidx.compose.material3.LinearProgressIndicator(
-                                progress = { prog },
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                            )
-                        }
-                    }
-                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = ocrPreferences.remoteTtsUrl().get(),
+                    onValueChange = { ocrPreferences.remoteTtsUrl().set(it.trim()) },
+                    label = { Text("http://192.168.1.10:8788") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    singleLine = true,
+                )
             }
 
             if (voiceEngine == TtsSpeaker.ENGINE_SYSTEM) {

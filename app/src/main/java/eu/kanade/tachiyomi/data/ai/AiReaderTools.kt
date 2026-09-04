@@ -51,7 +51,7 @@ object AiReaderTools {
         "@tool plugins_list {} — реестры плагинов: OCR-движки, голосовые движки и бэкенды AI-чата " +
             "с требованиями и доступностью",
         "@tool tts_status {} — озвучка: выбранный движок и голоса, установленные системные " +
-            "TTS-движки, состояние ONNX и последняя ошибка синтеза, хвост logs/tts.log",
+            "TTS-движки, адрес сервера синтеза и последняя ошибка, хвост logs/tts.log",
     )
 
     /**
@@ -247,9 +247,8 @@ object AiReaderTools {
         hasApiKey = { plugin ->
             plugin.backend == VoiceBackend.ELEVEN_API && prefs.elevenApiKey().get().isNotBlank()
         },
-        modelsDownloaded = { plugin ->
-            plugin.backend == VoiceBackend.ONNX &&
-                OnnxTts.CATALOG.any { OnnxTts.isInstalled(context, it) }
+        hasServerAddress = { plugin ->
+            plugin.backend == VoiceBackend.REMOTE_TTS && prefs.remoteTtsUrl().get().isNotBlank()
         },
     ).map { it.id }.toSet()
 

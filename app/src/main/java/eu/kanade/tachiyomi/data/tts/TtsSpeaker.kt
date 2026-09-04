@@ -435,6 +435,54 @@ object TtsSpeaker {
 
     // endregion
 
+    /**
+     * ПРОБА КОНКРЕТНЫМ системным голосом (кнопка «Проба» в списке голосов).
+     * Раньше проба звала speak() с текущими настройками — пользователь жал
+     * кнопку у мужского голоса и слышал дефолтный женский: казалось, что
+     * «все голоса одинаковые». Здесь имя голоса передаётся напрямую.
+     */
+    fun speakSystemVoiceTest(context: Context, voiceName: String) {
+        stop()
+        currentJob = scope.launch {
+            setSpeaking(true)
+            try {
+                withContext(Dispatchers.Main) {
+                    ensureSystem(context) { engine ->
+                        if (engine == null) {
+                            setSpeaking(false)
+                            return@ensureSystem
+                        }
+                        engine.setOnUtteranceProgressListener(
+                            object : android.speech.tts.UtteranceProgressListener() {
+                                override fun onStart(utteranceId: String?) = setSpeaking(true)
+                                override fun onDone(utteranceId: String?) = setSpeaking(false)
+                                @Deprecated("Deprecated in Java")
+                                override fun onError(utteranceId: String?) = setSpeaking(false)
+                                override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
+                            },
+                        )
+                        engine.setSpeechRate(prefs().speechRate().get().coerceIn(0.5f, 2f))
+                        val known = runCatching { engine.voices?.firstOrNull { it.name == voiceName } }.getOrNull()
+                        if (known != null) engine.setVoice(known)
+                        val params = android.os.Bundle().apply { putString("voiceName", voiceName) }
+                        val r = runCatching {
+                            engine.speak(
+                                "Привет! Это тест голоса $voiceName.",
+                                TextToSpeech.QUEUE_FLUSH,
+                                params,
+                                "yk_vtest",
+                            )
+                        }.getOrDefault(TextToSpeech.ERROR)
+                        if (r != TextToSpeech.SUCCESS) setSpeaking(false)
+                    }
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "voice test failed" }
+                setSpeaking(false)
+            }
+        }
+    }
+
     // region REMOTE (нейроголоса на сервере ПК/ранера)
 
     /**

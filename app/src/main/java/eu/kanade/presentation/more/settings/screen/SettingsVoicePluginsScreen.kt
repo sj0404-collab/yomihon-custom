@@ -46,11 +46,9 @@ object SettingsVoicePluginsScreen : SearchableSettings {
                 hasApiKey = { plugin ->
                     plugin.backend == VoiceBackend.ELEVEN_API && prefs.elevenApiKey().get().isNotBlank()
                 },
-                modelsDownloaded = { plugin ->
-                    plugin.backend == VoiceBackend.ONNX &&
-                        eu.kanade.tachiyomi.data.tts.OnnxTts.CATALOG.any {
-                            eu.kanade.tachiyomi.data.tts.OnnxTts.isInstalled(context, it)
-                        }
+                hasServerAddress = { plugin ->
+                    plugin.backend == VoiceBackend.REMOTE_TTS &&
+                        prefs.remoteTtsUrl().get().isNotBlank()
                 },
             ).map { it.id }.toSet()
         }
@@ -144,5 +142,6 @@ object SettingsVoicePluginsScreen : SearchableSettings {
         VoiceRequirement.SYSTEM_ENGINE -> stringResource(MR.strings.pref_voice_requires_system)
         VoiceRequirement.MODEL_DOWNLOAD -> stringResource(MR.strings.pref_plugin_requires_models)
         VoiceRequirement.NATIVE_LIBRARY -> stringResource(MR.strings.pref_voice_requires_native)
+        VoiceRequirement.SERVER_ADDRESS -> "адрес TTS-сервера (Настройки озвучки)"
     }
 }
