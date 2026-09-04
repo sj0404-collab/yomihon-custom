@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.data.ocr.OcrHistoryStore
+import mihon.data.ocr.RuMorph
 import mihon.data.ocr.MangaTranslatorService
 import mihon.domain.ocr.interactor.ScanPageOcr
 import mihon.domain.ocr.model.OcrBoundingBox
@@ -430,15 +431,7 @@ class AutoReadEngine(
     }
 
     /** Озвучка с ожиданием реального окончания фразы. */
-    private suspend fun speakAndAwait(rawText: String, gender: String? = null, speakerSlot: Int = 0) {
-        // Многоточие TTS читает как «точка точка точка»: заменяем на паузу-
-        // запятую. Одиночные точки (концы предложений) не трогаем.
-        val text = rawText
-            .replace("…", ", ")
-            .replace(Regex("\\.{3,}"), ", ")
-            .replace(Regex("\\s{2,}"), " ")
-            .trim()
-        if (text.isBlank()) return
+    private suspend fun speakAndAwait(text: String, gender: String? = null, speakerSlot: Int = 0) {
         val done = MutableStateFlow(false)
         var started = false
         val t0 = System.currentTimeMillis()
@@ -497,11 +490,18 @@ class AutoReadEngine(
         // Подстрочный поиск покрывает падежи: «моей сестры», «к отцу».
         val maleCount = maleMarkers.count { lower.contains(it) }
         val femaleCount = femaleMarkers.count { lower.contains(it) }
-        return when {
+        val byMarkers = when {
             maleCount > femaleCount -> "male"
             femaleCount > maleCount -> "female"
             else -> null
         }
+        if (byMarkers != null) return byMarkers
+        // Морфологический фолбэк: род по окончаниям словоформ (RuMorph).
+        val morph = RuMorph.guessGender(text)
+        if (morph != null) {
+            OcrHistoryStore.addAutoRead(true, "пол говорящего: морфология", "$morph: ${text.take(40)}")
+        }
+        return morph
     }
 
     // region Баллоны (YOLO) и чистка OCR-мусора
