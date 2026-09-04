@@ -3,7 +3,9 @@ package eu.kanade.presentation.more.settings.screen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
@@ -47,6 +49,13 @@ object SettingsOcrScreen : SearchableSettings {
         val contentType by prefs.contentType().collectPreferenceAsState()
         val presetRegion by prefs.presetScanRegion().collectPreferenceAsState()
 
+        // Экран истории (две вкладки: авточтение и сканирование) открывается
+        // полноэкранным диалогом прямо из настроек.
+        var showHistory by remember { mutableStateOf(false) }
+        if (showHistory) {
+            OcrHistoryDialog(onDismiss = { showHistory = false })
+        }
+
         // Доступность плагинов пересчитывается при смене состояния сети:
         // список должен честно показывать, что можно выбрать прямо сейчас.
         val online = rememberNetworkState(context)
@@ -70,6 +79,21 @@ object SettingsOcrScreen : SearchableSettings {
             getRegionGroup(prefs = prefs, presetRegion = presetRegion),
             getTuningGroup(prefs = prefs),
             getEnginesGroup(prefs = prefs, navigator = navigator, availableIds = availableIds),
+            getHistoryGroup(onOpenHistory = { showHistory = true }),
+        )
+    }
+
+    @Composable
+    private fun getHistoryGroup(onOpenHistory: () -> Unit): Preference.PreferenceGroup {
+        return Preference.PreferenceGroup(
+            title = "История",
+            preferenceItems = listOf(
+                Preference.PreferenceItem.TextPreference(
+                    title = "История авточтения и сканирования",
+                    subtitle = "Журналы: успех/неудача по страницам, словари, сбои TTS",
+                    onClick = onOpenHistory,
+                ),
+            ),
         )
     }
 

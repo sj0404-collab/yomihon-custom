@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import logcat.LogPriority
+import mihon.data.ocr.OcrHistoryStore
 import mihon.data.ocr.MangaTranslatorService
 import mihon.domain.ocr.interactor.ScanPageOcr
 import mihon.domain.ocr.model.OcrBoundingBox
@@ -222,7 +223,10 @@ class AutoReadEngine(
                 val wholePage = result.regions.size == 1 && result.regions.first().isWholePage
                 if (wholePage && !bitmap.isRecycled) {
                     val bubbleLines = runCatching { readBubbles(bitmap, chapterId, pageIndex, order) }
-                        .onFailure { logcat(LogPriority.WARN, it) { "Bubble detection failed" } }
+                        .onFailure {
+                            logcat(LogPriority.WARN, it) { "Bubble detection failed" }
+                            OcrHistoryStore.addAutoRead(false, "детектор облачков", it.message ?: it.javaClass.simpleName)
+                        }
                         .getOrDefault(emptyList())
                     lines = if (bubbleLines.isNotEmpty()) {
                         bubbleLines
@@ -400,6 +404,7 @@ class AutoReadEngine(
                 throw e
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "AutoRead frame failed" }
+                OcrHistoryStore.addAutoRead(false, "сбой страницы", e.message ?: e.javaClass.simpleName)
             } finally {
                 aiRefine?.cancel()
                 _currentRegion.value = null
@@ -437,6 +442,7 @@ class AutoReadEngine(
             if (!speaking && started) {
                 done.value = true
                 logcat(LogPriority.DEBUG) { "TTS done in ${System.currentTimeMillis() - t0}ms" }
+                OcrHistoryStore.addAutoRead(true, "озвучено (${System.currentTimeMillis() - t0} мс)", text.take(60))
             }
         }
         // страховка: макс. время = длина текста * 220мс + запас 5с
@@ -454,8 +460,10 @@ class AutoReadEngine(
             logcat(LogPriority.WARN) {
                 "TTS timeout without onDone: ${text.take(60)} (waited ${System.currentTimeMillis() - start}ms)"
             }
+            OcrHistoryStore.addAutoRead(false, "TTS без завершения", text.take(60))
         } else if (!started) {
             logcat(LogPriority.WARN) { "TTS never started: ${text.take(60)}" }
+            OcrHistoryStore.addAutoRead(false, "TTS не запустился", text.take(60))
         }
     }
 

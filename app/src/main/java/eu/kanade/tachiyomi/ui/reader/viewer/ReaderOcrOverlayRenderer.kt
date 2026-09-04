@@ -147,7 +147,11 @@ internal class ReaderOcrOverlayRenderer(
             // We draw non-highlighted text first in white, then re-draw highlighted chars
             // on top in the contrasting color so the highlight background shows correctly.
             textPaint.color = Color.WHITE
+            // До озвучки текст курсивом (запрос пользователя); подсвеченное
+            // слово — то, что звучит сейчас, — рисуется прямым начертанием.
+            textPaint.textSkewX = -0.25f
             canvas.drawText(line.text, line.left, line.baselineY, textPaint)
+            textPaint.textSkewX = 0f
             if (line.highlightSegments.isNotEmpty()) {
                 textPaint.color = highlightTextColor
                 line.highlightText.forEach { (text, x) ->
@@ -180,11 +184,13 @@ internal class ReaderOcrOverlayRenderer(
 
         overlayLayout.glyphs.forEach { glyph ->
             textPaint.color = if (glyph.isHighlighted) highlightTextColor else Color.WHITE
+            textPaint.textSkewX = if (glyph.isHighlighted) 0f else -0.25f
             val drawChar = verticalEllipsis(glyph.char)
             val textWidth = measureText(drawChar)
             val textX = glyph.rect.left + ((glyph.rect.width() - textWidth) / 2f)
             canvas.drawText(drawChar, textX, glyph.baselineY, textPaint)
         }
+        textPaint.textSkewX = 0f
     }
 
     private fun buildHorizontalLayout(
