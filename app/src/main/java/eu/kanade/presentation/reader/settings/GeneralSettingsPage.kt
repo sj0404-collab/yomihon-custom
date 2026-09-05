@@ -1,13 +1,23 @@
 package eu.kanade.presentation.reader.settings
 
 import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.util.system.hasDisplayCutout
@@ -163,6 +173,80 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
                     label = { Text(stringResource(labelRes)) },
                 )
             }
+        }
+    }
+
+    // Паритет с основными настройками (запрос пользователя): распознавание
+    // и пресеты голоса доступны прямо из читалки.
+    val ocrPrefs = remember { Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
+    val voiceGender by ocrPrefs.voicePresetGender().collectAsState()
+    val voiceAge by ocrPrefs.voicePresetAge().collectAsState()
+    val ocrContent by ocrPrefs.contentType().collectAsState()
+    val ocrHighlight by ocrPrefs.highlightStyle().collectAsState()
+    val ocrStress by ocrPrefs.ruStress().collectAsState()
+
+    Text(
+        text = "Распознавание и голос",
+        style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
+    )
+    PresetChipRow(
+        title = "Пол голоса",
+        options = mapOf("auto" to "Авто", "male" to "Мужской", "female" to "Женский", "neutral" to "Средний"),
+        current = voiceGender,
+        onPick = { ocrPrefs.voicePresetGender().set(it) },
+    )
+    PresetChipRow(
+        title = "Возраст голоса",
+        options = mapOf("infant" to "Младенец", "child" to "Ребёнок", "teen" to "Подросток", "adult" to "Взрослый", "elderly" to "Пожилой"),
+        current = voiceAge,
+        onPick = { ocrPrefs.voicePresetAge().set(it) },
+    )
+    PresetChipRow(
+        title = "Пресет типа контента",
+        options = mihon.data.ocr.OcrContentType.entries.associate { it.id to it.title },
+        current = ocrContent,
+        onPick = { ocrPrefs.contentType().set(it) },
+    )
+    PresetChipRow(
+        title = "Подсветка читаемого",
+        options = mapOf("box" to "Рамка", "underline" to "Подчёркивание", "both" to "Рамка+линия", "bubble" to "Мягкая"),
+        current = ocrHighlight,
+        onPick = { ocrPrefs.highlightStyle().set(it) },
+    )
+    PresetChipRow(
+        title = "Ударения (RHVoice)",
+        options = mapOf("on" to "Включены", "off" to "Выключены"),
+        current = ocrStress,
+        onPick = { ocrPrefs.ruStress().set(it) },
+    )
+}
+
+/** Подпись + горизонтальная лента чипов (русские подписи, как в SAO-панели). */
+@Composable
+private fun ColumnScope.PresetChipRow(
+    title: String,
+    options: Map<String, String>,
+    current: String,
+    onPick: (String) -> Unit,
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp),
+    )
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { (id, label) ->
+            FilterChip(
+                selected = current == id,
+                onClick = { onPick(id) },
+                label = { Text(label) },
+            )
         }
     }
 }
