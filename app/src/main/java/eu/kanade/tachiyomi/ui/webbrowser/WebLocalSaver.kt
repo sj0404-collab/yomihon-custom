@@ -62,7 +62,7 @@ object WebLocalSaver {
     ): UniFile? = withContext(Dispatchers.IO) {
         try {
             val fs: LocalSourceFileSystem = Injekt.get()
-            val baseDir = fs.baseDirectory ?: run {
+            val baseDir = fs.getBaseDirectory() ?: run {
                 logcat(LogPriority.WARN) { "WebLocalSaver: baseDirectory null" }
                 return@withContext null
             }

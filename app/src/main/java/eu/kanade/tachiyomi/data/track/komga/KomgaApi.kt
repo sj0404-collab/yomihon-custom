@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.data.track.komga
 
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
@@ -159,7 +161,7 @@ class KomgaApi(
         // Если этого сделать нельзя — используем fallback через первый найденный HttpSource,
         // либо бросаем читаемое исключение.
         return try {
-            val sm = uy.kohesive.injekt.Injekt.get<tachiyomi.domain.source.service.SourceManager>()
+            val sm = Injekt.get<tachiyomi.domain.source.service.SourceManager>()
             val key = "komga/all/1"
             val bytes = java.security.MessageDigest.getInstance("MD5").digest(key.toByteArray())
             val id = (0..7).map { bytes[it].toLong() and 0xff shl 8 * (7 - it) }.reduce(Long::or) and Long.MAX_VALUE
