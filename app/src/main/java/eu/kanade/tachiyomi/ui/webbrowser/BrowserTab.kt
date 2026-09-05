@@ -263,6 +263,16 @@ data object BrowserTab : Tab {
         var fabX by remember { mutableFloatStateOf(0f) }
         var fabY by remember { mutableFloatStateOf(0f) }
 
+        // Автоскролл страницы: плавно, скорость 1..10
+        LaunchedEffect(isAuto, speed) {
+            while (isAuto) {
+                sharedWebView?.scrollBy(0, (speed * 3).roundToInt())
+                delay(16)
+            }
+        }
+
+        var isAutoRead by autoReadActive
+        val ctx = androidx.compose.ui.platform.LocalContext.current
         var ocrBusy by remember { mutableStateOf(false) }
         var ocrText by remember { mutableStateOf<String?>(null) }
         var ocrJob by remember { mutableStateOf<Job?>(null) }
@@ -311,16 +321,6 @@ data object BrowserTab : Tab {
             }
         }
 
-        // Автоскролл страницы: плавно, скорость 1..10
-        LaunchedEffect(isAuto, speed) {
-            while (isAuto) {
-                sharedWebView?.scrollBy(0, (speed * 3).roundToInt())
-                delay(16)
-            }
-        }
-
-        var isAutoRead by autoReadActive
-        val ctx = androidx.compose.ui.platform.LocalContext.current
         val readEngine = remember { autoReadEngine ?: AutoReadEngine(ctx.applicationContext).also { autoReadEngine = it } }
         val currentRegion by readEngine.currentRegion.collectAsState()
 
