@@ -294,7 +294,20 @@ data object BrowserTab : Tab {
                         ocrText = ""
                     } else {
                         val zone = detectBookZone()
-                        val bmp = cropToZone(raw, zone)
+                        val cropped = cropToZone(raw, zone)
+                        // Мелкий кроп апскейлим: декоративные шрифты сайтов
+                        // на мелком масштабе ломают распознавание.
+                        val bmp = if (cropped.width < 1200) {
+                            val k = minOf(3f, 1200f / cropped.width)
+                            android.graphics.Bitmap.createScaledBitmap(
+                                cropped,
+                                (cropped.width * k).toInt(),
+                                (cropped.height * k).toInt(),
+                                true,
+                            ).also { if (it !== cropped) cropped.recycle() }
+                        } else {
+                            cropped
+                        }
                         val text = withTimeout(90_000) {
                             Injekt.get<mihon.domain.ocr.interactor.OcrProcessor>().getText(bmp.toOcrImage())
                         }

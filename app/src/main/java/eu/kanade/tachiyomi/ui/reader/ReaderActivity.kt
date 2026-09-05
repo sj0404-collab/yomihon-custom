@@ -1041,8 +1041,15 @@ class ReaderActivity : BaseActivity() {
                                 }
                             },
                             onPlayAudioClick = dictionarySearchScreenModel::fetchAndPlayAudio,
+                            onSpeak = {
+                                eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(
+                                    this@ReaderActivity,
+                                    dialog.queryText,
+                                )
+                            },
+                            onChooseVoice = { showTtsDialog = true },
                             )
-                            OcrVoiceFloatingControls(
+                            if (searchState.dictionaries.isNotEmpty()) OcrVoiceFloatingControls(
                                 enabled = dialog.queryText.isNotBlank(),
                                 onSpeak = {
                                     eu.kanade.tachiyomi.data.tts.TtsSpeaker.speak(
@@ -1052,19 +1059,13 @@ class ReaderActivity : BaseActivity() {
                                 },
                                 onChooseVoice = { showTtsDialog = true },
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .statusBarsPadding(),
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding(),
                             )
                         }
                     }
                     null -> {}
                 }
-
-                // OCR loading bar at bottom of screen
-                OcrLoadingIndicator(
-                    visible = state.isProcessingOcr,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
             }
         }
 

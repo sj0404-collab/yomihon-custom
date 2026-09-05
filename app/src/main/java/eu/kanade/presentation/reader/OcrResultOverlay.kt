@@ -40,6 +40,8 @@ fun OcrResultOverlay(
     onSearch: (String) -> Unit,
     onTermGroupClick: (List<DictionaryTerm>) -> Unit,
     onPlayAudioClick: (List<DictionaryTerm>) -> Unit,
+    onSpeak: () -> Unit = {},
+    onChooseVoice: () -> Unit = {},
 ) {
     BackHandler(onBack = onDismissRequest)
     // Словарей нет — не дёргаем поиск и не показываем «No Dictionaries
@@ -67,6 +69,8 @@ fun OcrResultOverlay(
                     text = queryText,
                     onCopyText = onCopyText,
                     onDismissRequest = onDismissRequest,
+                    onSpeak = onSpeak,
+                    onChooseVoice = onChooseVoice,
                 )
             }
             presentation == OcrResultPresentation.POPUP && anchorRect != null -> {
@@ -106,6 +110,8 @@ private fun OcrPlainTextCard(
     text: String,
     onCopyText: () -> Unit,
     onDismissRequest: () -> Unit,
+    onSpeak: () -> Unit = {},
+    onChooseVoice: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -135,8 +141,15 @@ private fun OcrPlainTextCard(
                     modifier = Modifier.height(12.dp),
                 )
                 androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                 ) {
+                    androidx.compose.material3.TextButton(onClick = onSpeak) {
+                        androidx.compose.material3.Text("Голос")
+                    }
+                    androidx.compose.material3.TextButton(onClick = onChooseVoice) {
+                        androidx.compose.material3.Text("Выбрать голос")
+                    }
                     androidx.compose.material3.TextButton(onClick = onCopyText) {
                         androidx.compose.material3.Text("Копировать")
                     }
