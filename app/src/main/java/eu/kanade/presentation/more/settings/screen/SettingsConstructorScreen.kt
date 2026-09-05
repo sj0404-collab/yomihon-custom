@@ -355,7 +355,3 @@ object SettingsConstructorScreen : Screen {
         )
     }
 }
-
-@Composable
-private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsState(): androidx.compose.runtime.State<T> =
-    androidx.compose.runtime.collectAsState()

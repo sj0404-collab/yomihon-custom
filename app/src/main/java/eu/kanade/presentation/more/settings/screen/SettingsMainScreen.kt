@@ -236,8 +236,8 @@ object SettingsMainScreen : Screen() {
             screen = SettingsBrowseScreen,
         ),
         Item(
-            title = "Конструктор",
-            subtitle = "Вкладки, модули панелей, свои кнопки: скрыть, переставить, создать",
+            titleRes = MR.strings.constructor,
+            subtitleRes = MR.strings.constructor_summary,
             icon = Icons.Outlined.Build,
             screen = SettingsConstructorScreen,
         ),

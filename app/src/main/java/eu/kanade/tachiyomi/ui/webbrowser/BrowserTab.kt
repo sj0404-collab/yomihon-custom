@@ -77,6 +77,8 @@ import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.data.tts.AutoReadEngine
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import kotlinx.coroutines.delay
+import eu.kanade.tachiyomi.util.system.toast
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -258,9 +260,10 @@ data object BrowserTab : Tab {
         }
 
         var menuOpen by remember { mutableStateOf(false) }
+        val ctorContext = androidx.compose.ui.platform.LocalContext.current
         val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
         val hiddenM = remember(ctorVersion) {
-            eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(androidx.compose.ui.platform.LocalContext.current)
+            eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(ctorContext)
         }
         var isAuto by autoscrollActive
         var speed by autoscrollSpeed

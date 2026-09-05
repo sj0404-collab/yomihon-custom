@@ -142,7 +142,7 @@ fun AutoReadHighlight(
         val mapped = engine?.mapToViewport(region.box) ?: region.box
         // Санитария: вырожденные боксы (узкая полоса во всю высоту) не
         // рисуем — это мусор маппинга, а не реплика.
-        if ((mapped.right - mapped.left) < 0.12f || (mapped.bottom - mapped.top) > 0.92f) return
+        if ((mapped.right - mapped.left) < 0.12f || (mapped.bottom - mapped.top) > 0.92f) return@AutoReadHighlight
         val boxWidth = with(density) { ((mapped.right - mapped.left) * iw).toDp() }
         val boxHeight = with(density) { ((mapped.bottom - mapped.top) * ih).toDp() }
         val offsetModifier = Modifier.offset {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.Close
