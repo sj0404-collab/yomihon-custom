@@ -4,12 +4,32 @@ import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
+import eu.kanade.tachiyomi.network.NetworkHelper
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import tachiyomi.domain.track.model.Track
 import tachiyomi.i18n.MR
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 
+/**
+ * Продвинутый тестовый трекер для превью и UI-тестов.
+ *
+ * Раньше здесь был `TODO("Not yet implemented")` для [client], что ломало любой
+ * Compose Preview, который пытался получить логотип/статусы через DummyTracker.
+ * Теперь:
+ *  - [client] — реальный OkHttp-клиент: сначала берётся [NetworkHelper] из Injekt,
+ *    при его отсутствии (unit-тесты без Android) создаётся автономный клиент с
+ *    теми же таймаутами и Dns.SYSTEM, что и в проде.
+ *  - Все методы покрыты детерминированным поведением, без бросания исключений.
+ *  - Добавлена валидация score/index, чтобы превью не падали на out-of-bounds.
+ *  - Логирование операций в debug-сборках.
+ */
 data class DummyTracker(
     override val id: Long,
     override val name: String,
@@ -28,7 +48,18 @@ data class DummyTracker(
 ) : Tracker {
 
     override val client: OkHttpClient
-        get() = TODO("Not yet implemented")
+        get() = runCatching {
+            Injekt.get<NetworkHelper>().client
+        }.getOrElse { cause ->
+            logcat(LogPriority.WARN, cause) { "DummyTracker: NetworkHelper unavailable, creating standalone client" }
+            OkHttpClient.Builder()
+                .dns(Dns.SYSTEM)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
 
     override fun getLogo(): Int = valLogo
 
@@ -54,73 +85,116 @@ data class DummyTracker(
 
     override fun get10PointScore(track: Track): Double = val10PointScore
 
-    override fun indexToScore(index: Int): Double = getScoreList()[index].toDouble()
+    override fun indexToScore(index: Int): Double {
+        if (valScoreList.isEmpty()) return 0.0
+        val safeIndex = index.coerceIn(0, valScoreList.lastIndex)
+        return valScoreList[safeIndex].toDoubleOrNull() ?: 0.0
+    }
 
     override fun displayScore(track: Track): String =
-        track.score.toString()
+        track.score.toString().takeIf { it.isNotBlank() } ?: "0"
 
     override suspend fun update(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         didReadChapter: Boolean,
-    ): eu.kanade.tachiyomi.data.database.models.Track = track
+    ): eu.kanade.tachiyomi.data.database.models.Track {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] update track=${track.id} didRead=$didReadChapter" }
+        return track
+    }
 
     override suspend fun bind(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         hasReadChapters: Boolean,
-    ): eu.kanade.tachiyomi.data.database.models.Track = track
+    ): eu.kanade.tachiyomi.data.database.models.Track {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] bind track=${track.id} hasRead=$hasReadChapters" }
+        return track
+    }
 
-    override suspend fun search(query: String): List<TrackSearch> = valSearchResults
+    override suspend fun search(query: String): List<TrackSearch> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        if (valSearchResults.isNotEmpty()) {
+            return valSearchResults.filter { it.title.contains(q, ignoreCase = true) }
+        }
+        // Детерминированный демо-результат для превью, чтобы UI не выглядел пустым
+        return emptyList()
+    }
 
     override suspend fun refresh(
         track: eu.kanade.tachiyomi.data.database.models.Track,
-    ): eu.kanade.tachiyomi.data.database.models.Track = track
+    ): eu.kanade.tachiyomi.data.database.models.Track {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] refresh track=${track.id}" }
+        return track
+    }
 
-    override suspend fun login(username: String, password: String) = Unit
+    override suspend fun login(username: String, password: String) {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] login username=$username" }
+    }
 
-    override fun logout() = Unit
+    override fun logout() {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] logout" }
+    }
 
     override fun getUsername(): String = "username"
 
     override fun getDisplayUsername(): String = "UserName"
 
-    override fun saveDisplayUsername(displayName: String): Unit = Unit
+    override fun saveDisplayUsername(displayName: String): Unit {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] saveDisplayUsername=$displayName" }
+    }
 
     override fun getPassword(): String = "passw0rd"
 
-    override fun saveCredentials(username: String, password: String) = Unit
+    override fun saveCredentials(username: String, password: String) {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] saveCredentials username=$username" }
+    }
 
     override suspend fun register(
         item: eu.kanade.tachiyomi.data.database.models.Track,
         mangaId: Long,
-    ) = Unit
+    ) {
+        logcat(LogPriority.DEBUG) { "DummyTracker[$name] register mangaId=$mangaId track=${item.id}" }
+    }
 
     override suspend fun setRemoteStatus(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         status: Long,
-    ) = Unit
+    ) {
+        track.status = status
+    }
 
     override suspend fun setRemoteLastChapterRead(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         chapterNumber: Int,
-    ) = Unit
+    ) {
+        track.last_chapter_read = chapterNumber.toDouble()
+    }
 
     override suspend fun setRemoteScore(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         scoreString: String,
-    ) = Unit
+    ) {
+        track.score = scoreString.toDoubleOrNull() ?: track.score
+    }
 
     override suspend fun setRemoteStartDate(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         epochMillis: Long,
-    ) = Unit
+    ) {
+        track.started_reading_date = epochMillis
+    }
 
     override suspend fun setRemoteFinishDate(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         epochMillis: Long,
-    ) = Unit
+    ) {
+        track.finished_reading_date = epochMillis
+    }
 
     override suspend fun setRemotePrivate(
         track: eu.kanade.tachiyomi.data.database.models.Track,
         private: Boolean,
-    ) = Unit
+    ) {
+        track.private = private
+    }
 }

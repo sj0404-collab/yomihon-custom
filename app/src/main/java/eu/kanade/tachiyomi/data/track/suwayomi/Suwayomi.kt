@@ -7,6 +7,8 @@ import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.source.Source
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.domain.manga.model.Manga as DomainManga
 import tachiyomi.domain.track.model.Track as DomainTrack
@@ -24,6 +26,7 @@ class Suwayomi(id: Long) : BaseTracker(id, "Suwayomi"), EnhancedTracker {
 
         private const val TRACKER_DELETE_KEY = "Tracker Delete"
         private const val TRACKER_DELETE_DEFAULT = false
+        private const val SEARCH_LIMIT = 20
     }
 
     override fun getStatusList(): List<Long> = listOf(UNREAD, READING, COMPLETED)
@@ -63,8 +66,27 @@ class Suwayomi(id: Long) : BaseTracker(id, "Suwayomi"), EnhancedTracker {
         return track
     }
 
+    /**
+     * Продвинутый поиск в Suwayomi (Tachidesk/Suwayomi-Server).
+     *
+     * Раньше метод бросал `TODO`, теперь реализован через GraphQL:
+     *  - Пустой запрос → пустой список без сетевого обращения.
+     *  - Использует `POST /api/graphql` с фильтром
+     *    `mangas(filter: {title: {includesInsensitive: $query}}, first: 20)`.
+     *  - При недоступности сервера или отсутствии Tachidesk-источника
+     *    возвращается пустой список с предупреждением, а не краш.
+     *  - Результаты мапятся в [TrackSearch] с корректными полями
+     *    (title, summary, cover, tracking_url, chapters, статус).
+     */
     override suspend fun search(query: String): List<TrackSearch> {
-        TODO("Not yet implemented")
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        return try {
+            api.search(q, SEARCH_LIMIT)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Suwayomi search failed for query=$q" }
+            emptyList()
+        }
     }
 
     override suspend fun refresh(track: Track): Track {
@@ -88,6 +110,7 @@ class Suwayomi(id: Long) : BaseTracker(id, "Suwayomi"), EnhancedTracker {
         try {
             api.getTrackSearch(manga.url.getMangaId())
         } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Suwayomi match failed for url=${manga.url}" }
             null
         }
 
@@ -105,7 +128,12 @@ class Suwayomi(id: Long) : BaseTracker(id, "Suwayomi"), EnhancedTracker {
         this.substringAfterLast('/').toLong()
 
     private fun getPrefTrackerDelete(): Boolean {
-        val preferences = api.sourcePreferences()
-        return preferences.getBoolean(TRACKER_DELETE_KEY, TRACKER_DELETE_DEFAULT)
+        return try {
+            val preferences = api.sourcePreferences()
+            preferences.getBoolean(TRACKER_DELETE_KEY, TRACKER_DELETE_DEFAULT)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Suwayomi getPrefTrackerDelete failed" }
+            TRACKER_DELETE_DEFAULT
+        }
     }
 }

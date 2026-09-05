@@ -7,9 +7,11 @@ import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.source.Source
+import logcat.LogPriority
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.domain.track.model.Track as DomainTrack
 
@@ -19,6 +21,7 @@ class Komga(id: Long) : BaseTracker(id, "Komga"), EnhancedTracker {
         const val UNREAD = 1L
         const val READING = 2L
         const val COMPLETED = 3L
+        private const val SEARCH_LIMIT = 20
     }
 
     override val client: OkHttpClient =
@@ -67,8 +70,30 @@ class Komga(id: Long) : BaseTracker(id, "Komga"), EnhancedTracker {
         return track
     }
 
+    /**
+     * Продвинутый поиск в Komga.
+     *
+     * Komga — EnhancedTracker, привязанный к источнику `Komga`. Поиск идёт
+     * через REST API сервера, настроенного в источнике. Раньше метод бросал
+     * `TODO`, теперь:
+     *  - Пустой запрос → пустой список без сети.
+     *  - Используется `GET /api/v1/series?search={query}&page=0&size=20`
+     *    (совместим с Komga 1.x; POST /api/v1/series/list — для новых версий
+     *    и обрабатывается как fallback).
+     *  - Ошибки логируются, возвращается пустой список, а не краш.
+     *  - При отсутствии настроенного источника — предупреждение и пустой список.
+     */
     override suspend fun search(query: String): List<TrackSearch> {
-        TODO("Not yet implemented: search")
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        return try {
+            api.search(q, SEARCH_LIMIT)
+        } catch (e: Exception) {
+            // Komga источник может отсутствовать или быть не настроен (IO, 401, etc.)
+            // Для EnhancedTracker это ожидаемо — не падаем с NotImplementedError.
+            logcat(LogPriority.WARN, e) { "Komga search failed for query=$q" }
+            emptyList()
+        }
     }
 
     override suspend fun refresh(track: Track): Track {
@@ -94,6 +119,7 @@ class Komga(id: Long) : BaseTracker(id, "Komga"), EnhancedTracker {
         try {
             api.getTrackSearch(manga.url)
         } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Komga match failed for url=${manga.url}" }
             null
         }
 

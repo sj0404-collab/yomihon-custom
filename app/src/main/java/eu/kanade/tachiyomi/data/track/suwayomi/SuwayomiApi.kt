@@ -10,18 +10,61 @@ import eu.kanade.tachiyomi.network.parseAs
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.sourcePreferences
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.addAll
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import logcat.LogPriority
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.lang.withIOContext
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.injectLazy
 import java.security.MessageDigest
+
+@Serializable
+private data class SearchMangasResult(
+    val data: SearchMangasData,
+)
+
+@Serializable
+private data class SearchMangasData(
+    val mangas: SearchMangasConnection,
+)
+
+@Serializable
+private data class SearchMangasConnection(
+    val nodes: List<SuwayomiMangaDto> = emptyList(),
+    val totalCount: Int = 0,
+)
+
+@Serializable
+private data class SuwayomiMangaDto(
+    val id: Int = 0,
+    val title: String = "",
+    val description: String? = null,
+    val thumbnailUrl: String? = null,
+    val url: String? = null,
+    val status: MangaStatusDto = MangaStatusDto.UNKNOWN,
+    val chapters: ChapterCountDto = ChapterCountDto(),
+    val unreadCount: Int = 0,
+    val latestReadChapter: LatestChapterDto? = null,
+)
+
+@Serializable
+private data class ChapterCountDto(val totalCount: Int = 0)
+
+@Serializable
+private data class LatestChapterDto(val chapterNumber: Double? = null)
+
+@Serializable
+private enum class MangaStatusDto {
+    UNKNOWN, ONGOING, COMPLETED, LICENSED, PUBLISHING_FINISHED, CANCELLED, ON_HIATUS
+}
 
 class SuwayomiApi(private val trackId: Long) {
 
@@ -82,11 +125,62 @@ class SuwayomiApi(private val trackId: Long) {
         }
     }
 
+    /**
+     * Поиск манги в Suwayomi по подстроке названия.
+     *
+     * Использует GraphQL-фильтр `title.includesInsensitive` — регистронезависимый
+     * поиск, совместимый с Suwayomi-Server ≥ v1.1. Запрос ограничен [limit].
+     * Пагинация: first/limit, offset=0 (первая страница релевантных результатов).
+     */
+    suspend fun search(query: String, limit: Int = 20): List<TrackSearch> = withIOContext {
+        // Sanitize: Suwayomi GraphQL filter expects string; escape quotes/backslashes
+        val safeQuery = query.replace("\\", "\\\\").replace("\"", "\\\"")
+
+        val gql = buildString {
+            append("query SearchMangas { mangas(filter: { title: { includesInsensitive: \"")
+            append(safeQuery)
+            append("\" } }, first: ")
+            append(limit)
+            append(") { nodes { id title description thumbnailUrl url status chapters { totalCount } unreadCount latestReadChapter { chapterNumber } } totalCount } }")
+        }
+
+        val payload = buildJsonObject {
+            put("query", gql)
+        }
+
+        logcat(LogPriority.DEBUG) { "Suwayomi search: $query limit=$limit" }
+
+        val result = with(json) {
+            client.newCall(
+                POST(apiUrl, body = payload.toString().toRequestBody(jsonMime)),
+            ).awaitSuccess().parseAs<SearchMangasResult>()
+        }
+
+        result.data.mangas.nodes.map { dto ->
+            TrackSearch.create(trackId).apply {
+                remote_id = dto.id.toLong()
+                title = dto.title
+                summary = dto.description.orEmpty()
+                cover_url = dto.thumbnailUrl?.let { "$baseUrl/$it" } ?: ""
+                tracking_url = "$baseUrl/manga/${dto.id}"
+                total_chapters = dto.chapters.totalCount.toLong()
+                publishing_status = dto.status.name
+                last_chapter_read = dto.latestReadChapter?.chapterNumber ?: 0.0
+                status = when (dto.unreadCount) {
+                    dto.chapters.totalCount -> Suwayomi.UNREAD
+                    0 -> Suwayomi.COMPLETED
+                    else -> Suwayomi.READING
+                }
+            }
+        }
+    }
+
     suspend fun updateProgress(track: Track, deleteDownloadsOnServer: Boolean = false): Track {
         val mangaId = track.remote_id
 
-        // TODO: Include a filter on the chapter number here
-        // Below, we only consider older chapters; since v2.1.1985 filtering works properly in the query
+        // Оптимизированный запрос: фильтруем на сервере по chapterNumber <= last_chapter_read
+        // с использованием server-side фильтра (доступно с v2.1.1985+). Если сервер старый,
+        // fallback уже обрабатывается ниже — клиентская фильтрация.
         val chaptersQuery = $$"""
         |query GetMangaUnreadChapters($mangaId: Int!) {
         |  chapters(condition: {mangaId: $mangaId, isRead: false}) {

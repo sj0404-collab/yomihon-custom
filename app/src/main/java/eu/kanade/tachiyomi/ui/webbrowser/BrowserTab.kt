@@ -86,6 +86,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,6 +94,7 @@ import eu.kanade.tachiyomi.util.ocr.toOcrImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import mihon.data.ocr.OcrNotificationManager
 import kotlin.math.roundToInt
 
 /**
@@ -285,6 +287,8 @@ data object BrowserTab : Tab {
         var ocrJob by remember { mutableStateOf<Job?>(null) }
         var immersive by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
+        var saving by remember { mutableStateOf(false) }
+        var saveMsg by remember { mutableStateOf<String?>(null) }
 
         fun manualScan() {
             ocrJob?.cancel()
@@ -298,8 +302,7 @@ data object BrowserTab : Tab {
                     } else {
                         val zone = detectBookZone()
                         val cropped = cropToZone(raw, zone)
-                        // Мелкий кроп апскейлим: декоративные шрифты сайтов
-                        // на мелком масштабе ломают распознавание.
+                        val prefsN = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
                         val bmp = if (cropped.width < 1200) {
                             val k = minOf(3f, 1200f / cropped.width)
                             android.graphics.Bitmap.createScaledBitmap(
@@ -317,6 +320,13 @@ data object BrowserTab : Tab {
                         if (bmp !== raw) bmp.recycle()
                         raw.recycle()
                         ocrText = text
+                        // Продвинуто: шторка уведомлений + стриминг (если включено)
+                        if (prefsN.ocrToNotification().get() && text.isNotBlank()) {
+                            OcrNotificationManager.show(ctx.applicationContext, text)
+                        }
+                        if (prefsN.ocrStreamingHighlight().get() && text.isNotBlank()) {
+                            mihon.data.ocr.OcrHistoryStore.addStreamingScan(text.take(120), page = urlBar.take(40))
+                        }
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
@@ -324,6 +334,33 @@ data object BrowserTab : Tab {
                     ocrText = ""
                 } finally {
                     ocrBusy = false
+                }
+            }
+        }
+
+        fun saveAsLocal() {
+            if (saving) return
+            val wv = sharedWebView ?: return
+            scope.launch {
+                saving = true
+                saveMsg = null
+                try {
+                    val url = urlBar
+                    val result = WebLocalSaver.saveAsLocalChapter(
+                        context = ctx.applicationContext,
+                        webView = wv,
+                        url = url,
+                        title = wv.title,
+                    ) { /* progress */ }
+                    saveMsg = if (result != null) "Сохранено: ${result.name} (папка сайта: ${result.parentFile?.parentFile?.name})" else "Не удалось сохранить"
+                    ctx.toast(saveMsg ?: "")
+                } catch (e: Exception) {
+                    saveMsg = "Ошибка: ${e.message}"
+                    ctx.toast(saveMsg ?: "")
+                } finally {
+                    saving = false
+                    kotlinx.coroutines.delay(3000)
+                    saveMsg = null
                 }
             }
         }
@@ -519,40 +556,12 @@ data object BrowserTab : Tab {
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
-                            if (!hiddenM.contains("b_autoscroll")) {
-
+                            // Продвинутый компакт: оставлены только 4 ключевые кнопки.
+                            // Остальные (язык, перевод, скорость) вынесены в настройки,
+                            // чтобы не загромождать FAB-меню. Конструктор всё ещё может скрыть любую.
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    if (isAuto) "Стоп прокрутки  " else "Автопрокрутка  ",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                                SmallFloatingActionButton(onClick = { isAuto = !isAuto }) {
-                                    Icon(
-                                        if (isAuto) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                        contentDescription = "Автопрокрутка",
-                                        tint = if (isAuto) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    )
-                                }
-                            }
-
-                            }
-                            if (isAuto) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Outlined.Speed, contentDescription = null)
-                                    Slider(
-                                        value = speed,
-                                        onValueChange = { speed = it },
-                                        valueRange = 1f..10f,
-                                        modifier = Modifier.width(140.dp),
-                                    )
-                                    Text("×${speed.roundToInt()}")
-                                }
-                            }
-                            if (!hiddenM.contains("b_autoread")) {
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    if (isAutoRead) "Стоп авточтения  " else "Авточтение страницы  ",
+                                    if (isAutoRead) "Стоп авточтения  " else "Авточтение  ",
                                     style = MaterialTheme.typography.labelMedium,
                                 )
                                 SmallFloatingActionButton(onClick = {
@@ -560,7 +569,7 @@ data object BrowserTab : Tab {
                                         isAutoRead = false
                                         readEngine.stop()
                                     } else {
-                                        isAuto = false // выключаем простой автоскролл
+                                        isAuto = false
                                         isAutoRead = true
                                         menuOpen = false
                                     }
@@ -572,68 +581,8 @@ data object BrowserTab : Tab {
                                     )
                                 }
                             }
-
-                            }
-                            run {
-                                val prefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
-                                var lang by remember { mutableStateOf(prefs.autoReadLanguage().get()) }
-                                var translate by remember { mutableStateOf(prefs.autoReadTranslate().get()) }
-                                if (!hiddenM.contains("b_lang")) {
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val langLabel = when (lang) {
-                                        "ru" -> "🇷🇺 Русский"; "en" -> "🇬🇧 English"; "ja" -> "🇯🇵 日本語"
-                                        "ko" -> "🇰🇷 한국어"; "zh" -> "🇨🇳 中文"; else -> "🌐 Любой"
-                                    }
-                                    Text("Читать: $langLabel  ", style = MaterialTheme.typography.labelMedium)
-                                    SmallFloatingActionButton(onClick = {
-                                        val next = when (lang) {
-                                            "ru" -> "en"; "en" -> "ja"; "ja" -> "ko"; "ko" -> "zh"; "zh" -> "any"; else -> "ru"
-                                        }
-                                        lang = next
-                                        prefs.autoReadLanguage().set(next)
-                                    }) { Icon(Icons.Outlined.Language, contentDescription = "Язык чтения") }
-                                }
-
-                                }
-                                if (!hiddenM.contains("b_translate")) {
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        if (translate) "Перевод: вкл  " else "Перевод: выкл  ",
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
-                                    SmallFloatingActionButton(onClick = {
-                                        translate = !translate
-                                        prefs.autoReadTranslate().set(translate)
-                                    }) {
-                                        Icon(
-                                            Icons.Outlined.Translate,
-                                            contentDescription = "Переводить",
-                                            tint = if (translate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                        )
-                                    }
-                                }
-
-                                }
-                            }
-                            if (!hiddenM.contains("b_top")) {
-
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Наверх  ", style = MaterialTheme.typography.labelMedium)
-                                SmallFloatingActionButton(onClick = {
-                                    sharedWebView?.scrollTo(0, 0)
-                                    menuOpen = false
-                                }) {
-                                    Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = "Наверх")
-                                }
-                            }
-
-                            }
-                            if (!hiddenM.contains("b_scan")) {
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Скан текста (OCR)  ", style = MaterialTheme.typography.labelMedium)
+                                Text("Скан OCR  ", style = MaterialTheme.typography.labelMedium)
                                 SmallFloatingActionButton(onClick = {
                                     menuOpen = false
                                     manualScan()
@@ -641,26 +590,21 @@ data object BrowserTab : Tab {
                                     Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
                                 }
                             }
-
-                            }
-                            if (!hiddenM.contains("b_full")) {
-
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    if (immersive) "Обычный экран  " else "Полный экран  ",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                                SmallFloatingActionButton(onClick = {
-                                    immersive = !immersive
-                                    menuOpen = false
-                                }) {
-                                    Icon(
-                                        if (immersive) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
-                                        contentDescription = "Экран",
-                                    )
+                                Text(if (saving) "Сохранение…  " else "Сохранить как главу  ", style = MaterialTheme.typography.labelMedium)
+                                SmallFloatingActionButton(onClick = { saveAsLocal() }) {
+                                    if (saving) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp))
+                                    else Icon(Icons.Outlined.Download, contentDescription = "Сохранить")
                                 }
                             }
-
+                            if (saveMsg != null) {
+                                Text(saveMsg ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (immersive) "Обычный экран  " else "Полный экран  ", style = MaterialTheme.typography.labelMedium)
+                                SmallFloatingActionButton(onClick = { immersive = !immersive; menuOpen = false }) {
+                                    Icon(if (immersive) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen, contentDescription = "Экран")
+                                }
                             }
                         }
                     }
