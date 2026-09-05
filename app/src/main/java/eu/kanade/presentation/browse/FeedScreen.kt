@@ -37,7 +37,7 @@ import uy.kohesive.injekt.api.get
  * списком секций. Нажатие на мангу открывает поиск по её названию в этом
  * источнике, нажатие на заголовок — каталог источника.
  */
-class FeedScreen : Screen() {
+class FeedScreen : Screen {
 
     @Composable
     override fun Content() {
