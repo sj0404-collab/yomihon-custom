@@ -126,7 +126,7 @@ private fun OcrPlainTextCard(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 androidx.compose.foundation.layout.Spacer(
-                    modifier = androidx.compose.foundation.layout.height(12.dp),
+                    modifier = Modifier.height(12.dp),
                 )
                 androidx.compose.foundation.layout.Row(
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,

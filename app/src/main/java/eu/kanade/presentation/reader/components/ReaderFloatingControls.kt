@@ -337,4 +337,3 @@ fun ReaderFloatingControls(
             }
         }
     }
-}
