@@ -32,6 +32,12 @@ class OcrPreferences(
     /** Память авто-пресета: «mangaId:presetId,…» (последние 60). */
     fun mangaPresetMap() = preferenceStore.getString("pref_manga_preset_map", "")
 
+    /** Пресет голоса: пол (auto/male/female/neutral). */
+    fun voicePresetGender() = preferenceStore.getString("pref_voice_preset_gender", "auto")
+
+    /** Пресет голоса: возраст (infant/child/teen/adult/elderly). */
+    fun voicePresetAge() = preferenceStore.getString("pref_voice_preset_age", "adult")
+
     // Область, которую пресет применяет по умолчанию. Хранится отдельно от
     // scanRegion(): пользователь может переопределить область, не теряя пресет.
     fun presetScanRegion() = preferenceStore.getString("pref_ocr_preset_region", "full")

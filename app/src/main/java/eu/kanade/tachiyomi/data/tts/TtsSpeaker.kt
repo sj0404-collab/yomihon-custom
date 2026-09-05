@@ -266,7 +266,10 @@ object TtsSpeaker {
                 return@ensureSystem
             }
             val p = prefs()
-            engine.setSpeechRate(p.speechRate().get().coerceIn(0.5f, 2f))
+            // Пресет голоса пол/возраст: модификаторы питча и темпа.
+            val presetAge = VoicePreset.Age.fromId(p.voicePresetAge().get())
+            val presetGender = VoicePreset.Gender3.fromId(p.voicePresetGender().get())
+            engine.setSpeechRate((p.speechRate().get() * presetAge.rate).coerceIn(0.5f, 2f))
             engine.setPitch(p.speechPitch().get().coerceIn(0.5f, 2f))
             // Пол говорящего (логика из overlay-translator):
             // 1) явный пресет пользователя для пола; 2) VoiceHelper.pick —
@@ -282,7 +285,11 @@ object TtsSpeaker {
             val kind = when (gender) {
                 "male" -> VoiceKind.MALE
                 "female" -> VoiceKind.FEMALE
-                else -> null
+                else -> when (presetGender) {
+                    VoicePreset.Gender3.MALE -> VoiceKind.MALE
+                    VoicePreset.Gender3.FEMALE -> VoiceKind.FEMALE
+                    else -> null
+                }
             }
             // Разные персонажи одного пола получают разные голоса: слот > 0
             // сдвигает выбор внутри группы. Явный пресет пользователя всегда
@@ -385,7 +392,7 @@ object TtsSpeaker {
                 override fun onError(utteranceId: String?) = setSpeaking(false)
                 override fun onError(utteranceId: String?, errorCode: Int) = setSpeaking(false)
             })
-            val baseRate = p.speechRate().get().coerceIn(0.5f, 2f)
+            val baseRate = (p.speechRate().get() * presetAge.rate).coerceIn(0.5f, 2f)
             // Тон по полу: если для пола не нашлось ОТДЕЛЬНОГО голоса,
             // различаем персонажей питчем — мужчины ниже, женщины выше.
             // С отдельными голосами модификатор не нужен (=1.0).
@@ -400,7 +407,8 @@ object TtsSpeaker {
                 gender == "female" -> 1.18f
                 else -> 1.0f
             }
-            val basePitch = (p.speechPitch().get() * genderPitchMod).coerceIn(0.5f, 2f)
+            val basePitch = (p.speechPitch().get() * genderPitchMod *
+                presetGender.pitch * presetAge.pitch).coerceIn(0.5f, 2f)
             var queued = false
             sentences.forEachIndexed { i, sentence ->
                 val trimmed = sentence.trim()
