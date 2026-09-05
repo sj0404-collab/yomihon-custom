@@ -419,107 +419,7 @@ data object BrowserTab : Tab {
         LaunchedEffect(immersive) {
             val act = ctx as? android.app.Activity ?: return@LaunchedEffect
             val controller = androidx.core.view.WindowCompat.getInsetsController(act.window, act.window.decorView)
-            if (moreOpen) {
-            AlertDialog(
-                onDismissRequest = { moreOpen = false },
-                confirmButton = { TextButton(onClick = { moreOpen = false }) { Text("Закрыть") } },
-                title = { Text("Мини-браузер") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        TextButton(onClick = { moreOpen = false; tabsOpen = true }) { Text("Вкладки (${webTabs.size})") }
-                        TextButton(onClick = { moreOpen = false; marksOpen = true }) { Text("Закладки (${webMarks.size})") }
-                        TextButton(onClick = { moreOpen = false; libOpen = true }) { Text("Библиотека веб-страниц (${webPages.size})") }
-                        TextButton(onClick = { moreOpen = false; histOpen = true }) { Text("История просмотра") }
-                        TextButton(onClick = { moreOpen = false; cacheOpen = true }) { Text("Кэш и данные") }
-                        TextButton(onClick = { moreOpen = false; saveHtmlPage() }) { Text("Сохранить страницу (HTML)") }
-                        if (!hiddenM.contains("b_urlscan")) {
-                            TextButton(onClick = { moreOpen = false; manualScan() }) { Text("Скан текста (OCR)") }
-                        }
-                        if (!hiddenM.contains("b_urlfull")) {
-                            TextButton(onClick = { moreOpen = false; immersive = true }) { Text("Полный экран") }
-                        }
-                    }
-                },
-            )
-        }
-        if (libOpen) {
-            WebListDialog(
-                title = "Веб-библиотека (по источнику и id)",
-                rows = webPages.sortedByDescending { it.savedAt }.map { Triple(it.id, it.host + " · " + it.title, it.url) },
-                onPick = { id ->
-                    webPages.firstOrNull { it.id == id }?.let { p ->
-                        sharedWebView?.loadUrl("file://" + p.file)
-                        libOpen = false
-                    }
-                },
-                onDelete = { id -> webPages.firstOrNull { it.id == id }?.let { WebStore.deletePage(ctx, it) } },
-                onDismiss = { libOpen = false },
-            )
-        }
-        if (marksOpen) {
-            WebListDialog(
-                title = "Закладки",
-                rows = webMarks.map { Triple(it.id, it.title, it.url) },
-                onPick = { id ->
-                    webMarks.firstOrNull { it.id == id }?.let { m ->
-                        sharedWebView?.loadUrl(m.url)
-                        marksOpen = false
-                    }
-                },
-                onDelete = { id -> webMarks.firstOrNull { it.id == id }?.let { WebStore.deleteMark(ctx, it) } },
-                onDismiss = { marksOpen = false },
-            )
-        }
-        if (histOpen) {
-            WebListDialog(
-                title = "История просмотра",
-                rows = webHist.map {
-                    Triple(
-                        it.url,
-                        it.title,
-                        java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it.at)),
-                    )
-                },
-                onPick = { u -> sharedWebView?.loadUrl(u); histOpen = false },
-                onDismiss = { histOpen = false },
-            )
-        }
-        if (tabsOpen) {
-            WebListDialog(
-                title = "Вкладки",
-                rows = webTabs.map { Triple(it.id, it.title, it.url) },
-                onPick = { id ->
-                    webTabs.firstOrNull { it.id == id }?.let { t ->
-                        sharedWebView?.loadUrl(t.url)
-                        tabsOpen = false
-                    }
-                },
-                onDelete = { id -> WebStore.closeTab(ctx, id) },
-                onDismiss = { tabsOpen = false },
-            )
-        }
-        if (cacheOpen) {
-            AlertDialog(
-                onDismissRequest = { cacheOpen = false },
-                confirmButton = {
-                    TextButton(onClick = {
-                        runCatching { sharedWebView?.clearCache(true) }
-                        WebStore.clearCache(ctx)
-                        cacheOpen = false
-                    }) { Text("Очистить кэш") }
-                },
-                dismissButton = { TextButton(onClick = { cacheOpen = false }) { Text("Закрыть") } },
-                title = { Text("Кэш и данные") },
-                text = {
-                    Text(
-                        "Кэш WebView/приложения: " +
-                            String.format(java.util.Locale.getDefault(), "%.1f МБ", WebStore.cacheSizeBytes(ctx) / 1048576.0) +
-                            "\nОчистка не трогает веб-библиотеку и закладки.",
-                    )
-                },
-            )
-        }
-        if (immersive) {
+            if (immersive) {
                 controller.systemBarsBehavior =
                     androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
@@ -801,6 +701,106 @@ data object BrowserTab : Tab {
             }
         }
 
+        if (moreOpen) {
+            AlertDialog(
+                onDismissRequest = { moreOpen = false },
+                confirmButton = { TextButton(onClick = { moreOpen = false }) { Text("Закрыть") } },
+                title = { Text("Мини-браузер") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(onClick = { moreOpen = false; tabsOpen = true }) { Text("Вкладки (${webTabs.size})") }
+                        TextButton(onClick = { moreOpen = false; marksOpen = true }) { Text("Закладки (${webMarks.size})") }
+                        TextButton(onClick = { moreOpen = false; libOpen = true }) { Text("Библиотека веб-страниц (${webPages.size})") }
+                        TextButton(onClick = { moreOpen = false; histOpen = true }) { Text("История просмотра") }
+                        TextButton(onClick = { moreOpen = false; cacheOpen = true }) { Text("Кэш и данные") }
+                        TextButton(onClick = { moreOpen = false; saveHtmlPage() }) { Text("Сохранить страницу (HTML)") }
+                        if (!hiddenM.contains("b_urlscan")) {
+                            TextButton(onClick = { moreOpen = false; manualScan() }) { Text("Скан текста (OCR)") }
+                        }
+                        if (!hiddenM.contains("b_urlfull")) {
+                            TextButton(onClick = { moreOpen = false; immersive = true }) { Text("Полный экран") }
+                        }
+                    }
+                },
+            )
+        }
+        if (libOpen) {
+            WebListDialog(
+                title = "Веб-библиотека (по источнику и id)",
+                rows = webPages.sortedByDescending { it.savedAt }.map { Triple(it.id, it.host + " · " + it.title, it.url) },
+                onPick = { id ->
+                    webPages.firstOrNull { it.id == id }?.let { p ->
+                        sharedWebView?.loadUrl("file://" + p.file)
+                        libOpen = false
+                    }
+                },
+                onDelete = { id -> webPages.firstOrNull { it.id == id }?.let { WebStore.deletePage(ctx, it) } },
+                onDismiss = { libOpen = false },
+            )
+        }
+        if (marksOpen) {
+            WebListDialog(
+                title = "Закладки",
+                rows = webMarks.map { Triple(it.id, it.title, it.url) },
+                onPick = { id ->
+                    webMarks.firstOrNull { it.id == id }?.let { m ->
+                        sharedWebView?.loadUrl(m.url)
+                        marksOpen = false
+                    }
+                },
+                onDelete = { id -> webMarks.firstOrNull { it.id == id }?.let { WebStore.deleteMark(ctx, it) } },
+                onDismiss = { marksOpen = false },
+            )
+        }
+        if (histOpen) {
+            WebListDialog(
+                title = "История просмотра",
+                rows = webHist.map {
+                    Triple(
+                        it.url,
+                        it.title,
+                        java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it.at)),
+                    )
+                },
+                onPick = { u -> sharedWebView?.loadUrl(u); histOpen = false },
+                onDismiss = { histOpen = false },
+            )
+        }
+        if (tabsOpen) {
+            WebListDialog(
+                title = "Вкладки",
+                rows = webTabs.map { Triple(it.id, it.title, it.url) },
+                onPick = { id ->
+                    webTabs.firstOrNull { it.id == id }?.let { t ->
+                        sharedWebView?.loadUrl(t.url)
+                        tabsOpen = false
+                    }
+                },
+                onDelete = { id -> WebStore.closeTab(ctx, id) },
+                onDismiss = { tabsOpen = false },
+            )
+        }
+        if (cacheOpen) {
+            AlertDialog(
+                onDismissRequest = { cacheOpen = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        runCatching { sharedWebView?.clearCache(true) }
+                        WebStore.clearCache(ctx)
+                        cacheOpen = false
+                    }) { Text("Очистить кэш") }
+                },
+                dismissButton = { TextButton(onClick = { cacheOpen = false }) { Text("Закрыть") } },
+                title = { Text("Кэш и данные") },
+                text = {
+                    Text(
+                        "Кэш WebView/приложения: " +
+                            String.format(java.util.Locale.getDefault(), "%.1f МБ", WebStore.cacheSizeBytes(ctx) / 1048576.0) +
+                            "\nОчистка не трогает веб-библиотеку и закладки.",
+                    )
+                },
+            )
+        }
         if (immersive) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
                 Column(

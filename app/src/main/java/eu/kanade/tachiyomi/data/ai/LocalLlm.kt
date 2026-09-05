@@ -327,7 +327,7 @@ object LocalLlm {
             return@withContext false to "Мало ОЗУ: у устройства $ramGb ГБ, модели нужно ${m.tier.label}"
         }
         val started = System.currentTimeMillis()
-        val result = runCatching {
+        val result = runCatching<String> {
             error("Локальный LLM-движок удалён из сборки для уменьшения размера APK")
         }
         val took = System.currentTimeMillis() - started
