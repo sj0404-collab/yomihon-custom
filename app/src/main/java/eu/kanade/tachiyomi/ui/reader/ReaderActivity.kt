@@ -867,7 +867,7 @@ class ReaderActivity : BaseActivity() {
                 }
 
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
-                    visible = state.menuVisible,
+                    visible = state.menuVisible && state.dialog == null,
                     manualVoiceMode = manualVoiceMode,
                     manualVoiceGender = manualVoiceGender,
                     onVoiceModeChange = { manual ->
