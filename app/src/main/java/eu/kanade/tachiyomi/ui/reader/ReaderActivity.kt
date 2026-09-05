@@ -337,6 +337,10 @@ class ReaderActivity : BaseActivity() {
             }
         }
 
+        // Прогрев OCR: инициализация модели не должна попадать в тайминг
+        // первого ручного сканирования.
+        viewModel.warmupOcr()
+
         config = ReaderConfig()
         setMenuVisibility(viewModel.state.value.menuVisible)
 

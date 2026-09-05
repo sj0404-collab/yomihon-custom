@@ -1064,4 +1064,8 @@
     <string name="pref_reader_actions_hint">Свои действия создаёт AI-чат (ui_action_create) или файлы в workspace/ui. Нажмите, чтобы применить.</string>
     <string name="pref_reader_actions_empty">Действий пока нет</string>
     <string name="pref_reader_actions_builtin">встроенное</string>
+    <string name="no_dictionaries">Словари не установлены</string>
+    <string name="no_dictionaries_enabled">Словари не включены</string>
+    <string name="ocr_select_region">Выделите область текста перетаскиванием</string>
+    <string name="ocr_processing">Распознавание…</string>
 </resources>
