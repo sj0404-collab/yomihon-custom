@@ -157,7 +157,7 @@ fun ReaderFloatingControls(
                     .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
                     // Держим кнопку НАД нижней панелью читалки, чтобы не
                     // перекрывать шестерёнку настроек и прочие кнопки меню.
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -327,27 +327,29 @@ fun ReaderFloatingControls(
                     }
                 }
 
-                // Главная кнопка: тап — меню, перетаскивание — перемещение
-                FloatingActionButton(
-                    onClick = {
-                        beepOpen()
-                        menuOpen = !menuOpen
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
+                // Главная кнопка: тап — меню; перетаскивание — отдельная
+                // обёртка Box поверх FAB, чтобы клик и drag не конфликтовали.
+                Box(
                     modifier = Modifier.pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = { },
-                        ) { change, dragAmount ->
+                        detectDragGestures { change, dragAmount ->
                             change.consume()
                             offsetX = (offsetX + dragAmount.x).coerceIn(-4000f, 0f)
                             offsetY = (offsetY + dragAmount.y).coerceIn(-4000f, 400f)
                         }
                     },
                 ) {
-                    Icon(
-                        if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
-                        contentDescription = "Меню читалки",
-                    )
+                    FloatingActionButton(
+                        onClick = {
+                            beepOpen()
+                            menuOpen = !menuOpen
+                        },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ) {
+                        Icon(
+                            if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
+                            contentDescription = "Меню читалки",
+                        )
+                    }
                 }
             }
         }

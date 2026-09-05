@@ -425,6 +425,14 @@ data object BrowserTab : Tab {
                         }
                     },
                 )
+            if (!immersive) {
+                IconButton(onClick = { manualScan() }) {
+                    Icon(Icons.Outlined.DocumentScanner, contentDescription = "Скан текста (OCR)")
+                }
+                IconButton(onClick = { immersive = true }) {
+                    Icon(Icons.Outlined.Fullscreen, contentDescription = "Полный экран")
+                }
+            }
             }
             if (!immersive && progress < 1f) {
                 LinearProgressIndicator(
@@ -620,6 +628,22 @@ data object BrowserTab : Tab {
                         if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
                         contentDescription = "Меню браузера",
                     )
+                }
+            }
+        }
+
+        if (immersive) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SmallFloatingActionButton(onClick = { manualScan() }) {
+                        Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
+                    }
+                    SmallFloatingActionButton(onClick = { immersive = false }) {
+                        Icon(Icons.Outlined.FullscreenExit, contentDescription = "Выход")
+                    }
                 }
             }
         }
