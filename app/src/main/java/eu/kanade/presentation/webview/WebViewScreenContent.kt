@@ -12,12 +12,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import eu.kanade.tachiyomi.util.ocr.toOcrImage
+import mihon.domain.ocr.interactor.OcrProcessor
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -134,8 +140,7 @@ fun WebViewScreenContent(
             view.draw(android.graphics.Canvas(bmp))
             val text = try {
                 kotlinx.coroutines.withTimeout(90_000) {
-                    uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.interactor.OcrProcessor>()
-                        .getText(eu.kanade.tachiyomi.util.ocr.toOcrImage(bmp))
+                    Injekt.get<OcrProcessor>().getText(bmp.toOcrImage())
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -158,7 +163,7 @@ fun WebViewScreenContent(
         )
         if (immersive) {
             controller.systemBarsBehavior =
-                androidx.core.view.WindowInsetsCompat.SystemBarsBehavior.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
         } else {
             controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
@@ -448,7 +453,8 @@ fun WebViewScreenContent(
         if (immersive) {
             Column(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .fillMaxSize()
+                    .wrapContentSize(Alignment.BottomEnd)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

@@ -884,7 +884,7 @@ class ReaderViewModel @JvmOverloads constructor(
             target.mkdirs()
             var count = 0
             fun copyDir(src: com.hippo.unifile.UniFile, dst: java.io.File) {
-                for (f in src.listFiles()) {
+                for (f in src.listFiles() ?: emptyArray()) {
                     val name = f.name ?: continue
                     if (f.isDirectory) {
                         val nd = java.io.File(dst, name)
