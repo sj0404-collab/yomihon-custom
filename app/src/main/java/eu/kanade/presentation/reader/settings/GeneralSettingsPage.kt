@@ -4,7 +4,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.horizontalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.util.system.hasDisplayCutout
@@ -175,7 +177,7 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
 
     // Паритет с основными настройками (запрос пользователя): распознавание
     // и пресеты голоса доступны прямо из читалки.
-    val ocrPrefs = remember { uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
+    val ocrPrefs = remember { Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }
     val voiceGender by ocrPrefs.voicePresetGender().collectAsState()
     val voiceAge by ocrPrefs.voicePresetAge().collectAsState()
     val ocrContent by ocrPrefs.contentType().collectAsState()
