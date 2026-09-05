@@ -143,7 +143,12 @@ fun AutoReadHighlight(
         // Санитария: вырожденный бокс (узкая полоса во всю высоту) — мусор
         // маппинга, а не реплика: схлопываем в точку, рисовать нечего.
         val mappedSafe = if ((mapped.right - mapped.left) < 0.12f || (mapped.bottom - mapped.top) > 0.92f) {
-            android.graphics.RectF(mapped.left, mapped.top, mapped.left, mapped.top)
+            mihon.domain.ocr.model.OcrBoundingBox(
+                left = mapped.left,
+                top = mapped.top,
+                right = mapped.left,
+                bottom = mapped.top,
+            )
         } else {
             mapped
         }
