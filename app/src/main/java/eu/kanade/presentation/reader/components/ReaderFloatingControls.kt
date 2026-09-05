@@ -359,14 +359,27 @@ fun ReaderFloatingControls(
                 val userActs = remember(ctorVersion) {
                     eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctorContext, mihon.data.ui.UiPlacement.FLOATING_MENU)
                 }
-                userActs.forEach { act ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
-                        SmallFloatingActionButton(onClick = {
-                            beepAction()
-                            ctorContext.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctorContext, act))
-                        }) {
-                            Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                AnimatedVisibility(visible = menuOpen) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.End,
+                        ) {
+                            userActs.forEach { act ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
+                                    SmallFloatingActionButton(onClick = {
+                                        ctorContext.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctorContext, act))
+                                    }) {
+                                        Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
