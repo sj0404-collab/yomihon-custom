@@ -1,11 +1,13 @@
 package eu.kanade.tachiyomi.data.track.kavita
 
 import eu.kanade.tachiyomi.data.database.models.Track
+import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.parseAs
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import okhttp3.Dns
@@ -17,6 +19,23 @@ import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.net.URLEncoder
+
+@Serializable
+private data class KavitaSearchResult(
+    val series: List<SeriesDto> = emptyList(),
+    val collections: List<CollectionDto> = emptyList(),
+    val readingLists: List<ReadingListDto> = emptyList(),
+    val persons: List<PersonDto> = emptyList(),
+    val genres: List<GenreDto> = emptyList(),
+    val tags: List<TagDto> = emptyList(),
+)
+
+@Serializable private data class CollectionDto(val id: Int = 0, val title: String = "")
+@Serializable private data class ReadingListDto(val id: Int = 0, val title: String = "")
+@Serializable private data class PersonDto(val id: Int = 0, val name: String = "")
+@Serializable private data class GenreDto(val id: Int = 0, val title: String = "")
+@Serializable private data class TagDto(val id: Int = 0, val title: String = "")
 
 class KavitaApi(private val client: OkHttpClient, interceptor: KavitaInterceptor) {
 
@@ -181,5 +200,41 @@ class KavitaApi(private val client: OkHttpClient, interceptor: KavitaInterceptor
         )
             .awaitSuccess()
         return getTrackSearch(track.tracking_url)
+    }
+
+    /**
+     * Поиск серий в конкретном инстансе Kavita.
+     *
+     * Эндпоинт: `GET /api/Search/search?queryString=...`
+     * Проверен на Kavita 0.8.x (goenvoy, kavitapy). Ответ содержит `series[]`.
+     * Пагинация не требуется для предпросмотра — берём первые [limit] результатов.
+     */
+    suspend fun search(
+        query: String,
+        auth: SourceAuth,
+        limit: Int = 20,
+    ): List<TrackSearch> = withIOContext {
+        val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
+        val apiUrl = auth.apiUrl.trimEnd('/')
+        val url = "$apiUrl/Search/search?queryString=$encoded"
+
+        logcat(LogPriority.DEBUG) { "Kavita search: $url" }
+
+        val result = with(json) {
+            authClient.newCall(GET(url)).awaitSuccess().parseAs<KavitaSearchResult>()
+        }
+
+        result.series.take(limit).map { dto ->
+            val apiBase = getApiFromUrl(apiUrl)
+            TrackSearch.create(TrackerManager.KAVITA).apply {
+                title = dto.name
+                summary = dto.localizedName ?: ""
+                cover_url = dto.thumbnail_url ?: "$apiBase/Series/series-detail?seriesId=${dto.id}"
+                tracking_url = "$apiBase/Series/series-detail?seriesId=${dto.id}"
+                // Kavita не отдаёт total_chapters в поиске — заполнится при refresh()
+                total_chapters = dto.pages.toLong()
+                publishing_status = if (dto.pagesRead == dto.pages) "completed" else "publishing"
+            }
+        }
     }
 }

@@ -9,6 +9,8 @@ import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.sourcePreferences
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
@@ -22,6 +24,7 @@ class Kavita(id: Long) : BaseTracker(id, "Kavita"), EnhancedTracker {
         const val UNREAD = 1L
         const val READING = 2L
         const val COMPLETED = 3L
+        private const val SEARCH_LIMIT = 20
     }
 
     var authentications: OAuth? = null
@@ -69,8 +72,58 @@ class Kavita(id: Long) : BaseTracker(id, "Kavita"), EnhancedTracker {
         return track
     }
 
+    /**
+     * Продвинутый поиск по всем настроенным инстансам Kavita.
+     *
+     * Раньше метод бросал `TODO`, из-за чего любой вызов из UI/тестов падал с
+     * NotImplementedError. Теперь:
+     *  - Если ни один источник Kavita не настроен — возвращается пустой список
+     *    с предупреждением в логе (корректное поведение для EnhancedTracker,
+     *    который привязан к источнику, а не к глобальному каталогу).
+     *  - Для каждого настроенного API (до 3 слотов `kavita_1..3`) выполняется
+     *    запрос `/api/Search/search?queryString=...` с ограничением [SEARCH_LIMIT].
+     *  - Ошибки одного инстанса не прерывают поиск по остальным (addSuppressed).
+     *  - Дубликаты по `tracking_url` удаляются, сохраняется порядок релевантности.
+     *  - Пустой запрос возвращает пустой список без сетевого вызова.
+     */
     override suspend fun search(query: String): List<TrackSearch> {
-        TODO("Not yet implemented: search")
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+
+        // Гарантируем, что OAuth загружен, но не падаем, если источников нет
+        if (authentications == null) {
+            runCatching { loadOAuth() }
+        }
+
+        val auths = authentications?.authentications?.filter {
+            it.apiUrl.isNotBlank() && it.jwtToken.isNotBlank()
+        }.orEmpty()
+
+        if (auths.isEmpty()) {
+            logcat(LogPriority.WARN) { "Kavita search: no configured instances, query=$q" }
+            return emptyList()
+        }
+
+        val allResults = mutableListOf<TrackSearch>()
+        var lastError: Throwable? = null
+
+        for (auth in auths) {
+            try {
+                val results = api.search(q, auth, SEARCH_LIMIT)
+                allResults += results
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "Kavita search failed for ${auth.apiUrl}, query=$q" }
+                if (lastError == null) lastError = e else lastError.addSuppressed(e)
+            }
+        }
+
+        if (allResults.isEmpty() && lastError != null) {
+            logcat(LogPriority.ERROR, lastError) { "Kavita search: all instances failed for query=$q" }
+        }
+
+        return allResults
+            .distinctBy { it.tracking_url }
+            .take(SEARCH_LIMIT)
     }
 
     override suspend fun refresh(track: Track): Track {
@@ -96,6 +149,7 @@ class Kavita(id: Long) : BaseTracker(id, "Kavita"), EnhancedTracker {
         try {
             api.getTrackSearch(manga.url)
         } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "Kavita match failed for url=${manga.url}" }
             null
         }
 
@@ -119,7 +173,12 @@ class Kavita(id: Long) : BaseTracker(id, "Kavita"), EnhancedTracker {
                 (0..7).map { bytes[it].toLong() and 0xff shl 8 * (7 - it) }
                     .reduce(Long::or) and Long.MAX_VALUE
             }
-            val preferences = (sourceManager.get(sourceId) as ConfigurableSource).sourcePreferences()
+            val preferences = try {
+                (sourceManager.get(sourceId) as? ConfigurableSource)?.sourcePreferences()
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "Kavita loadOAuth: source $sourceId not installed" }
+                null
+            } ?: continue
 
             val prefApiUrl = preferences.getString("APIURL", "")
             val prefApiKey = preferences.getString("APIKEY", "")
@@ -128,7 +187,12 @@ class Kavita(id: Long) : BaseTracker(id, "Kavita"), EnhancedTracker {
                 continue
             }
 
-            val token = api.getNewToken(apiUrl = prefApiUrl, apiKey = prefApiKey)
+            val token = try {
+                api.getNewToken(apiUrl = prefApiUrl, apiKey = prefApiKey)
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "Kavita loadOAuth: token fetch failed for $prefApiUrl" }
+                null
+            }
             if (token.isNullOrEmpty()) {
                 // Source is not accessible. Skip
                 continue

@@ -235,6 +235,54 @@ class OcrPreferences(
     // Какой голос использовать в ручном режиме: "female" | "male"
     fun manualVoiceGender() = preferenceStore.getString("pref_manual_voice_gender", "female")
 
+    // ---- Продвинутые настройки голоса (запрос: 1/2/3 голоса, муж/жен/нарратор) ----
+    /** Режим озвучки: single (один голос нарратора) | dual (муж+жен) | triple (муж+жен+нарратор) */
+    fun voiceMode() = preferenceStore.getString("pref_voice_mode", "dual")
+
+    /** Пол нарратора в режиме single/triple: male | female | auto */
+    fun narratorGender() = preferenceStore.getString("pref_voice_narrator_gender", "female")
+
+    /** Движок для мужского голоса: system_tts | google_web | remote_tts | eleven_api */
+    fun voiceMaleEngine() = preferenceStore.getString("pref_voice_male_engine", "system_tts")
+
+    /** Движок для женского голоса */
+    fun voiceFemaleEngine() = preferenceStore.getString("pref_voice_female_engine", "system_tts")
+
+    /** Движок для голоса нарратора */
+    fun voiceNarratorEngine() = preferenceStore.getString("pref_voice_narrator_engine", "system_tts")
+
+    // ---- Оверлей и уведомления ----
+    /** Компактный оверлей (уменьшенный) вместо полноэкранного затемнения */
+    fun ocrOverlayCompact() = preferenceStore.getBoolean("pref_ocr_overlay_compact", true)
+
+    /** Дублировать распознанный текст в шторку уведомлений */
+    fun ocrToNotification() = preferenceStore.getBoolean("pref_ocr_to_notification", false)
+
+    /** Стриминг подсветки: подсвечивать слово сразу по мере распознавания */
+    fun ocrStreamingHighlight() = preferenceStore.getBoolean("pref_ocr_streaming_highlight", true)
+
+    // ---- Формы области сканирования ----
+    /** Форма рамки сканирования: rect | circle | diamond | hexagon | octagon | figure8 | free */
+    fun scanShape() = preferenceStore.getString("pref_scan_shape", "rect")
+
+    // ---- Веб: сохранение как локальная глава ----
+    /** Сохранять веб-страницы как локальные главы с изоляцией по сайту */
+    fun webSavePerSiteFolder() = preferenceStore.getBoolean("pref_web_per_site_folder", true)
+
+    // ---- История сканирования (персистент) ----
+    /** Хранить историю сканирования между перезапусками */
+    fun persistOcrHistory() = preferenceStore.getBoolean("pref_persist_ocr_history", true)
+
+    // ---- AI-чат продвинутый ----
+    /** Лимит истории чата (сообщений) — чтобы не тратить 50к токенов */
+    fun aiHistoryLimit() = preferenceStore.getInt("pref_ai_history_limit", 12)
+
+    /** Лимит токенов на один ответ (reasoning + content) */
+    fun aiTokenBudget() = preferenceStore.getInt("pref_ai_token_budget", 4000)
+
+    /** Показывать что доступно/невозможно (availability report) */
+    fun aiShowAvailability() = preferenceStore.getBoolean("pref_ai_show_availability", true)
+
     // Local Model Management (модели НЕ входят в APK — по умолчанию не установлены,
     // из коробки работают только онлайн-движки)
     fun isMangaOcrDownloaded() = preferenceStore.getBoolean("pref_model_manga_ocr_downloaded", false)

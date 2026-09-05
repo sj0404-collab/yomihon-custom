@@ -214,20 +214,39 @@ object AiAgent {
         val results = mutableListOf<ToolResult>()
         val images = mutableListOf<File>()
 
-        val historyBlock = history.takeLast(8).joinToString("\n") { (role, c) ->
-            (if (role == "user") "Пользователь: " else "Ассистент: ") + c.take(300)
+        // Продвинутый лимит истории и токен-бюджет (запрос: не тратить 50к токенов)
+        // Продвинутый лимит истории и токен-бюджет (запрос: не тратить 50к токенов)
+        val prefs = runCatching { uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>() }.getOrNull()
+        val historyLimit = prefs?.aiHistoryLimit()?.get()?.coerceIn(4, 100) ?: 12
+        val tokenBudget = prefs?.aiTokenBudget()?.get()?.coerceIn(1000, 16000) ?: 4000
+        // Грубая оценка токенов: 3.5 символа ≈ 1 токен
+        fun est(s: String) = (s.length / 3.5).toInt()
+        var budgetedHistory = history
+        var total = history.sumOf { est(it.second) }
+        while (budgetedHistory.size > 4 && total > (tokenBudget * 0.7).toInt()) {
+            val removed = budgetedHistory.first()
+            total -= est(removed.second)
+            budgetedHistory = budgetedHistory.drop(1)
         }
+        val trimmedHistory = budgetedHistory
+        val historyBlock = trimmedHistory.takeLast(historyLimit).joinToString("\n") { (role, c) ->
+            (if (role == "user") "Пользователь: " else "Ассистент: ") + c.take(280)
+        }
+        val capabilityBlock = runCatching { AiCapabilityReporter.renderForPrompt(context) }.getOrNull().orEmpty()
         val prompt = buildString {
-            if (historyBlock.isNotBlank()) append("Контекст диалога:\n").append(historyBlock).append("\n\n")
+            if (historyBlock.isNotBlank()) append("Контекст диалога (последние $historyLimit, бюджет ${tokenBudget} токенов):\n").append(historyBlock).append("\n\n")
             if (!attachmentsInfo.isNullOrBlank()) append("Вложения пользователя:\n").append(attachmentsInfo).append("\n\n")
+            if (capabilityBlock.isNotBlank()) append(capabilityBlock).append("\n\n")
             append(userText)
+            append("\n\n[Инструкция: отвечай кратко на русском, одним языком, reasoning ≤250 токенов, укажи что доступно/недоступно из блока выше, не повторяй запрос; токен-бюджет хода ${tokenBudget}.]")
         }
+        val systemPromptEffective = SYSTEM_PROMPT + "\n\n" + capabilityBlock
 
         val turnStarted = System.currentTimeMillis()
         var totalTokens = 0
         var roundsDone = 0
 
-        var reply = reliableChat(chat, prompt, SYSTEM_PROMPT)
+        var reply = reliableChat(chat, prompt, systemPromptEffective)
             ?: return@withContext AgentReply(
                 buildString {
                     append("Нет ответа от AI-бэкенда после повторов и ротации.")
@@ -285,7 +304,7 @@ object AiAgent {
             val next = reliableChat(
                 chat,
                 prompt + "\n\n(вызовы выполнены приложением)\n" + followUp,
-                SYSTEM_PROMPT,
+                systemPromptEffective,
             )
             if (next != null) {
                 totalTokens += next.tokens
