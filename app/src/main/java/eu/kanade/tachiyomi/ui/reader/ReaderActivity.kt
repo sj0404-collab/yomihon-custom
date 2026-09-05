@@ -912,6 +912,9 @@ class ReaderActivity : BaseActivity() {
                     onExportChapter = { viewModel.exportChapterToOfflineFolder(this@ReaderActivity) },
                 )
 
+                val scanShapeId by uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
+                    .scanShape().collectAsState()
+
                 // OCR selection overlay
                 if (state.ocrSelectionMode) {
                     OcrSelectionOverlay(
@@ -924,6 +927,7 @@ class ReaderActivity : BaseActivity() {
                         },
                         startPoint = ocrDragStart,
                         endPoint = ocrDragEnd,
+                        shape = mihon.data.ocr.ScanShape.fromId(scanShapeId),
                     )
                 }
 
@@ -1508,7 +1512,13 @@ class ReaderActivity : BaseActivity() {
     ): Bitmap? {
         val captures = resolveSelectionCaptures(rect)
         val manga = viewModel.manga ?: throw IllegalStateException("Manga unavailable")
-        return selectionBitmapCropper.cropSelectionBitmap(manga, captures)
+        return selectionBitmapCropper.cropSelectionBitmap(
+            manga = manga,
+            captures = captures,
+            shape = mihon.data.ocr.ScanShape.fromId(
+                uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.service.OcrPreferences>().scanShape().get(),
+            ),
+        )
     }
 
     private suspend fun resolveSelectionCaptures(
