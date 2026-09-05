@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.Close
@@ -47,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import eu.kanade.tachiyomi.util.system.toast
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -82,6 +84,9 @@ fun ReaderFloatingControls(
     var manualVoice by remember(manualVoiceMode) { mutableStateOf(manualVoiceMode) }
     var voiceGender by remember(manualVoiceGender) { mutableStateOf(manualVoiceGender) }
     var menuOpen by remember { mutableStateOf(false) }
+    val ctorContext = androidx.compose.ui.platform.LocalContext.current
+    val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
+    val hiddenM = remember(ctorVersion) { eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(ctorContext) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -157,7 +162,7 @@ fun ReaderFloatingControls(
                     .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
                     // Держим кнопку НАД нижней панелью читалки, чтобы не
                     // перекрывать шестерёнку настроек и прочие кнопки меню.
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -177,6 +182,8 @@ fun ReaderFloatingControls(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
+                                if (!hiddenM.contains("r_scan")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("OCR скан  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -189,6 +196,10 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
                                     }
                                 }
+
+                                }
+                                if (!hiddenM.contains("r_autoscroll")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         if (isAutoscrollActive) "Стоп прокрутки  " else "Автопрокрутка  ",
@@ -210,6 +221,8 @@ fun ReaderFloatingControls(
                                         )
                                     }
                                 }
+
+                                }
                                 if (isAutoscrollActive) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Outlined.Speed, contentDescription = null)
@@ -225,6 +238,8 @@ fun ReaderFloatingControls(
                                         Text("×${autoscrollSpeed.roundToInt()}")
                                     }
                                 }
+                                if (!hiddenM.contains("r_autoread")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Прочитать страницу  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -235,6 +250,8 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.PlayArrow, contentDescription = "Прочитать страницу")
                                     }
                                 }
+
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Стоп чтения  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -244,6 +261,8 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.Pause, contentDescription = "Стоп чтения")
                                     }
                                 }
+                                if (!hiddenM.contains("r_export")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Сохранить главу в папку  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -253,6 +272,10 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.Download, contentDescription = "Оффлайн")
                                     }
                                 }
+
+                                }
+                                if (!hiddenM.contains("r_order")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val orderLabel = when (readingOrder) {
                                         "ltr" -> "→ Слева направо"
@@ -271,6 +294,8 @@ fun ReaderFloatingControls(
                                     }) {
                                         Icon(Icons.Outlined.DocumentScanner, contentDescription = "Порядок чтения")
                                     }
+                                }
+
                                 }
                                 // AI-чат убран из читалки: теперь он —
                                 // отдельная вкладка «AI» в нижней навигации.
@@ -312,6 +337,8 @@ fun ReaderFloatingControls(
                                     }
                                 }
 
+                                if (!hiddenM.contains("r_tts")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Озвучка (TTS)  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
@@ -322,32 +349,51 @@ fun ReaderFloatingControls(
                                         Icon(Icons.Outlined.RecordVoiceOver, contentDescription = "Озвучка")
                                     }
                                 }
+
+                                }
                             }
                         }
                     }
                 }
 
-                // Главная кнопка: тап — меню, перетаскивание — перемещение
-                FloatingActionButton(
-                    onClick = {
-                        beepOpen()
-                        menuOpen = !menuOpen
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
+                val userActs = remember(ctorVersion) {
+                    eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctorContext, mihon.data.ui.UiPlacement.FLOATING_MENU)
+                }
+                userActs.forEach { act ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
+                        SmallFloatingActionButton(onClick = {
+                            beepAction()
+                            ctorContext.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctorContext, act))
+                        }) {
+                            Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                        }
+                    }
+                }
+
+                // Главная кнопка: тап — меню; перетаскивание — отдельная
+                // обёртка Box поверх FAB, чтобы клик и drag не конфликтовали.
+                Box(
                     modifier = Modifier.pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = { },
-                        ) { change, dragAmount ->
+                        detectDragGestures { change, dragAmount ->
                             change.consume()
                             offsetX = (offsetX + dragAmount.x).coerceIn(-4000f, 0f)
                             offsetY = (offsetY + dragAmount.y).coerceIn(-4000f, 400f)
                         }
                     },
                 ) {
-                    Icon(
-                        if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
-                        contentDescription = "Меню читалки",
-                    )
+                    FloatingActionButton(
+                        onClick = {
+                            beepOpen()
+                            menuOpen = !menuOpen
+                        },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ) {
+                        Icon(
+                            if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
+                            contentDescription = "Меню читалки",
+                        )
+                    }
                 }
             }
         }

@@ -140,12 +140,24 @@ fun AutoReadHighlight(
         val ix = if (img != null) img.left * w else 0f
         val iy = if (img != null) img.top * h else 0f
         val mapped = engine?.mapToViewport(region.box) ?: region.box
-        val boxWidth = with(density) { ((mapped.right - mapped.left) * iw).toDp() }
-        val boxHeight = with(density) { ((mapped.bottom - mapped.top) * ih).toDp() }
+        // Санитария: вырожденный бокс (узкая полоса во всю высоту) — мусор
+        // маппинга, а не реплика: схлопываем в точку, рисовать нечего.
+        val mappedSafe = if ((mapped.right - mapped.left) < 0.12f || (mapped.bottom - mapped.top) > 0.92f) {
+            mihon.domain.ocr.model.OcrBoundingBox(
+                left = mapped.left,
+                top = mapped.top,
+                right = mapped.left,
+                bottom = mapped.top,
+            )
+        } else {
+            mapped
+        }
+        val boxWidth = with(density) { ((mappedSafe.right - mappedSafe.left) * iw).toDp() }
+        val boxHeight = with(density) { ((mappedSafe.bottom - mappedSafe.top) * ih).toDp() }
         val offsetModifier = Modifier.offset {
             IntOffset(
-                (ix + mapped.left * iw).roundToInt(),
-                (iy + mapped.top * ih).roundToInt(),
+                (ix + mappedSafe.left * iw).roundToInt(),
+                (iy + mappedSafe.top * ih).roundToInt(),
             )
         }
 
@@ -155,8 +167,8 @@ fun AutoReadHighlight(
             // высоту». Диаметр чуть больше реплики, чтобы накрыть текст.
             val sideDp = maxOf(boxWidth, boxHeight) * 1.6f
             val sidePx = with(density) { sideDp.toPx() }
-            val cx = ix + (mapped.left + mapped.right) / 2f * iw
-            val cy = iy + (mapped.top + mapped.bottom) / 2f * ih
+            val cx = ix + (mappedSafe.left + mappedSafe.right) / 2f * iw
+            val cy = iy + (mappedSafe.top + mappedSafe.bottom) / 2f * ih
             Box(
                 modifier = Modifier
                     .offset {
@@ -203,8 +215,8 @@ fun AutoReadHighlight(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (ix + mapped.left * iw).roundToInt(),
-                            (iy + mapped.bottom * ih).roundToInt(),
+                            (ix + mappedSafe.left * iw).roundToInt(),
+                            (iy + mappedSafe.bottom * ih).roundToInt(),
                         )
                     }
                     .width(boxWidth)

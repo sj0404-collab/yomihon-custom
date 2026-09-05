@@ -929,10 +929,12 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     private fun prepareCropForOcr(src: Bitmap): Bitmap {
         val minSide = 140
-        val scale = if (src.height < minSide || src.width < minSide) {
-            minOf(3f, minSide.toFloat() / minOf(src.height, src.width).coerceAtLeast(1))
-        } else {
-            1f
+        val targetWidth = 1200
+        val scale = when {
+            src.height < minSide || src.width < minSide ->
+                minOf(4f, minSide.toFloat() / minOf(src.height, src.width).coerceAtLeast(1))
+            src.width < targetWidth -> minOf(3f, targetWidth.toFloat() / src.width)
+            else -> 1f
         }
         val w = (src.width * scale).toInt().coerceAtLeast(1)
         val h = (src.height * scale).toInt().coerceAtLeast(1)

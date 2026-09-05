@@ -120,13 +120,29 @@ object HomeScreen : Screen() {
         val aiVisible by prefs.aiTabVisible().collectAsState()
         val context = LocalContext.current
         val version by UiTabRegistry.version.collectAsState()
+        val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
         var hidden by remember { mutableStateOf(emptySet<String>()) }
-        LaunchedEffect(version) {
-            hidden = withContext(Dispatchers.IO) { UiTabRegistry.hidden(context) }
+        var order by remember { mutableStateOf(emptyList<String>()) }
+        LaunchedEffect(version, ctorVersion) {
+            val (h, o) = withContext(Dispatchers.IO) {
+                UiTabRegistry.hidden(context) to eu.kanade.tachiyomi.data.ui.UiConstructorStore.tabOrder(context)
+            }
+            hidden = h
+            order = o
         }
         return TABS
             .filterNot { (tab, _) -> tab == UiTab.AI && !aiVisible }
             .filterNot { (tab, _) -> UiTabs.isHidden(tab.id, hidden) }
+            .let { list ->
+                if (order.isEmpty()) {
+                    list
+                } else {
+                    list.sortedBy { (tab, _) ->
+                        val i = order.indexOf(tab.id)
+                        if (i < 0) Int.MAX_VALUE else i
+                    }
+                }
+            }
             .map { (_, screen) -> screen }
     }
 

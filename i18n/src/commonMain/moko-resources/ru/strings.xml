@@ -1068,4 +1068,6 @@
     <string name="no_dictionaries_enabled">Словари не включены</string>
     <string name="ocr_select_region">Выделите область текста перетаскиванием</string>
     <string name="ocr_processing">Распознавание…</string>
+    <string name="constructor">Конструктор</string>
+    <string name="constructor_summary">Вкладки, модули панелей, свои кнопки: скрыть, переставить, создать</string>
 </resources>

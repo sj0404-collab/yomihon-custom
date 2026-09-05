@@ -77,6 +77,8 @@ import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.data.tts.AutoReadEngine
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import kotlinx.coroutines.delay
+import eu.kanade.tachiyomi.util.system.toast
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -258,6 +260,11 @@ data object BrowserTab : Tab {
         }
 
         var menuOpen by remember { mutableStateOf(false) }
+        val ctorContext = androidx.compose.ui.platform.LocalContext.current
+        val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
+        val hiddenM = remember(ctorVersion) {
+            eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(ctorContext)
+        }
         var isAuto by autoscrollActive
         var speed by autoscrollSpeed
         var fabX by remember { mutableFloatStateOf(0f) }
@@ -290,7 +297,20 @@ data object BrowserTab : Tab {
                         ocrText = ""
                     } else {
                         val zone = detectBookZone()
-                        val bmp = cropToZone(raw, zone)
+                        val cropped = cropToZone(raw, zone)
+                        // Мелкий кроп апскейлим: декоративные шрифты сайтов
+                        // на мелком масштабе ломают распознавание.
+                        val bmp = if (cropped.width < 1200) {
+                            val k = minOf(3f, 1200f / cropped.width)
+                            android.graphics.Bitmap.createScaledBitmap(
+                                cropped,
+                                (cropped.width * k).toInt(),
+                                (cropped.height * k).toInt(),
+                                true,
+                            ).also { if (it !== cropped) cropped.recycle() }
+                        } else {
+                            cropped
+                        }
                         val text = withTimeout(90_000) {
                             Injekt.get<mihon.domain.ocr.interactor.OcrProcessor>().getText(bmp.toOcrImage())
                         }
@@ -425,6 +445,18 @@ data object BrowserTab : Tab {
                         }
                     },
                 )
+            if (!immersive) {
+                if (!hiddenM.contains("b_urlscan")) {
+                IconButton(onClick = { manualScan() }) {
+                    Icon(Icons.Outlined.DocumentScanner, contentDescription = "Скан текста (OCR)")
+                }
+                }
+                if (!hiddenM.contains("b_urlfull")) {
+                IconButton(onClick = { immersive = true }) {
+                    Icon(Icons.Outlined.Fullscreen, contentDescription = "Полный экран")
+                }
+                }
+            }
             }
             if (!immersive && progress < 1f) {
                 LinearProgressIndicator(
@@ -487,6 +519,8 @@ data object BrowserTab : Tab {
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
+                            if (!hiddenM.contains("b_autoscroll")) {
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (isAuto) "Стоп прокрутки  " else "Автопрокрутка  ",
@@ -500,6 +534,8 @@ data object BrowserTab : Tab {
                                     )
                                 }
                             }
+
+                            }
                             if (isAuto) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Outlined.Speed, contentDescription = null)
@@ -512,6 +548,8 @@ data object BrowserTab : Tab {
                                     Text("×${speed.roundToInt()}")
                                 }
                             }
+                            if (!hiddenM.contains("b_autoread")) {
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (isAutoRead) "Стоп авточтения  " else "Авточтение страницы  ",
@@ -534,10 +572,14 @@ data object BrowserTab : Tab {
                                     )
                                 }
                             }
+
+                            }
                             run {
                                 val prefs = Injekt.get<mihon.domain.ocr.service.OcrPreferences>()
                                 var lang by remember { mutableStateOf(prefs.autoReadLanguage().get()) }
                                 var translate by remember { mutableStateOf(prefs.autoReadTranslate().get()) }
+                                if (!hiddenM.contains("b_lang")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val langLabel = when (lang) {
                                         "ru" -> "🇷🇺 Русский"; "en" -> "🇬🇧 English"; "ja" -> "🇯🇵 日本語"
@@ -552,6 +594,10 @@ data object BrowserTab : Tab {
                                         prefs.autoReadLanguage().set(next)
                                     }) { Icon(Icons.Outlined.Language, contentDescription = "Язык чтения") }
                                 }
+
+                                }
+                                if (!hiddenM.contains("b_translate")) {
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         if (translate) "Перевод: вкл  " else "Перевод: выкл  ",
@@ -568,7 +614,11 @@ data object BrowserTab : Tab {
                                         )
                                     }
                                 }
+
+                                }
                             }
+                            if (!hiddenM.contains("b_top")) {
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Наверх  ", style = MaterialTheme.typography.labelMedium)
                                 SmallFloatingActionButton(onClick = {
@@ -578,6 +628,10 @@ data object BrowserTab : Tab {
                                     Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = "Наверх")
                                 }
                             }
+
+                            }
+                            if (!hiddenM.contains("b_scan")) {
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Скан текста (OCR)  ", style = MaterialTheme.typography.labelMedium)
                                 SmallFloatingActionButton(onClick = {
@@ -587,6 +641,10 @@ data object BrowserTab : Tab {
                                     Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
                                 }
                             }
+
+                            }
+                            if (!hiddenM.contains("b_full")) {
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (immersive) "Обычный экран  " else "Полный экран  ",
@@ -602,9 +660,25 @@ data object BrowserTab : Tab {
                                     )
                                 }
                             }
+
+                            }
                         }
                     }
                 }
+                val userActs = remember(ctorVersion) {
+                    eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctx, mihon.data.ui.UiPlacement.FLOATING_MENU)
+                }
+                userActs.forEach { act ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
+                        SmallFloatingActionButton(onClick = {
+                            ctx.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctx, act))
+                        }) {
+                            Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                        }
+                    }
+                }
+
                 FloatingActionButton(
                     onClick = { menuOpen = !menuOpen },
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -620,6 +694,22 @@ data object BrowserTab : Tab {
                         if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
                         contentDescription = "Меню браузера",
                     )
+                }
+            }
+        }
+
+        if (immersive) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SmallFloatingActionButton(onClick = { manualScan() }) {
+                        Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
+                    }
+                    SmallFloatingActionButton(onClick = { immersive = false }) {
+                        Icon(Icons.Outlined.FullscreenExit, contentDescription = "Выход")
+                    }
                 }
             }
         }
