@@ -3,6 +3,12 @@ package eu.kanade.presentation.reader.components
 import android.media.AudioManager
 import android.media.ToneGenerator
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -86,6 +92,9 @@ fun ReaderFloatingControls(
     var menuOpen by remember { mutableStateOf(false) }
     val ctorContext = androidx.compose.ui.platform.LocalContext.current
     val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
+    val ctorUiPrefs = ctorContext.getSharedPreferences("yomikai_ctor_ui", android.content.Context.MODE_PRIVATE)
+    var ctorExpanded by remember { mutableStateOf(ctorUiPrefs.getBoolean("menu_ctor_expanded", true)) }
+    val userActs = remember(ctorVersion) { eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctorContext, mihon.data.ui.UiPlacement.FLOATING_MENU) }
     val hiddenM = remember(ctorVersion) { eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(ctorContext) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
@@ -178,7 +187,10 @@ fun ReaderFloatingControls(
                         ),
                     ) {
                         Column(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .heightIn(max = 480.dp)
+                                .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
@@ -351,34 +363,34 @@ fun ReaderFloatingControls(
                                 }
 
                                 }
-                            }
-                        }
-                    }
-                }
-
-                val userActs = remember(ctorVersion) {
-                    eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctorContext, mihon.data.ui.UiPlacement.FLOATING_MENU)
-                }
-                AnimatedVisibility(visible = menuOpen) {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
-                        ),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            horizontalAlignment = Alignment.End,
-                        ) {
-                            userActs.forEach { act ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
-                                    SmallFloatingActionButton(onClick = {
-                                        ctorContext.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctorContext, act))
-                                    }) {
-                                        Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                                if (userActs.isNotEmpty()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Кнопки конструктора  ", style = MaterialTheme.typography.labelMedium)
+                                        IconButton(onClick = {
+                                            ctorExpanded = !ctorExpanded
+                                            ctorUiPrefs.edit().putBoolean("menu_ctor_expanded", ctorExpanded).apply()
+                                        }) {
+                                            Icon(if (ctorExpanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, contentDescription = "Скрыть или показать кнопки конструктора")
+                                        }
+                                    }
+                                    if (ctorExpanded) {
+                                        userActs.forEach { act ->
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
+                                                SmallFloatingActionButton(onClick = {
+                                                    ctorContext.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctorContext, act))
+                                                }) {
+                                                    Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+                                Text(
+                                    "yomikai " + eu.kanade.tachiyomi.AppInfo.getVersionName(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                )
                             }
                         }
                     }

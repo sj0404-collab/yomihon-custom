@@ -140,21 +140,28 @@ private fun OcrPlainTextCard(
                 androidx.compose.foundation.layout.Spacer(
                     modifier = Modifier.height(12.dp),
                 )
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
-                ) {
-                    androidx.compose.material3.TextButton(onClick = onSpeak) {
-                        androidx.compose.material3.Text("Голос")
+                androidx.compose.foundation.layout.Column {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                    ) {
+                        androidx.compose.material3.TextButton(onClick = onSpeak) {
+                            androidx.compose.material3.Text("Голос")
+                        }
+                        androidx.compose.material3.TextButton(onClick = onChooseVoice) {
+                            androidx.compose.material3.Text("Выбрать голос")
+                        }
                     }
-                    androidx.compose.material3.TextButton(onClick = onChooseVoice) {
-                        androidx.compose.material3.Text("Выбрать голос")
-                    }
-                    androidx.compose.material3.TextButton(onClick = onCopyText) {
-                        androidx.compose.material3.Text("Копировать")
-                    }
-                    androidx.compose.material3.TextButton(onClick = onDismissRequest) {
-                        androidx.compose.material3.Text("Закрыть")
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                    ) {
+                        androidx.compose.material3.TextButton(onClick = onCopyText) {
+                            androidx.compose.material3.Text("Копировать")
+                        }
+                        androidx.compose.material3.TextButton(onClick = onDismissRequest) {
+                            androidx.compose.material3.Text("Закрыть")
+                        }
                     }
                 }
             }

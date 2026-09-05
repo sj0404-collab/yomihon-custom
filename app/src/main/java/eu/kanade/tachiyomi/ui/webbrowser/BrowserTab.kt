@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Pause
@@ -264,6 +265,10 @@ data object BrowserTab : Tab {
         var menuOpen by remember { mutableStateOf(false) }
         val ctorContext = androidx.compose.ui.platform.LocalContext.current
         val ctorVersion by eu.kanade.tachiyomi.data.ui.UiConstructorStore.version.collectAsState()
+        val ctorUiCtx = androidx.compose.ui.platform.LocalContext.current
+        val ctorUiPrefs = ctorUiCtx.getSharedPreferences("yomikai_ctor_ui", android.content.Context.MODE_PRIVATE)
+        var ctorExpanded by remember { mutableStateOf(ctorUiPrefs.getBoolean("menu_ctor_expanded", true)) }
+        val userActs = remember(ctorVersion) { eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctorUiCtx, mihon.data.ui.UiPlacement.FLOATING_MENU) }
         val hiddenM = remember(ctorVersion) {
             eu.kanade.tachiyomi.data.ui.UiConstructorStore.moduleHidden(ctorContext)
         }
@@ -552,7 +557,10 @@ data object BrowserTab : Tab {
                         ),
                     ) {
                         Column(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .heightIn(max = 480.dp)
+                                .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
@@ -606,33 +614,34 @@ data object BrowserTab : Tab {
                                     Icon(if (immersive) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen, contentDescription = "Экран")
                                 }
                             }
-                        }
-                    }
-                }
-                val userActs = remember(ctorVersion) {
-                    eu.kanade.tachiyomi.data.ui.UiActionRegistry.forPlacement(ctx, mihon.data.ui.UiPlacement.FLOATING_MENU)
-                }
-                AnimatedVisibility(visible = menuOpen) {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
-                        ),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            horizontalAlignment = Alignment.End,
-                        ) {
-                            userActs.forEach { act ->
+                            if (userActs.isNotEmpty()) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
-                                    SmallFloatingActionButton(onClick = {
-                                        ctx.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctx, act))
+                                    Text("Кнопки конструктора  ", style = MaterialTheme.typography.labelMedium)
+                                    IconButton(onClick = {
+                                        ctorExpanded = !ctorExpanded
+                                        ctorUiPrefs.edit().putBoolean("menu_ctor_expanded", ctorExpanded).apply()
                                     }) {
-                                        Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                                        Icon(if (ctorExpanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, contentDescription = "Скрыть или показать кнопки конструктора")
+                                    }
+                                }
+                                if (ctorExpanded) {
+                                    userActs.forEach { act ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(act.title + "  ", style = MaterialTheme.typography.labelMedium)
+                                            SmallFloatingActionButton(onClick = {
+                                                ctx.toast(eu.kanade.tachiyomi.data.ui.UiActionRegistry.apply(ctx, act))
+                                            }) {
+                                                Icon(Icons.Outlined.Tune, contentDescription = act.title)
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            Text(
+                                "yomikai " + eu.kanade.tachiyomi.AppInfo.getVersionName(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            )
                         }
                     }
                 }
