@@ -235,12 +235,6 @@ object SettingsMainScreen : Screen() {
             screen = SettingsBrowseScreen,
         ),
         Item(
-            titleRes = MR.strings.pref_category_ankidroid,
-            subtitleRes = MR.strings.pref_ankidroid_summary,
-            icon = ImageVector.vectorResource(R.drawable.ic_ankidroid),
-            screen = SettingsAnkiScreen,
-        ),
-        Item(
             titleRes = MR.strings.label_data_storage,
             subtitleRes = MR.strings.pref_backup_summary,
             icon = Icons.Outlined.Storage,

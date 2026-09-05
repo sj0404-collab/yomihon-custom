@@ -53,9 +53,7 @@ data object DictionaryTab : Tab {
             snackbarHostState = screenModel.snackbarHostState,
             onQueryChange = screenModel::updateQuery,
             onSearch = screenModel::search,
-            onTermGroupClick = { terms ->
-                screenModel.addGroupToAnki(terms)
-            },
+            onTermGroupClick = { },
             onPlayAudioClick = screenModel::fetchAndPlayAudio,
             onOpenDictionarySettings = {
                 navigator.push(SettingsScreen(SettingsScreen.Destination.Dictionary))
