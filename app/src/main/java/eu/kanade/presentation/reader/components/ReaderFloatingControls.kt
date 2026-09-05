@@ -155,7 +155,9 @@ fun ReaderFloatingControls(
             Column(
                 modifier = Modifier
                     .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                    .padding(16.dp),
+                    // Держим кнопку НАД нижней панелью читалки, чтобы не
+                    // перекрывать шестерёнку настроек и прочие кнопки меню.
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -333,10 +335,12 @@ fun ReaderFloatingControls(
                     },
                     containerColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
+                        detectDragGestures(
+                            onDragEnd = { },
+                        ) { change, dragAmount ->
                             change.consume()
-                            offsetX = (offsetX + dragAmount.x).coerceAtMost(0f)
-                            offsetY = (offsetY + dragAmount.y).coerceAtMost(0f)
+                            offsetX = (offsetX + dragAmount.x).coerceIn(-4000f, 0f)
+                            offsetY = (offsetY + dragAmount.y).coerceIn(-4000f, 400f)
                         }
                     },
                 ) {

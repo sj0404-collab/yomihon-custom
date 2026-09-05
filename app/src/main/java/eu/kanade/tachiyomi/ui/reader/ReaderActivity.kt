@@ -867,7 +867,7 @@ class ReaderActivity : BaseActivity() {
                 }
 
                 eu.kanade.presentation.reader.components.ReaderFloatingControls(
-                    visible = state.menuVisible,
+                    visible = state.menuVisible && state.dialog == null,
                     manualVoiceMode = manualVoiceMode,
                     manualVoiceGender = manualVoiceGender,
                     onVoiceModeChange = { manual ->
@@ -1051,15 +1051,9 @@ class ReaderActivity : BaseActivity() {
                                     )
                                 },
                                 onChooseVoice = { showTtsDialog = true },
-                                modifier = if (searchState.dictionaries.isEmpty()) {
-                                    Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .navigationBarsPadding()
-                                } else {
-                                    Modifier
-                                        .align(Alignment.TopEnd)
-                                        .statusBarsPadding()
-                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .statusBarsPadding(),
                             )
                         }
                     }
