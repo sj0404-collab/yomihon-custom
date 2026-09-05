@@ -25,7 +25,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -98,6 +111,59 @@ fun WebViewScreenContent(
     var currentUrl by remember { mutableStateOf(url) }
     var showCloudflareHelp by remember { mutableStateOf(false) }
     var isActive by remember { mutableStateOf(true) }
+
+    // OCR-оверлей и полноэкранный режим браузера (запрос пользователя):
+    // та же SAO-логика, что в читалке, плюс отмена в любое время.
+    var immersive by remember { mutableStateOf(false) }
+    var ocrText by remember { mutableStateOf<String?>(null) }
+    var ocrBusy by remember { mutableStateOf(false) }
+    var ocrJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val clipboard = LocalClipboardManager.current
+
+    fun captureAndOcr() {
+        val view = currentWindow.webView ?: return
+        ocrJob?.cancel()
+        ocrBusy = true
+        ocrText = null
+        ocrJob = scope.launch {
+            val bmp = android.graphics.Bitmap.createBitmap(
+                view.width.coerceAtLeast(1),
+                view.height.coerceAtLeast(1),
+                android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            view.draw(android.graphics.Canvas(bmp))
+            val text = try {
+                kotlinx.coroutines.withTimeout(90_000) {
+                    uy.kohesive.injekt.Injekt.get<mihon.domain.ocr.interactor.OcrProcessor>()
+                        .getText(eu.kanade.tachiyomi.util.ocr.toOcrImage(bmp))
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ""
+            } finally {
+                bmp.recycle()
+                ocrBusy = false
+            }
+            ocrText = text
+        }
+    }
+
+    val activity = androidx.activity.compose.LocalActivity.current
+    LaunchedEffect(immersive) {
+        val act = activity as? android.app.Activity ?: return@LaunchedEffect
+        val controller = androidx.core.view.WindowCompat.getInsetsController(
+            act.window,
+            act.window.decorView,
+        )
+        if (immersive) {
+            controller.systemBarsBehavior =
+                androidx.core.view.WindowInsetsCompat.SystemBarsBehavior.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose { isActive = false }
@@ -223,8 +289,7 @@ fun WebViewScreenContent(
     BackHandler(windowStack.size > 1, popState)
 
     Scaffold(
-        topBar = {
-            Box {
+        topBar = { if (!immersive) Box {
                 Column {
                     AppBar(
                         title = currentWindow.state.pageTitle ?: initialTitle,
@@ -253,6 +318,15 @@ fun WebViewScreenContent(
                                             }
                                         },
                                         enabled = navigator.canGoForward,
+                                    ),
+                                    AppBar.Action(
+                                        title = "Распознать текст (OCR)",
+                                        icon = Icons.Outlined.DocumentScanner,
+                                        onClick = { captureAndOcr() },
+                                    ),
+                                    AppBar.OverflowAction(
+                                        title = "Полный экран (как в читалке)",
+                                        onClick = { immersive = true },
                                     ),
                                     AppBar.OverflowAction(
                                         title = stringResource(MR.strings.action_webview_refresh),
@@ -367,6 +441,56 @@ fun WebViewScreenContent(
                                 initializePopup(webView, it)
                             }
                         }
+                },
+            )
+        }
+
+        if (immersive) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FloatingActionButton(onClick = { captureAndOcr() }) {
+                    Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
+                }
+                FloatingActionButton(onClick = { immersive = false }) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Выйти из полного экрана")
+                }
+                FloatingActionButton(onClick = onNavigateUp) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Назад")
+                }
+            }
+        }
+
+        if (ocrBusy || ocrText != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    ocrJob?.cancel()
+                    ocrBusy = false
+                    ocrText = null
+                },
+                confirmButton = {
+                    TextButton(onClick = { ocrText = null; ocrBusy = false; ocrJob?.cancel() }) {
+                        Text("Закрыть")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { ocrText?.takeIf { it.isNotBlank() }?.let { clipboard.setText(AnnotatedString(it)) } }) {
+                        Text("Копировать")
+                    }
+                },
+                title = { Text(if (ocrBusy) "Распознавание… (закрытие = отмена)" else "Распознанный текст") },
+                text = {
+                    if (ocrBusy) {
+                        CircularProgressIndicator()
+                    } else {
+                        Text(
+                            text = ocrText?.ifBlank { "Не удалось распознать текст на странице" } ?: "",
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                        )
+                    }
                 },
             )
         }

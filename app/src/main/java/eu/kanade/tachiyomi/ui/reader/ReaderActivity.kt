@@ -394,6 +394,9 @@ class ReaderActivity : BaseActivity() {
                     is ReaderViewModel.Event.SetCoverResult -> {
                         onSetAsCoverResult(event.result)
                     }
+                    is ReaderViewModel.Event.OfflineExportResult -> {
+                        toast(event.message)
+                    }
                     ReaderViewModel.Event.OcrNoTextFound -> {
                         clearActiveOcrOverlaySession()
                         toast(MR.strings.no_results_found)
@@ -906,6 +909,7 @@ class ReaderActivity : BaseActivity() {
                         )
                     },
                     readingOrder = readingOrderState,
+                    onExportChapter = { viewModel.exportChapterToOfflineFolder(this@ReaderActivity) },
                 )
 
                 // OCR selection overlay
