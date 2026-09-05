@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   get_tag:
-    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'sj0404-collab/yomikai' || github.repository == 'yomihon/yomihon'
     name: Extract tag name
     runs-on: 'ubuntu-24.04'
     outputs:
@@ -26,7 +26,7 @@ jobs:
         run: echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
 
   build:
-    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'yomihon/yomihon'
+    if: github.repository == 'sj0404-collab/yomihon-custom' || github.repository == 'sj0404-collab/yomikai' || github.repository == 'yomihon/yomihon'
     name: Build
     runs-on: 'ubuntu-24.04'
     timeout-minutes: 50
@@ -105,14 +105,14 @@ jobs:
           set -e
           # Собирается один APK под arm64-v8a (см. splits в app/build.gradle.kts).
           mv app/build/outputs/apk/release/app-arm64-v8a-release.apk \
-            yomihon-${{ needs.get_tag.outputs.tag }}.apk
+            yomikai-${{ needs.get_tag.outputs.tag }}.apk
 
       - name: Verify version baked into the APK
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          apk="yomihon-${{ needs.get_tag.outputs.tag }}.apk"
+          apk="yomikai-${{ needs.get_tag.outputs.tag }}.apk"
           tag="${{ needs.get_tag.outputs.tag }}"
           expected_name="${tag#v}"
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
@@ -147,7 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk="yomihon-${{ needs.get_tag.outputs.tag }}.apk"
+          apk="yomikai-${{ needs.get_tag.outputs.tag }}.apk"
           ls -la "$apk"
           sha256=$(sha256sum "$apk" | cut -d' ' -f1)
           size=$(stat -c%s "$apk")
@@ -169,7 +169,7 @@ jobs:
             echo "| Source commit | [\`${GITHUB_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
             echo "| Tag | \`${{ needs.get_tag.outputs.tag }}\` |"
             echo "| Remote build | [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |"
-            echo "| APK | \`yomihon-${{ needs.get_tag.outputs.tag }}.apk\` (arm64-v8a, единственный артефакт) |"
+            echo "| APK | \`yomikai-${{ needs.get_tag.outputs.tag }}.apk\` (arm64-v8a, единственный артефакт) |"
             echo "| versionName / versionCode | \`${{ steps.version.outputs.version_name }}\` / \`${{ steps.version.outputs.version_code }}\` |"
             echo "| SHA-256 | \`${{ steps.digest.outputs.sha256 }}\` |"
             echo "| Size | ${{ steps.digest.outputs.size }} bytes |"
@@ -187,8 +187,8 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: yomihon
-          path: yomihon-${{ needs.get_tag.outputs.tag }}.apk
+          name: yomikai
+          path: yomikai-${{ needs.get_tag.outputs.tag }}.apk
 
   release:
     name: Create GitHub Release
@@ -227,16 +227,16 @@ jobs:
         with:
           failOnError: false
           name: |
-            yomihon
+            yomikai
             ocr-quality-report-${{ github.sha }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.get_tag.outputs.tag }}
-          name: Yomihon ${{ needs.get_tag.outputs.tag }}
+          name: Yomikai ${{ needs.get_tag.outputs.tag }}
           body: |
-            ### Один APK: `yomihon-${{ needs.get_tag.outputs.tag }}.apk` (arm64-v8a)
+            ### Один APK: `yomikai-${{ needs.get_tag.outputs.tag }}.apk` (arm64-v8a)
 
             | Поле | Значение |
             |---|---|

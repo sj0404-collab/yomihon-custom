@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.browse.source
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.runtime.Composable
@@ -11,6 +12,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.presentation.browse.FeedScreen
 import eu.kanade.presentation.browse.SourceOptionsDialog
 import eu.kanade.presentation.browse.SourcesScreen
 import eu.kanade.presentation.components.AppBar
@@ -31,6 +33,11 @@ fun Screen.sourcesTab(): TabContent {
     return TabContent(
         titleRes = MR.strings.label_sources,
         actions = listOf(
+            AppBar.Action(
+                title = "Лента обновлений",
+                icon = Icons.Outlined.DynamicFeed,
+                onClick = { navigator.push(FeedScreen()) },
+            ),
             AppBar.Action(
                 title = stringResource(MR.strings.action_global_search),
                 icon = Icons.Outlined.TravelExplore,
