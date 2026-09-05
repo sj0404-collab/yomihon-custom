@@ -80,7 +80,6 @@ fun ReaderFloatingControls(
     var manualVoice by remember(manualVoiceMode) { mutableStateOf(manualVoiceMode) }
     var voiceGender by remember(manualVoiceGender) { mutableStateOf(manualVoiceGender) }
     var menuOpen by remember { mutableStateOf(false) }
-    var showRegions by remember { mutableStateOf(false) }
     var isAutoscrollActive by remember { mutableStateOf(false) }
     var autoscrollSpeed by remember { mutableFloatStateOf(2f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -174,35 +173,14 @@ fun ReaderFloatingControls(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
-                            if (showRegions) {
-                                Text(
-                                    "Область сканирования",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                                SmallFloatingActionButton(onClick = {
-                                    beepAction()
-                                    onScanRegionChange(ScanRegion.FULL_PAGE)
-                                    showRegions = false; menuOpen = false
-                                    onTriggerOcr()
-                                }) { Text("  100% страница  ") }
-                                SmallFloatingActionButton(onClick = {
-                                    beepAction()
-                                    onScanRegionChange(ScanRegion.TOP_HALF)
-                                    showRegions = false; menuOpen = false
-                                    onTriggerOcr()
-                                }) { Text("  ⬆ Верхние 50%  ") }
-                                SmallFloatingActionButton(onClick = {
-                                    beepAction()
-                                    onScanRegionChange(ScanRegion.BOTTOM_HALF)
-                                    showRegions = false; menuOpen = false
-                                    onTriggerOcr()
-                                }) { Text("  ⬇ Нижние 50%  ") }
-                            } else {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("OCR скан  ", style = MaterialTheme.typography.labelMedium)
                                     SmallFloatingActionButton(onClick = {
                                         beepAction()
-                                        showRegions = true
+                                        // Сразу режим выделения области: промежуточные
+                                        // кнопки «100%/верх/низ» убраны как лишние — область
+                                        // пользователь выбирает перетаскиванием.
+                                        onTriggerOcr()
                                     }) {
                                         Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
                                     }
@@ -340,7 +318,6 @@ fun ReaderFloatingControls(
                 FloatingActionButton(
                     onClick = {
                         beepOpen()
-                        if (menuOpen) showRegions = false
                         menuOpen = !menuOpen
                     },
                     containerColor = MaterialTheme.colorScheme.primary,

@@ -847,11 +847,64 @@ class ReaderViewModel @JvmOverloads constructor(
         mutableState.update { it.copy(ocrSelectionMode = false) }
     }
 
+    /**
+     * Прогрев OCR-двика при входе в читалку: первая ручная область не
+     * должна ждать инициализацию модели («долго грузит»).
+     */
+    fun warmupOcr() {
+        viewModelScope.launchIO {
+            runCatching {
+                val dummy = android.graphics.Bitmap.createBitmap(
+                    64, 64, android.graphics.Bitmap.Config.ARGB_8888,
+                )
+                try {
+                    ocrProcessor.getText(dummy.toOcrImage())
+                } finally {
+                    dummy.recycle()
+                }
+            }
+        }
+    }
+
+    /**
+     * Мелкие/узкие кропы апскейлим и добавляем белые поля: детектору и
+     * распознаванию нужен масштаб и контекст вокруг надписи, иначе
+     * «нет текста» на вполне читаемом куске.
+     */
+    private fun prepareCropForOcr(src: Bitmap): Bitmap {
+        val minSide = 140
+        val scale = if (src.height < minSide || src.width < minSide) {
+            minOf(3f, minSide.toFloat() / minOf(src.height, src.width).coerceAtLeast(1))
+        } else {
+            1f
+        }
+        val w = (src.width * scale).toInt().coerceAtLeast(1)
+        val h = (src.height * scale).toInt().coerceAtLeast(1)
+        val scaled = if (scale > 1f) {
+            Bitmap.createScaledBitmap(src, w, h, true)
+        } else {
+            src
+        }
+        val pad = (maxOf(w, h) * 0.06f).toInt()
+        if (pad < 4) return scaled
+        val out = Bitmap.createBitmap(w + pad * 2, h + pad * 2, Bitmap.Config.ARGB_8888)
+        out.eraseColor(android.graphics.Color.WHITE)
+        val canvas = android.graphics.Canvas(out)
+        canvas.drawBitmap(scaled, pad.toFloat(), pad.toFloat(), null)
+        if (scaled !== src) scaled.recycle()
+        return out
+    }
+
     fun processOcrRegion(bitmap: Bitmap) {
         viewModelScope.launchIO {
             mutableState.update { it.copy(isProcessingOcr = true, ocrSelectionMode = false) }
             try {
-                val text = ocrProcessor.getText(bitmap.toOcrImage())
+                val work = prepareCropForOcr(bitmap)
+                val text = try {
+                    ocrProcessor.getText(work.toOcrImage())
+                } finally {
+                    if (work !== bitmap) work.recycle()
+                }
                 withUIContext {
                     val queryText = flattenOcrTextForQuery(text)
                     if (queryText.isNotBlank()) {

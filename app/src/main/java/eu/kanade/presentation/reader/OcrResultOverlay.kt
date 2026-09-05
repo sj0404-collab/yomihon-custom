@@ -9,6 +9,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
 import eu.kanade.domain.dictionary.OcrResultPresentation
 import eu.kanade.tachiyomi.ui.dictionary.DictionarySearchScreenModel
 import mihon.domain.dictionary.model.DictionaryTerm
@@ -36,8 +38,11 @@ fun OcrResultOverlay(
     onPlayAudioClick: (List<DictionaryTerm>) -> Unit,
 ) {
     BackHandler(onBack = onDismissRequest)
-    LaunchedEffect(queryText, initialSearchText) {
-        if (queryText.isNotBlank()) {
+    // Словарей нет — не дёргаем поиск и не показываем «No Dictionaries
+    // Enabled»: пользователю нужен сам распознанный текст.
+    val noDictionaries = searchState.dictionaries.isEmpty()
+    LaunchedEffect(queryText, initialSearchText, noDictionaries) {
+        if (queryText.isNotBlank() && !noDictionaries) {
             onQueryChange(queryText)
             onSearch(initialSearchText)
         }
@@ -53,6 +58,13 @@ fun OcrResultOverlay(
         }
 
         when {
+            noDictionaries -> {
+                OcrPlainTextCard(
+                    text = queryText,
+                    onCopyText = onCopyText,
+                    onDismissRequest = onDismissRequest,
+                )
+            }
             presentation == OcrResultPresentation.POPUP && anchorRect != null -> {
                 OcrResultPopup(
                     onDismissRequest = onDismissRequest,
@@ -76,6 +88,55 @@ fun OcrResultOverlay(
                     onTermGroupClick = onTermGroupClick,
                     onPlayAudioClick = onPlayAudioClick,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Карточка распознанного текста без словарной части: текст можно выделить
+ * и скопировать, лишних сообщений «словари не найдены» нет.
+ */
+@Composable
+private fun OcrPlainTextCard(
+    text: String,
+    onCopyText: () -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        androidx.compose.material3.Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+        ) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.padding(16.dp),
+            ) {
+                androidx.compose.material3.Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                androidx.compose.foundation.layout.Spacer(
+                    modifier = androidx.compose.foundation.layout.height(12.dp),
+                )
+                androidx.compose.foundation.layout.Row(
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                ) {
+                    androidx.compose.material3.TextButton(onClick = onCopyText) {
+                        androidx.compose.material3.Text("Копировать")
+                    }
+                    androidx.compose.material3.TextButton(onClick = onDismissRequest) {
+                        androidx.compose.material3.Text("Закрыть")
+                    }
+                }
             }
         }
     }
