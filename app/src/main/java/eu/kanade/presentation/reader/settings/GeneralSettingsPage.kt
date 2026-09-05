@@ -184,6 +184,7 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
     val ocrContent by ocrPrefs.contentType().collectAsState()
     val ocrHighlight by ocrPrefs.highlightStyle().collectAsState()
     val ocrStress by ocrPrefs.ruStress().collectAsState()
+    val ocrShape by ocrPrefs.scanShape().collectAsState()
 
     Text(
         text = "Распознавание и голос",
@@ -219,6 +220,12 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
         options = mapOf("on" to "Включены", "off" to "Выключены"),
         current = ocrStress,
         onPick = { ocrPrefs.ruStress().set(it) },
+    )
+    PresetChipRow(
+        title = "Форма рамки сканирования",
+        options = mihon.data.ocr.ScanShape.entries.associate { it.id to (it.icon + " " + it.title) },
+        current = ocrShape,
+        onPick = { ocrPrefs.scanShape().set(it) },
     )
 }
 

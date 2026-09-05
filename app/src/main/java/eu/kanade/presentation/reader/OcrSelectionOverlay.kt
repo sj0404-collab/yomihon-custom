@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
@@ -27,6 +28,7 @@ fun OcrSelectionOverlay(
     instructionText: AnnotatedString,
     startPoint: Offset?,
     endPoint: Offset?,
+    shape: mihon.data.ocr.ScanShape = mihon.data.ocr.ScanShape.RECT,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -47,20 +49,29 @@ fun OcrSelectionOverlay(
                 val width = abs(endPoint.x - startPoint.x)
                 val height = abs(endPoint.y - startPoint.y)
 
-                // Draw selection rectangle
-                drawRect(
-                    color = Color.White.copy(alpha = 0.3f),
-                    topLeft = Offset(left, top),
-                    size = Size(width, height),
-                )
+                if (shape == mihon.data.ocr.ScanShape.RECT) {
+                    // Draw selection rectangle
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.3f),
+                        topLeft = Offset(left, top),
+                        size = Size(width, height),
+                    )
 
-                // Draw border
-                drawRect(
-                    color = Color.White,
-                    topLeft = Offset(left, top),
-                    size = Size(width, height),
-                    style = Stroke(width = 3f),
-                )
+                    // Draw border
+                    drawRect(
+                        color = Color.White,
+                        topLeft = Offset(left, top),
+                        size = Size(width, height),
+                        style = Stroke(width = 3f),
+                    )
+                } else {
+                    // Фигурная рамка: путь фигуры вписан в выделенные пользователем границы
+                    val shapePath = shape
+                        .buildPath(android.graphics.RectF(left, top, left + width, top + height))
+                        .asComposePath()
+                    drawPath(path = shapePath, color = Color.White.copy(alpha = 0.3f))
+                    drawPath(path = shapePath, color = Color.White, style = Stroke(width = 3f))
+                }
             }
         }
 

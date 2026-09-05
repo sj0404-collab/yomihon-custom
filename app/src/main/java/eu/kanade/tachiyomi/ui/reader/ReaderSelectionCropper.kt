@@ -21,11 +21,12 @@ internal class ReaderSelectionCropper(
     suspend fun cropSelectionBitmap(
         manga: Manga,
         captures: List<ReaderSelectionCapture>,
+        shape: mihon.data.ocr.ScanShape = mihon.data.ocr.ScanShape.RECT,
     ): Bitmap? {
         val resolvedPagesByChapter = mutableMapOf<Chapter, ResolvedOcrPages>()
         try {
             if (captures.size == 1) {
-                return cropPageBitmap(manga, captures.first(), resolvedPagesByChapter)
+                return cropPageBitmap(manga, captures.first(), resolvedPagesByChapter)?.let { clipToShape(it, shape) }
             }
 
             logcat(LogPriority.DEBUG) {
@@ -76,7 +77,7 @@ internal class ReaderSelectionCropper(
                 logcat(LogPriority.DEBUG) {
                     "Selection crop stitched bitmap size=${mergedBitmap.width}x${mergedBitmap.height}"
                 }
-                return mergedBitmap
+                return clipToShape(mergedBitmap, shape)
             } finally {
                 parts.forEach { part ->
                     if (!part.bitmap.isRecycled) {
@@ -124,6 +125,24 @@ internal class ReaderSelectionCropper(
             "Selection crop page=${page.index} unavailable"
         }
         return null
+    }
+
+    /**
+     * Обрезка по фигурной рамке: вне пути фигуры текст не распознаётся.
+     * RECT — без изменений; любая ошибка клипа = безопасный фолбэк в прямоугольник.
+     */
+    private fun clipToShape(bitmap: Bitmap, shape: mihon.data.ocr.ScanShape): Bitmap {
+        if (shape == mihon.data.ocr.ScanShape.RECT) return bitmap
+        return try {
+            val out = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.clipPath(shape.buildPath(RectF(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat())))
+            canvas.drawBitmap(bitmap, 0f, 0f, null)
+            out
+        } catch (t: Throwable) {
+            logcat(LogPriority.WARN, t) { "Shape clip failed; fallback to rect" }
+            bitmap
+        }
     }
 
     private suspend fun getPageInput(
