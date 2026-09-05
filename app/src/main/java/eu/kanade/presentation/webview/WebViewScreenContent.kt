@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -494,7 +495,9 @@ fun WebViewScreenContent(
                     } else {
                         Text(
                             text = ocrText?.ifBlank { "Не удалось распознать текст на странице" } ?: "",
-                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .heightIn(max = 400.dp),
                         )
                     }
                 },

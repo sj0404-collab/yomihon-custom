@@ -10,6 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import eu.kanade.domain.dictionary.OcrResultPresentation
@@ -113,7 +116,8 @@ private fun OcrPlainTextCard(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .heightIn(max = 520.dp)
                 .padding(24.dp),
         ) {
             androidx.compose.foundation.layout.Column(
@@ -123,7 +127,9 @@ private fun OcrPlainTextCard(
                     text = text,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .heightIn(max = 380.dp),
                 )
                 androidx.compose.foundation.layout.Spacer(
                     modifier = Modifier.height(12.dp),

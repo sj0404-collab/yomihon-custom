@@ -1051,9 +1051,15 @@ class ReaderActivity : BaseActivity() {
                                     )
                                 },
                                 onChooseVoice = { showTtsDialog = true },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .statusBarsPadding(),
+                                modifier = if (searchState.dictionaries.isEmpty()) {
+                                    Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .navigationBarsPadding()
+                                } else {
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .statusBarsPadding()
+                                },
                             )
                         }
                     }

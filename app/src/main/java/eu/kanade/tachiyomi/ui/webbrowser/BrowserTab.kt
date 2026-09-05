@@ -77,6 +77,20 @@ import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.data.tts.AutoReadEngine
 import eu.kanade.tachiyomi.data.tts.TtsSpeaker
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
+import androidx.compose.runtime.rememberCoroutineScope
+import eu.kanade.tachiyomi.util.ocr.toOcrImage
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlin.math.roundToInt
 
 /**
@@ -249,6 +263,54 @@ data object BrowserTab : Tab {
         var fabX by remember { mutableFloatStateOf(0f) }
         var fabY by remember { mutableFloatStateOf(0f) }
 
+        var ocrBusy by remember { mutableStateOf(false) }
+        var ocrText by remember { mutableStateOf<String?>(null) }
+        var ocrJob by remember { mutableStateOf<Job?>(null) }
+        var immersive by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        fun manualScan() {
+            ocrJob?.cancel()
+            ocrJob = scope.launch {
+                ocrBusy = true
+                ocrText = null
+                try {
+                    val raw = captureWebView()
+                    if (raw == null) {
+                        ocrText = ""
+                    } else {
+                        val zone = detectBookZone()
+                        val bmp = cropToZone(raw, zone)
+                        val text = withTimeout(90_000) {
+                            Injekt.get<mihon.domain.ocr.interactor.OcrProcessor>().getText(bmp.toOcrImage())
+                        }
+                        if (bmp !== raw) bmp.recycle()
+                        raw.recycle()
+                        ocrText = text
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ocrText = ""
+                } finally {
+                    ocrBusy = false
+                }
+            }
+        }
+
+        // Полный экран «как в читалке»: прячем системные бары
+        LaunchedEffect(immersive) {
+            val act = ctx as? android.app.Activity ?: return@LaunchedEffect
+            val controller = androidx.core.view.WindowCompat.getInsetsController(act.window, act.window.decorView)
+            if (immersive) {
+                controller.systemBarsBehavior =
+                    androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+
         // Автоскролл страницы: плавно, скорость 1..10
         LaunchedEffect(isAuto, speed) {
             while (isAuto) {
@@ -334,7 +396,7 @@ data object BrowserTab : Tab {
                 .fillMaxSize()
                 .systemBarsPadding(),
         ) {
-            Row(
+            if (!immersive) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -364,7 +426,7 @@ data object BrowserTab : Tab {
                     },
                 )
             }
-            if (progress < 1f) {
+            if (!immersive && progress < 1f) {
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth(),
@@ -516,6 +578,30 @@ data object BrowserTab : Tab {
                                     Icon(Icons.Outlined.KeyboardArrowUp, contentDescription = "Наверх")
                                 }
                             }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Скан текста (OCR)  ", style = MaterialTheme.typography.labelMedium)
+                                SmallFloatingActionButton(onClick = {
+                                    menuOpen = false
+                                    manualScan()
+                                }) {
+                                    Icon(Icons.Outlined.DocumentScanner, contentDescription = "OCR")
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (immersive) "Обычный экран  " else "Полный экран  ",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                SmallFloatingActionButton(onClick = {
+                                    immersive = !immersive
+                                    menuOpen = false
+                                }) {
+                                    Icon(
+                                        if (immersive) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                                        contentDescription = "Экран",
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -534,6 +620,66 @@ data object BrowserTab : Tab {
                         if (menuOpen) Icons.Outlined.Close else Icons.Outlined.Menu,
                         contentDescription = "Меню браузера",
                     )
+                }
+            }
+        }
+
+        // Карточка результата ручного скана: компактная, по центру, с отменой.
+        if (ocrBusy || ocrText != null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 6.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .padding(24.dp),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (ocrBusy) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                CircularProgressIndicator()
+                                Text("Распознавание… (закрытие = отмена)")
+                            }
+                        } else {
+                            Text(
+                                text = ocrText?.ifBlank { "Не удалось распознать текст на странице" } ?: "",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .heightIn(max = 360.dp),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            if (!ocrBusy && !ocrText.isNullOrBlank()) {
+                                TextButton(onClick = { TtsSpeaker.speak(ctx, ocrText ?: "") }) {
+                                    Text("Голос")
+                                }
+                                TextButton(onClick = {
+                                    val clipboard = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(null, ocrText))
+                                }) {
+                                    Text("Копировать")
+                                }
+                            }
+                            TextButton(onClick = {
+                                ocrJob?.cancel()
+                                ocrBusy = false
+                                ocrText = null
+                            }) {
+                                Text("Закрыть")
+                            }
+                        }
+                    }
                 }
             }
         }
